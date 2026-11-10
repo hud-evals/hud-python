@@ -23,7 +23,7 @@ from hud.utils.process import (
 from .core import Runtime
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncGenerator, Callable
 
     from hud.environment.env import Environment
     from hud.eval.task import Task
@@ -96,7 +96,7 @@ class LocalRuntime:
             )
 
     @asynccontextmanager
-    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+    async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
         from hud.environment.env import Environment as _Environment
 
         if task.runtime_config is not None:
@@ -191,7 +191,7 @@ class SubprocessRuntime:
         self.ready_timeout = ready_timeout
 
     @asynccontextmanager
-    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+    async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
         if task.runtime_config is not None:
             raise ValueError("SubprocessRuntime does not support task runtime_config")
         if not self.source.exists():

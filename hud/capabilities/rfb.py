@@ -36,7 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .base import Capability, CapabilityClient
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
 
 LOGGER = logging.getLogger("hud.capabilities.rfb")
 
@@ -268,7 +268,7 @@ class RFBClient(CapabilityClient):
         self._pointer()
 
     @contextlib.contextmanager
-    def holding_button(self, button: int) -> Iterator[None]:
+    def holding_button(self, button: int) -> Generator[None]:
         """Hold ``button`` down for the block."""
         self.button_down(button)
         try:
@@ -300,7 +300,7 @@ class RFBClient(CapabilityClient):
         self._key(_KEYSYMS[key], down=False)
 
     @contextlib.contextmanager
-    def holding_keys(self, *keys: str) -> Iterator[None]:
+    def holding_keys(self, *keys: str) -> Generator[None]:
         """Press ``keys`` in order for the block, then release them in reverse."""
         codes = [_KEYSYMS[key] for key in keys]
         for code in codes:

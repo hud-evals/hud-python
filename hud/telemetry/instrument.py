@@ -13,7 +13,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import functools
 import inspect
 import logging
@@ -246,7 +245,7 @@ def instrument(
             finally:
                 _emit_span(task_run_id, args, kwargs, start_time, start_perf, result, error)
 
-        wrapper = async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+        wrapper = async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
         wrapper_state = cast("_InstrumentedCallable", wrapper)
         wrapper_state._hud_instrumented = True
         wrapper_state._hud_original = func

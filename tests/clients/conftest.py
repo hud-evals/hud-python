@@ -14,7 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 from tests.fixtures.relay import relay
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, Sequence
 
     from hud.capabilities import Capability
     from tests.fixtures.relay import FlakyRelay
@@ -163,7 +163,7 @@ async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
 @asynccontextmanager
 async def control_peer(
     *scripts: Sequence[Action], upstreams: dict[str, tuple[str, int]] | None = None
-) -> AsyncIterator[ControlPeer]:
+) -> AsyncGenerator[ControlPeer]:
     """Serve a :class:`ControlPeer` answering connections from ``scripts`` for the block."""
     peer = ControlPeer(scripts=scripts or ([],), upstreams=upstreams or {})
     server = await asyncio.start_server(peer.handle, "127.0.0.1", 0)
@@ -181,7 +181,7 @@ async def control_peer(
 
 
 @asynccontextmanager
-async def relayed(binding: Capability) -> AsyncIterator[tuple[Capability, FlakyRelay]]:
+async def relayed(binding: Capability) -> AsyncGenerator[tuple[Capability, FlakyRelay]]:
     """``binding``, reached through a relay that can sever, refuse, and stall its connections."""
     parts = urlsplit(binding.url)
     assert parts.hostname is not None and parts.port is not None

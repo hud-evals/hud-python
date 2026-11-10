@@ -11,7 +11,7 @@ import shlex
 import shutil
 import socket
 import tempfile
-from collections.abc import AsyncGenerator, Iterator  # noqa: TC003
+from collections.abc import AsyncGenerator, Generator  # noqa: TC003
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -572,7 +572,7 @@ def materialized_artifacts(
     verifier_root: Path,
     artifacts: Path,
     verifier_identity: tuple[int, int] | None,
-) -> Iterator[None]:
+) -> Generator[None]:
     with tempfile.TemporaryDirectory(prefix="verifier-backup-", dir=RUNTIME_ROOT) as directory:
         backup_root = Path(directory)
         replacements: list[tuple[Path, Path | None]] = []

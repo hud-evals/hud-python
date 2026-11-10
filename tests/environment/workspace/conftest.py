@@ -22,7 +22,7 @@ from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
     from hud.capabilities import SSHClient
@@ -35,7 +35,7 @@ if sys.platform == "win32":
 
 
 @asynccontextmanager
-async def shell(root: Path, **options: Any) -> AsyncIterator[tuple[Workspace, SSHClient]]:
+async def shell(root: Path, **options: Any) -> AsyncGenerator[tuple[Workspace, SSHClient]]:
     """Serve a workspace over ``root`` and connect to its shell binding."""
     env = Environment("workspace")
     workspace = env.workspace(root, track_files=False, **options)

@@ -37,7 +37,7 @@ from hud.utils.hud_console import HUDConsole
 from hud.version import __version__
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 _INSTALL_ID_KEY = "HUD_INSTALL_ID"
 _FIRST_RUN_NOTICE = "hud collects anonymous CLI usage. Disable: hud set HUD_CLI_ANALYTICS_ENABLED=0"
@@ -134,7 +134,7 @@ def underlying_error(error: BaseException) -> BaseException | None:
 
 
 @contextlib.contextmanager
-def recorded_invocation(argv: list[str], cli: typer.Typer) -> Iterator[None]:
+def recorded_invocation(argv: list[str], cli: typer.Typer) -> Generator[None]:
     """Record one CLI invocation around the wrapped block, then re-raise as-is."""
     started = time.monotonic()
     exit_code = 0

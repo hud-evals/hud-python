@@ -21,7 +21,7 @@ from pydantic import (
 from .compose import ComposeProject
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
     from hud.eval.task import Task
@@ -179,7 +179,7 @@ class Runtime:
         return nullcontext(self)
 
     @asynccontextmanager
-    async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
+    async def snapshot_session(self, session_id: str) -> AsyncGenerator[Path | None]:
         """Yield a portable archive of one control session's files when present.
 
         ``None`` means this runtime cannot export the session.
@@ -239,7 +239,7 @@ class Shared:
             await stack.aclose()
 
     @asynccontextmanager
-    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+    async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
         if self._opens == 0:
             raise RuntimeError(
                 "Shared substrates outlive single rollouts; lease inside the scope "

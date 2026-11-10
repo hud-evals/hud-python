@@ -22,9 +22,10 @@ import contextlib
 import json
 import uuid
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeAlias, cast
 
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
+from typing_extensions import TypeVar
 
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
@@ -314,6 +315,7 @@ ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 
 StepSource: TypeAlias = Literal["user", "agent", "tool", "task", "subagent", "system"]
 RobotStepSource: TypeAlias = Literal["observation", "inference", "video_segment"]
+SourceT_co = TypeVar("SourceT_co", covariant=True, default=StepSource | RobotStepSource)
 
 
 class TaskCall(BaseModel):
@@ -329,7 +331,7 @@ class TaskCall(BaseModel):
     result: JsonValue = None
 
 
-class Step(BaseModel):
+class Step(BaseModel, Generic[SourceT_co]):
     """One ordered interaction unit in a task run — the shared skeleton.
 
     Carries what every family and the harness need: position, ``source``,
@@ -338,7 +340,9 @@ class Step(BaseModel):
     is preserved) and ``task_call`` (task lifecycle RPC). Agent families
     subclass this with their own payload fields (e.g.
     :class:`hud.agents.types.AgentStep`) and, for a new wire schema, their
-    own ``schema_tag``.
+    own ``schema_tag``. A family parametrizes ``Step`` with its own ``source``
+    values (``Step[StepSource]``, ``Step[RobotStepSource]``); a bare ``Step``
+    takes any family's.
     """
 
     #: Schema tag this step ships under; families with their own wire schema
@@ -347,7 +351,7 @@ class Step(BaseModel):
 
     # Sequential position in the trace, assigned by ``Trace`` (1-based).
     step_id: int | None = None
-    source: StepSource
+    source: SourceT_co
 
     messages: list[PromptMessage] = Field(default_factory=list[PromptMessage])
     task_call: TaskCall | None = None

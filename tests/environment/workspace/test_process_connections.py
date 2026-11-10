@@ -31,7 +31,7 @@ from hud.environment.process_guard import ProcessConnectionGuard, process_connec
 from hud.eval import LocalRuntime, Task
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterator
+    from collections.abc import Awaitable, Callable, Generator
 
 pytestmark = pytest.mark.skipif(
     not process_connections_supported(), reason="process connection guards are unavailable"
@@ -57,7 +57,7 @@ class Recorded(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def upstream() -> Iterator[tuple[int, list[str | None]]]:
+def upstream() -> Generator[tuple[int, list[str | None]]]:
     authorizations: list[str | None] = []
     handler = type("Upstream", (Recorded,), {"authorizations": authorizations})
     server = HTTPServer(("127.0.0.1", 0), handler)
@@ -120,7 +120,7 @@ def in_a_child(source: str) -> str:
 
 
 @contextmanager
-def guard_directory() -> Iterator[Path]:
+def guard_directory() -> Generator[Path]:
     """Outside the pytest tmp dir: the guard's unix socket path caps near 104 bytes."""
     directory = Path(tempfile.mkdtemp(dir="/tmp"))
     try:

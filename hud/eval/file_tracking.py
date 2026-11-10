@@ -30,7 +30,7 @@ from hud.telemetry.span import (
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from hud.capabilities import Capability
     from hud.clients.client import HudClient
@@ -103,7 +103,7 @@ class FileTrackingClient:
 
 
 @asynccontextmanager
-async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
+async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
     """Stream workspace diffs and final artifacts during the ``with`` block.
 
     A no-op unless telemetry is enabled and the manifest has a ``filetracking``

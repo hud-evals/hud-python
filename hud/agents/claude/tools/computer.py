@@ -194,7 +194,7 @@ class ClaudeComputerTool(RFBTool):
     ):
         if self.is_toolset:
             # The model calls each member as its own tool and sizes clicks from screenshots.
-            return cast("BetaComputerToolset20260801Param", {"type": "computer_toolset_20260801"})
+            return {"type": "computer_toolset_20260801"}
         if self.spec.api_type == "function":
             return cast(
                 "BetaToolUnionParam",

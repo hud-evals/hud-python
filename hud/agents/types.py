@@ -334,7 +334,7 @@ class Usage(BaseModel):
     llm_call_count: int | None = None
 
 
-class AgentStep(Step):
+class AgentStep(Step[StepSource]):
     """The model's turn: one LLM call, flat on the step skeleton.
 
     Provider agents return one from ``get_response()`` and the loop records
@@ -367,7 +367,7 @@ class AgentStep(Step):
         return json_safe_value(raw)
 
 
-class ToolStep(Step):
+class ToolStep(Step[StepSource]):
     """One tool round-trip: the originating call paired with its result.
 
     Error-ness of the call is data on the ``result`` (``isError``), not a
@@ -379,7 +379,7 @@ class ToolStep(Step):
     result: ToolResult | None = None
 
 
-class SubagentStep(Step):
+class SubagentStep(Step[StepSource]):
     """A nested rollout (e.g. an ``AgentTool`` invocation), embedded whole.
 
     The sub-rollout's own steps stream under its own trace id; this step is
@@ -407,7 +407,7 @@ class StateFeature(BaseModel):
     values: list[float] = Field(default_factory=list[float])
 
 
-class ObservationStep(Step):
+class ObservationStep(Step[RobotStepSource]):
     """What the policy saw at one control tick: camera frames + numeric state.
 
     Camera ``images`` are MCP ``ImageContent`` keyed by camera name — ingest
@@ -496,7 +496,7 @@ class ObservationStep(Step):
         return cls(tick=tick, state=state)
 
 
-class InferenceStep(Step):
+class InferenceStep(Step[RobotStepSource]):
     """What the policy did at one control tick: the ``[T, A]`` action chunk it executed.
 
     A single executed action is just a length-1 chunk; a re-infer tick carries the
@@ -518,7 +518,7 @@ class InferenceStep(Step):
     names: list[str] = Field(default_factory=list[str])
 
 
-class VideoSegmentStep(Step):
+class VideoSegmentStep(Step[RobotStepSource]):
     """One CMAF (fragmented-MP4) fragment of a camera's H.264 stream.
 
     Replaces per-tick JPEG frames: the episode's frames for one camera are

@@ -20,7 +20,7 @@ from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
     from hud.eval import Run
@@ -373,7 +373,7 @@ async def test_a_rollout_timed_out_on_an_env_served_elsewhere_closes_its_task_th
 
 async def test_the_rollout_timeout_ends_a_run_still_being_provisioned() -> None:
     @asynccontextmanager
-    async def never_ready(task: Task) -> AsyncIterator[Runtime]:
+    async def never_ready(task: Task) -> AsyncGenerator[Runtime]:
         await asyncio.sleep(30)
         yield Runtime("tcp://127.0.0.1:1")
 
@@ -390,7 +390,7 @@ async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_f
     events = []
 
     @asynccontextmanager
-    async def slow_to_stop(task: Task) -> AsyncIterator[Runtime]:
+    async def slow_to_stop(task: Task) -> AsyncGenerator[Runtime]:
         async with LocalRuntime(checked())(task) as runtime:
             yield runtime
         await release.wait()

@@ -37,7 +37,7 @@ from hud.environment.utils import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, Sequence
 
     from hud.environment.egress import WorkspaceRoute
     from hud.eval.runtime import Runtime
@@ -492,7 +492,7 @@ async def connect(
     *,
     ready_timeout: float = DEFAULT_READY_TIMEOUT,
     workspace_routes: Sequence[WorkspaceRoute] = (),
-) -> AsyncIterator[HudClient]:
+) -> AsyncGenerator[HudClient]:
     """Connect a :class:`HudClient` to a provisioned substrate's control channel.
 
     Takes the :class:`~hud.eval.runtime.Runtime` a provider yielded (or

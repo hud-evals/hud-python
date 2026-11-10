@@ -13,7 +13,7 @@ from hud.capabilities import Capability
 from tests.conftest import eventually
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from fastmcp import FastMCP
     from starlette.types import ASGIApp
@@ -24,7 +24,7 @@ AppStatus.disable_automatic_graceful_drain()
 
 
 @asynccontextmanager
-async def serve_asgi(app: ASGIApp) -> AsyncIterator[int]:
+async def serve_asgi(app: ASGIApp) -> AsyncGenerator[int]:
     """Serve ``app`` on ``127.0.0.1`` and yield its port; stop it when the block ends."""
     server = uvicorn.Server(
         uvicorn.Config(
@@ -48,7 +48,7 @@ async def mcp_server(
     *,
     name: str = "tools",
     transport: Literal["streamable-http", "sse"] = "streamable-http",
-) -> AsyncIterator[Capability]:
+) -> AsyncGenerator[Capability]:
     """Serve ``server`` over HTTP on loopback; yield the capability that reaches it."""
     path = "/mcp" if transport == "streamable-http" else "/sse"
     async with serve_asgi(server.http_app(path=path, transport=transport)) as port:

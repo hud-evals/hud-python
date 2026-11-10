@@ -24,7 +24,7 @@ from starlette.routing import Route, WebSocketRoute
 from .asgi import serve_asgi
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from starlette.requests import Request
     from starlette.websockets import WebSocket
@@ -96,7 +96,7 @@ async def fake_browser(
     pages: list[str] | None = None,
     replies: dict[str, dict[str, Any]] | None = None,
     can_create: bool = True,
-) -> AsyncIterator[FakeBrowser]:
+) -> AsyncGenerator[FakeBrowser]:
     """Serve a :class:`FakeBrowser` on a loopback port for the duration of the block."""
     browser = FakeBrowser(
         pages=["page-1"] if pages is None else list(pages),
