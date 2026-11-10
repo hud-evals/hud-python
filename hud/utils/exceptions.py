@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 if TYPE_CHECKING:
     from typing import Self
 
-    import httpx
+    import httpx2
 
 from hud.utils.hints import (
     CLIENT_NOT_INITIALIZED,
@@ -128,7 +128,7 @@ class HudRequestError(HudException):
         return " | ".join(parts)
 
     @classmethod
-    def from_httpx_error(cls, error: httpx.HTTPStatusError, context: str = "") -> Self:
+    def from_httpx_error(cls, error: httpx2.HTTPStatusError, context: str = "") -> Self:
         """Create a RequestError from an HTTPx error response.
 
         Args:

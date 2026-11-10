@@ -499,8 +499,8 @@ def eval_command(
     if cfg.very_verbose:
         logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(message)s")
         logging.getLogger("hud.agents").setLevel(logging.DEBUG)
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("httpx2").setLevel(logging.WARNING)
+        logging.getLogger("httpcore2").setLevel(logging.WARNING)
     elif cfg.verbose or single_run:
         logging.getLogger("hud.agents").setLevel(logging.INFO)
     if not single_run:

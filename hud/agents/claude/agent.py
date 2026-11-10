@@ -10,7 +10,6 @@ import math
 from random import SystemRandom
 from typing import TYPE_CHECKING, cast
 
-import httpx
 import httpx2
 from anthropic import (
     APIConnectionError,
@@ -265,7 +264,6 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                 APIConnectionError,
                 APIStatusError,
                 APITimeoutError,
-                httpx.TransportError,
                 httpx2.TransportError,
             ) as exc:
                 inline_error = (
@@ -275,10 +273,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                 )
                 interrupted_stream = stream_opened and isinstance(
                     exc,
-                    APIConnectionError
-                    | APITimeoutError
-                    | httpx.TransportError
-                    | httpx2.TransportError,
+                    APIConnectionError | APITimeoutError | httpx2.TransportError,
                 )
                 if attempt >= _STREAM_MAX_ATTEMPTS or not (inline_error or interrupted_stream):
                     raise

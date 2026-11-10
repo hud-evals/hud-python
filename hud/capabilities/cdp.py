@@ -27,7 +27,7 @@ import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 from urllib.parse import urlsplit
 
-import httpx
+import httpx2
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import ConnectionClosed
 
@@ -90,7 +90,7 @@ class CDPClient(CapabilityClient):
             return raw_url
         if target_id:
             return f"ws://{host}:{port}/devtools/page/{target_id}"
-        async with httpx.AsyncClient(timeout=10.0) as http:
+        async with httpx2.AsyncClient(timeout=10.0) as http:
             resp = await http.get(f"http://{host}:{port}/json")
             targets: list[dict[str, Any]] = resp.json()
             pages = [

@@ -13,7 +13,7 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
-import httpx
+import httpx2
 import typer
 from dotenv import dotenv_values
 from packaging.version import parse as parse_version
@@ -206,10 +206,10 @@ def recorded_invocation(argv: list[str], cli: typer.Typer) -> Iterator[None]:
                             }
                         ]
                     }
-                    httpx.post(
+                    httpx2.post(
                         f"{settings.hud_telemetry_url.rstrip('/')}/sdk-events/cli",
                         json=payload,
-                        timeout=httpx.Timeout(1.0, connect=0.5),
+                        timeout=httpx2.Timeout(1.0, connect=0.5),
                     )
 
 
@@ -226,7 +226,7 @@ def notify_if_outdated(argv: list[str]) -> None:
         )
         fetched = time.time() - cached["checked_at"] > _VERSION_TTL_S
         latest = (
-            httpx.get(_PYPI, timeout=httpx.Timeout(1.0, connect=0.5)).json()["info"]["version"]
+            httpx2.get(_PYPI, timeout=httpx2.Timeout(1.0, connect=0.5)).json()["info"]["version"]
             if fetched
             else cached["latest"]
         )

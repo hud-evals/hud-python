@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
-import httpx
+import httpx2
 from pydantic import AliasPath, BaseModel, ConfigDict, Field
 
 from hud.utils.exceptions import HudException, HudNetworkError, HudRequestError
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
-_TRANSFER_TIMEOUT = httpx.Timeout(30.0, read=600.0, write=600.0)
+_TRANSFER_TIMEOUT = httpx2.Timeout(30.0, read=600.0, write=600.0)
 _CHUNK_BYTES = 1024 * 1024
 
 ImportStatus = Literal[
@@ -122,7 +122,7 @@ def upload_bundle(
     )
     file_id = reserved.file_id
     try:
-        with path.open("rb") as stream, httpx.Client(timeout=_TRANSFER_TIMEOUT) as client:
+        with path.open("rb") as stream, httpx2.Client(timeout=_TRANSFER_TIMEOUT) as client:
             response = client.put(
                 reserved.upload_url,
                 content=_chunks(stream, on_progress),

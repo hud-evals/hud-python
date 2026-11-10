@@ -18,7 +18,7 @@ from typing import Any, NotRequired
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
-import httpx
+import httpx2
 import typer
 import websockets
 from dotenv import dotenv_values
@@ -471,7 +471,7 @@ async def deploy_command(
         hud_console.progress_message("Uploading build context...")
         started = time.time()
         content = await asyncio.to_thread(tarball.read_bytes)
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx2.AsyncClient(timeout=300.0) as client:
             response = await client.put(
                 upload["upload_url"],
                 content=content,
