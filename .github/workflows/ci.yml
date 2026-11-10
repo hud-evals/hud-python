@@ -32,13 +32,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
       - name: Install Python
         run: uv python install ${{ matrix.python-version }}
 
-      # The unit suite drives agents against stub CLIs, which only an unsandboxed
-      # workspace can run; the Sandbox and Live lanes cover sandboxed workspaces.
       - name: Leave workspaces unsandboxed
         run: sudo rm /usr/bin/bwrap
 
@@ -50,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
       - name: Run ruff
         run: |
@@ -62,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
       - name: Run ty
         run: >-
@@ -77,10 +75,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
-      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
-      # environments' bubblewrap sandboxes need them, as they have on HUD's hosts.
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
@@ -99,13 +95,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
-      # environments' bubblewrap sandboxes need them, as they have on HUD's hosts.
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      # Environments run in containers with HUD's seccomp profile, so the
-      # sandbox scenarios run there too, as root, with bubblewrap installed.
       - name: Run sandbox scenarios in a container
         run: >-
           docker run --rm
@@ -128,7 +120,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
       - name: Check cookbooks
         run: >-

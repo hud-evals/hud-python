@@ -26,7 +26,6 @@ permissions:
 jobs:
   live:
     name: Live
-    # Secrets are not available to pull requests from forks or Dependabot.
     if: >-
       github.event_name != 'pull_request' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
@@ -37,27 +36,22 @@ jobs:
       HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
       HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
     steps:
-      # The scenarios skip themselves without a key; here that would pass with nothing run.
       - name: Require a HUD key
         run: test -n "$HUD_API_KEY" || { echo "::error::HUD_API_KEY is not set"; exit 1; }
 
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
       - name: Install the agent CLIs
         run: npm install --global @anthropic-ai/claude-code @openai/codex
 
-      # A sandboxed workspace's model connection reaches only the process it
-      # launches, so Codex has to be its native binary, not npm's Node launcher.
       - name: Put Codex's native binary on PATH
         run: >-
           ln -sf "$(find "$(npm root -g)/@openai/codex" -path '*/vendor/*/bin/codex' -type f)"
           "$(command -v codex)"
 
-      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
-      # Codex's bubblewrap sandbox needs them.
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
@@ -84,7 +78,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
       - name: Run Modal scenarios
         run: >-
@@ -100,10 +94,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
-      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
-      # environments' bubblewrap sandboxes need them, as they have on HUD's hosts.
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
@@ -121,7 +113,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
       - name: Run LeRobot scenarios
         run: >-

@@ -34,6 +34,5 @@ line-ending = "auto"
 asyncio_mode = "auto"
 
 [tool.hatch.build]
-# Flat top-level modules, not a package dir.
 only-packages = false
 include = ["env.py", "tasks.py"]
