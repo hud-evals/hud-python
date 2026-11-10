@@ -10,7 +10,7 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import httpx
+import httpx2
 import typer
 from packaging.version import Version
 
@@ -125,7 +125,7 @@ def init_command(
             headers = {}
             if token := os.environ.get("GITHUB_TOKEN"):
                 headers["Authorization"] = f"Bearer {token}"
-            response = httpx.get(
+            response = httpx2.get(
                 f"https://codeload.github.com/hud-evals/hud-python/tar.gz/refs/tags/v{version.public}",
                 headers=headers,
                 follow_redirects=True,
@@ -167,7 +167,7 @@ def init_command(
                 contents.replace(declaration, f'Environment(name="{target_name}")'),
                 encoding="utf-8",
             )
-    except (httpx.HTTPError, tarfile.TarError, ValueError, OSError) as exc:
+    except (httpx2.HTTPError, tarfile.TarError, ValueError, OSError) as exc:
         # Don't leave a half-written tree behind — it would trip the
         # non-empty-directory guard on the next run. Only remove a directory
         # this run created (never a dir the user already had).

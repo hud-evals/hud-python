@@ -15,8 +15,8 @@ COLOR = (10, 200, 30)
 
 async def test_a_screenshot_after_the_connection_drops_reconnects() -> None:
     async with (
-        fake_screen(width=4, height=2, color=COLOR) as screen,
-        relayed(Capability.rfb(url=screen.url)) as (capability, flaky),
+        fake_screen(width=4, height=2, color=COLOR, password="s3cret") as screen,
+        relayed(Capability.rfb(url=screen.url, password="s3cret")) as (capability, flaky),
     ):
         client = await RFBClient.connect(capability)
         try:

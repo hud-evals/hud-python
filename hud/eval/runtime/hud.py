@@ -11,7 +11,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
-import httpx
+import httpx2
 from websockets.exceptions import ConnectionClosedOK
 
 from hud.eval.run import Run, rollout
@@ -156,7 +156,7 @@ class HUDRuntime:
         if trace_id is not None:
             with contextlib.suppress(ValueError):
                 payload["trace_id"] = str(uuid.UUID(trace_id))
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx2.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{runtime_url}/runtime/sessions",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -172,7 +172,7 @@ class HUDRuntime:
     async def _delete_runtime_session(
         self, runtime_url: str, api_key: str, session_id: str
     ) -> None:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx2.AsyncClient(timeout=15.0) as client:
             with contextlib.suppress(Exception):
                 await client.delete(
                     f"{runtime_url}/runtime/sessions/{session_id}",

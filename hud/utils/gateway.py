@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-import httpx
+import httpx2
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic import BaseModel, Field
 
@@ -49,8 +49,8 @@ class GatewayModelInfo(BaseModel):
         return self.released_at or self.created_at or datetime.min.replace(tzinfo=UTC)
 
 
-async def _inject_trace_id(request: httpx.Request) -> None:
-    """httpx request hook."""
+async def _inject_trace_id(request: httpx2.Request) -> None:
+    """httpx2 request hook."""
     request.headers.update(get_trace_headers())
 
 
@@ -112,7 +112,9 @@ def build_model_client(
 
         return genai.Client(
             api_key=key,
-            http_options=HttpOptions(retry_options=HttpRetryOptions(initial_delay=10)),
+            http_options=HttpOptions(
+                api_version="v1beta", retry_options=HttpRetryOptions(initial_delay=10)
+            ),
         )
     return AsyncOpenAI(api_key=key)
 
@@ -162,7 +164,7 @@ def build_gateway_client(provider: str) -> GatewayClient:
                     }
                 },
                 async_client_args={
-                    "transport": httpx.AsyncHTTPTransport(),
+                    "transport": httpx2.AsyncHTTPTransport(),
                     "event_hooks": {"request": [_inject_trace_id]},
                 },
             ),

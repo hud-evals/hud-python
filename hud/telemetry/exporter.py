@@ -24,7 +24,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2
 
 from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE
 from hud.utils import make_request_sync
@@ -39,7 +39,7 @@ _MAX_BATCH_BYTES = 4 * 1024 * 1024
 _FLUSH_INTERVAL = 1.0
 _UPLOAD_RETRIES = 2
 _UPLOAD_RETRY_DELAY = 0.5
-_HTTP_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0)
+_HTTP_TIMEOUT = httpx2.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0)
 
 
 class _Marker(threading.Event):
@@ -60,7 +60,7 @@ _uploads: queue.Queue[_Upload | None] = queue.Queue()
 _pending = 0
 _worker: threading.Thread | None = None
 _uploaders: list[threading.Thread] = []
-_client: httpx.Client | None = None
+_client: httpx2.Client | None = None
 _lock = threading.Lock()
 _idle = threading.Condition(_lock)
 
@@ -154,9 +154,9 @@ def _ensure_worker() -> None:
     with _lock:
         if _worker is not None and _worker.is_alive():
             return
-        _client = httpx.Client(
+        _client = httpx2.Client(
             timeout=_HTTP_TIMEOUT,
-            limits=httpx.Limits(
+            limits=httpx2.Limits(
                 max_connections=_UPLOAD_WORKERS * 2,
                 max_keepalive_connections=_UPLOAD_WORKERS * 2,
                 keepalive_expiry=30.0,

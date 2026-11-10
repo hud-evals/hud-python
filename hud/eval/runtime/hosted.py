@@ -208,7 +208,7 @@ class HostedRuntime:
     async def _await_terminal(self, platform: PlatformClient, trace_id: str) -> _TraceState:
         task = asyncio.current_task()
         while True:
-            # httpx can swallow a cancellation that lands mid-request, which
+            # httpx2 can swallow a cancellation that lands mid-request, which
             # would leave a timed-out or cancelled rollout polling forever.
             if task is not None and task.cancelling():
                 raise asyncio.CancelledError

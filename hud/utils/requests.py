@@ -12,7 +12,7 @@ import time
 import warnings
 from typing import Any, TypeVar, overload
 
-import httpx
+import httpx2
 from pydantic import TypeAdapter
 
 from hud.utils.exceptions import (
@@ -33,7 +33,7 @@ logger.setLevel(logging.INFO)
 
 # Long running requests can take up to 10 minutes.
 _DEFAULT_TIMEOUT = 600.0
-_DEFAULT_LIMITS = httpx.Limits(
+_DEFAULT_LIMITS = httpx2.Limits(
     max_connections=1000,
     max_keepalive_connections=1000,
     keepalive_expiry=10.0,
@@ -60,7 +60,7 @@ def _retry_delay(
     return retry_time
 
 
-def _retry_after_seconds(response: httpx.Response) -> float | None:
+def _retry_after_seconds(response: httpx2.Response) -> float | None:
     """The wait the API advised in ``Retry-After`` (delay-seconds form), capped; None if absent."""
     value = response.headers.get("Retry-After")
     if value is None:
@@ -75,7 +75,7 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
 
 
 def _response_retry_wait(
-    response: httpx.Response, attempt: int, max_retries: int, retry_delay: float, url: str
+    response: httpx2.Response, attempt: int, max_retries: int, retry_delay: float, url: str
 ) -> float:
     """Seconds to wait before retrying a response: the advised wait, else the shared backoff."""
     advised = _retry_after_seconds(response)
@@ -94,17 +94,17 @@ def _response_retry_wait(
     return advised
 
 
-def _create_default_async_client() -> httpx.AsyncClient:
-    """Create a default httpx AsyncClient with standard configuration."""
-    return httpx.AsyncClient(
+def _create_default_async_client() -> httpx2.AsyncClient:
+    """Create a default httpx2 AsyncClient with standard configuration."""
+    return httpx2.AsyncClient(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
     )
 
 
-def _create_default_sync_client() -> httpx.Client:
-    """Create a default httpx Client with standard configuration."""
-    return httpx.Client(
+def _create_default_sync_client() -> httpx2.Client:
+    """Create a default httpx2 Client with standard configuration."""
+    return httpx2.Client(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
     )
@@ -113,7 +113,7 @@ def _create_default_sync_client() -> httpx.Client:
 _announced_deprecations: set[tuple[str, str, str]] = set()
 
 
-def _warn_if_deprecated(method: str, response: httpx.Response) -> None:
+def _warn_if_deprecated(method: str, response: httpx2.Response) -> None:
     """Warn once per process for each deprecation notice the HUD API sends."""
     if "Deprecation" not in response.headers:
         return
@@ -139,7 +139,7 @@ def _warn_if_deprecated(method: str, response: httpx.Response) -> None:
     )
 
 
-def _parse_reply(response: httpx.Response, reply: type[T] | None) -> Any:
+def _parse_reply(response: httpx2.Response, reply: type[T] | None) -> Any:
     """The body as ``reply``, or its decoded JSON without one; a 204 or empty body is ``{}``."""
     try:
         payload = {} if response.status_code == 204 or not response.content else response.json()
@@ -160,7 +160,7 @@ async def make_request(
     api_key: str | None = None,
     max_retries: int = 4,
     retry_delay: float = 2.0,
-    client: httpx.AsyncClient | None = None,
+    client: httpx2.AsyncClient | None = None,
     *,
     reply: type[T],
 ) -> T: ...
@@ -172,7 +172,7 @@ async def make_request(
     api_key: str | None = None,
     max_retries: int = 4,
     retry_delay: float = 2.0,
-    client: httpx.AsyncClient | None = None,
+    client: httpx2.AsyncClient | None = None,
     *,
     reply: None = None,
 ) -> Any: ...
@@ -183,7 +183,7 @@ async def make_request(
     api_key: str | None = None,
     max_retries: int = 4,
     retry_delay: float = 2.0,
-    client: httpx.AsyncClient | None = None,
+    client: httpx2.AsyncClient | None = None,
     *,
     reply: type[T] | None = None,
 ) -> Any:
@@ -197,7 +197,7 @@ async def make_request(
         api_key: API key for authentication
         max_retries: Maximum number of retries
         retry_delay: Delay between retries
-        client: Optional custom httpx.AsyncClient
+        client: Optional custom httpx2.AsyncClient
         reply: The type the response body is read as; None returns the decoded JSON
 
     Returns:
@@ -236,11 +236,11 @@ async def make_request(
 
                 _warn_if_deprecated(method, response)
                 response.raise_for_status()
-            except httpx.TimeoutException as e:
+            except httpx2.TimeoutException as e:
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
-            except httpx.HTTPStatusError as e:
+            except httpx2.HTTPStatusError as e:
                 raise HudRequestError.from_httpx_error(e) from None
-            except (httpx.RequestError, ssl.SSLError) as e:
+            except (httpx2.RequestError, ssl.SSLError) as e:
                 kind = "SSL error" if isinstance(e, ssl.SSLError) else "Network error"
                 if attempt > max_retries:
                     raise HudNetworkError(f"{kind}: {e}") from None
@@ -266,7 +266,7 @@ def make_request_sync(
     max_retries: int = 4,
     retry_delay: float = 2.0,
     *,
-    client: httpx.Client | None = None,
+    client: httpx2.Client | None = None,
     reply: type[T],
 ) -> T: ...
 @overload
@@ -278,7 +278,7 @@ def make_request_sync(
     max_retries: int = 4,
     retry_delay: float = 2.0,
     *,
-    client: httpx.Client | None = None,
+    client: httpx2.Client | None = None,
     reply: None = None,
 ) -> Any: ...
 def make_request_sync(
@@ -289,7 +289,7 @@ def make_request_sync(
     max_retries: int = 4,
     retry_delay: float = 2.0,
     *,
-    client: httpx.Client | None = None,
+    client: httpx2.Client | None = None,
     reply: type[T] | None = None,
 ) -> Any:
     """
@@ -302,7 +302,7 @@ def make_request_sync(
         api_key: API key for authentication
         max_retries: Maximum number of retries
         retry_delay: Delay between retries
-        client: Optional custom httpx.Client
+        client: Optional custom httpx2.Client
         reply: The type the response body is read as; None returns the decoded JSON
 
     Returns:
@@ -341,11 +341,11 @@ def make_request_sync(
 
                 _warn_if_deprecated(method, response)
                 response.raise_for_status()
-            except httpx.TimeoutException as e:
+            except httpx2.TimeoutException as e:
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
-            except httpx.HTTPStatusError as e:
+            except httpx2.HTTPStatusError as e:
                 raise HudRequestError.from_httpx_error(e) from None
-            except (httpx.RequestError, ssl.SSLError) as e:
+            except (httpx2.RequestError, ssl.SSLError) as e:
                 kind = "SSL error" if isinstance(e, ssl.SSLError) else "Network error"
                 if attempt > max_retries:
                     raise HudNetworkError(f"{kind}: {e}") from None
