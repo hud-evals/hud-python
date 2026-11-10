@@ -26,6 +26,7 @@ from anthropic.types.beta import (
     BetaImageBlockParam,
     BetaMessage,
     BetaMessageParam,
+    BetaOutputConfigParam,
     BetaPlainTextSourceParam,
     BetaRequestDocumentBlockParam,
     BetaTextBlockParam,
@@ -239,6 +240,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         tool_choice: BetaToolChoiceAutoParam,
         betas: list[str] | Omit,
         thinking: BetaThinkingConfigParam | Omit,
+        output_config: BetaOutputConfigParam | Omit,
     ) -> BetaMessage:
         attempt = 1
         while True:
@@ -253,6 +255,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     tool_choice=tool_choice,
                     betas=betas,
                     thinking=thinking,
+                    output_config=output_config,
                 ) as stream:
                     stream_opened = True
                     async for _ in stream:
@@ -313,6 +316,11 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             if thinking_payload is not None
             else Omit()
         )
+        output_config: BetaOutputConfigParam | Omit = (
+            {"effort": self.config.reasoning_effort}
+            if self.config.reasoning_effort is not None
+            else Omit()
+        )
         betas: list[str] | Omit = list(required_betas) if required_betas else Omit()
         tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)
         tools = self._defer_for_tool_search(cast("list[BetaToolUnionParam]", list(state.params)))
@@ -335,6 +343,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                         tool_choice=tool_choice,
                         betas=betas,
                         thinking=thinking,
+                        output_config=output_config,
                     )
                 else:
                     client = cast("AsyncAnthropic", self.anthropic_client)
@@ -346,6 +355,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                         tool_choice=tool_choice,
                         betas=betas,
                         thinking=thinking,
+                        output_config=output_config,
                     )
 
                 state.messages.append({"role": "assistant", "content": response.content})
