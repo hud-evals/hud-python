@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Argument-hints environment: prompt, data-file attachments, and rubric grading via console form hints (HUD v6)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "hud[agents]>=0.6.13",
+    "hud>=0.6.13",
     "httpx>=0.27.0",
 ]
 
@@ -34,6 +34,5 @@ line-ending = "auto"
 asyncio_mode = "auto"
 
 [tool.hatch.build]
-# Flat top-level modules, not a package dir.
 only-packages = false
 include = ["env.py", "tasks.py"]

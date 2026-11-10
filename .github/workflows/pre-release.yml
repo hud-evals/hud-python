@@ -1,8 +1,5 @@
 name: Pre-release
 
-# The release gate (release.yml) looks up a successful run of this workflow on the
-# tagged commit, so keep its file name and trigger.
-
 on:
   workflow_dispatch:
 
@@ -28,9 +25,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
 
-      # The hosted test skips without credentials, which must not pass the gate.
       - name: Require credentials
         env:
           HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
@@ -42,7 +38,7 @@ jobs:
           HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
           HUD_E2E_TRACE_DIR: ${{ runner.temp }}/traces
         run: >-
-          uv run --python 3.12 --all-extras
+          uv run --locked --python 3.12 --all-extras
           pytest -m "e2e and hosted" -p no:cacheprovider -rs
           "tests/e2e/test_templates.py::test_a_deployed_template_runs_on_hud_and_its_trace_reads_back[${{ matrix.template }}]"
 

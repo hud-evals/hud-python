@@ -26,7 +26,7 @@ without the fix when the fix could regress (see [Writing Tests](#writing-tests))
 3. Install [uv](https://docs.astral.sh/uv/) and set up dev dependencies:
    ```bash
    cd hud-python
-   uv sync --extra dev
+   uv sync --all-extras
    ```
 
 ## Development Workflow
@@ -88,7 +88,7 @@ async def test_a_graded_rollout_reports_its_reward(reporting):
 ```bash
 uv run ruff format . --check   # Formatting
 uv run ruff check .            # Linting
-uv run --extra dev --extra train ty check  # Type checking
+uv run ty check                # Type checking
 ```
 
 ## Code Style

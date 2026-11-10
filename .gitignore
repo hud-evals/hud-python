@@ -7,24 +7,17 @@ __pycache__
 .pytest_cache
 dist/
 build/
-# The broad build/ rule above also matches docs/v6/build/, which is real docs
-# content (linked from docs.json). Keep tracking it so docs.hud.ai/v6/build/*
-# does not 404.
 !docs/v6/build/
 *.egg-info/
-uv.lock
 !tests/integrations/harbor/cases/**/.env
 
-# Media files
 *.jpg
 *.jpeg
 *.bmp
 *.tiff
 
-# DS-Store
 .DS_Store
 
-# Test files
 /*.ipynb
 TODO.md
 
@@ -44,7 +37,6 @@ TODO.md
 .rl_config_*.json
 .rl-config-*.json
 
-# RL
 wandb/
 outputs/
 
@@ -60,7 +52,6 @@ hud/rl/checkpoints_test/
 .hud/
 .hud_eval_config
 .hud_eval.toml
-# The template hud init copies into new projects.
 !environments/*/.hud_eval.toml
 
 docs/internal
@@ -73,7 +64,6 @@ experiments/
 .codex/environments/*
 !.codex/environments/environment.toml
 
-# Runtime fixtures and dependency locks for featured environment templates.
 !environments/featured/**/uv.lock
 !environments/featured/file-analysis/fixtures/*.csv
 !environments/featured/libbet/games/test/

@@ -90,11 +90,6 @@ def __getattr__(name: str) -> object:
     from importlib import import_module
 
     module_name, symbol = target
-    try:
-        value = getattr(import_module(module_name), symbol)
-    except ModuleNotFoundError as exc:
-        raise ImportError(
-            f"{name} requires the agents extra. Install with: pip install 'hud[agents]'"
-        ) from exc
+    value = getattr(import_module(module_name), symbol)
     globals()[name] = value
     return value
