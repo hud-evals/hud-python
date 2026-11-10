@@ -158,6 +158,7 @@ dev = [
 
 [tool.uv]
 required-version = ">=0.12.2"
+exclude-newer = "1 day"
 
 [tool.ruff]
 target-version = "py311"

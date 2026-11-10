@@ -42,7 +42,7 @@ jobs:
           HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
           HUD_E2E_TRACE_DIR: ${{ runner.temp }}/traces
         run: >-
-          uv run --python 3.12 --all-extras
+          uv run --locked --python 3.12 --all-extras
           pytest -m "e2e and hosted" -p no:cacheprovider -rs
           "tests/e2e/test_templates.py::test_a_deployed_template_runs_on_hud_and_its_trace_reads_back[${{ matrix.template }}]"
 

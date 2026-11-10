@@ -9,6 +9,7 @@ on:
       - "environments/**"
       - "cookbooks/**"
       - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/ci.yml"
   pull_request:
     paths: *code
@@ -42,7 +43,7 @@ jobs:
         run: sudo rm /usr/bin/bwrap
 
       - name: Run tests
-        run: uv run --python ${{ matrix.python-version }} --all-extras pytest -n auto
+        run: uv run --locked --python ${{ matrix.python-version }} --all-extras pytest -n auto
 
   lint-ruff:
     runs-on: ubuntu-latest
@@ -53,8 +54,8 @@ jobs:
 
       - name: Run ruff
         run: |
-          uv run ruff format . --check
-          uv run ruff check .
+          uv run --locked ruff format . --check
+          uv run --locked ruff check .
 
   lint-ty:
     runs-on: ubuntu-latest
@@ -65,7 +66,7 @@ jobs:
 
       - name: Run ty
         run: >-
-          uv run --all-extras
+          uv run --locked --all-extras
           ty check --error-on-warning
 
   docker:
@@ -85,7 +86,7 @@ jobs:
 
       - name: Run Docker scenarios
         run: >-
-          uv run --python 3.12 --all-extras
+          uv run --locked --python 3.12 --all-extras
           pytest -m "e2e and docker" --ignore tests/integrations/harbor
           -n 4 --timeout 1800 --durations 20
 
@@ -117,7 +118,7 @@ jobs:
           python:3.12-bookworm
           sh -c 'apt-get update -qq && apt-get install -y -qq bubblewrap openssh-client busybox-static >/dev/null
           && pip install -q "uv>=0.12.2"
-          && uv run --all-extras pytest -m "e2e and sandbox" -n 4 --timeout 600'
+          && uv run --locked --all-extras pytest -m "e2e and sandbox" -n 4 --timeout 600'
 
   cookbooks:
     name: Cookbooks
@@ -131,5 +132,5 @@ jobs:
 
       - name: Check cookbooks
         run: >-
-          uv run --python 3.12 --all-extras
+          uv run --locked --python 3.12 --all-extras
           pytest tests/e2e/test_cookbooks.py -m e2e -n 4 --timeout 1200 --durations 20
