@@ -346,8 +346,8 @@ class ClaudeComputerTool(RFBTool):
                 await self.wait(duration)
 
             case "cursor_position":
-                mouse = self.client.conn.mouse
-                return tool_ok(f"({mouse.x}, {mouse.y})")
+                x, y = self.client.cursor
+                return tool_ok(f"({x}, {y})")
 
             case _:
                 return tool_err(f"unsupported computer action: {action!r}")

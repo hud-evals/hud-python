@@ -25,7 +25,8 @@ dependencies = [
     "questionary==2.1.0",
     "prompt-toolkit==3.0.51",
     "asyncssh>=2.23.0",
-    "asyncvnc>=1.3.0",
+    "cryptography>=43",
+    "keysymdef>=1.2",
     "pillow>=11.0.0",
     "websockets>=15.0.1",
 ]
