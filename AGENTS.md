@@ -117,10 +117,10 @@ Before calling a change done, check its diff:
 runs the test suite and the `e2e` lanes. Run the tests you touched.
 
 ```bash
-uv sync --extra dev
+uv sync --all-extras
 uv run ruff format . --check
 uv run ruff check .
-uv run --extra dev --extra train ty check
+uv run ty check
 ```
 
 ## Repository map

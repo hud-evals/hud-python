@@ -53,8 +53,8 @@ jobs:
 
       - name: Run ruff
         run: |
-          uv run --with=".[dev]" ruff format . --check
-          uv run --with=".[dev]" ruff check .
+          uv run ruff format . --check
+          uv run ruff check .
 
   lint-ty:
     runs-on: ubuntu-latest
@@ -65,7 +65,7 @@ jobs:
 
       - name: Run ty
         run: >-
-          uv run --extra dev --extra train --extra modal --extra daytona
+          uv run --all-extras
           ty check --error-on-warning
 
   docker:
