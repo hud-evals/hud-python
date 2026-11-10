@@ -6,7 +6,7 @@ updates:
       interval: daily
     cooldown:
       default-days: 1
-    versioning-strategy: widen
+    versioning-strategy: increase-if-necessary
     groups:
       minor-and-patch:
         update-types:
