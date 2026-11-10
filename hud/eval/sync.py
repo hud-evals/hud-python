@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 class TasksetRecord(BaseModel):
-    """A taskset as ``GET /tasksets/{id}`` and ``POST /tasksets`` return it."""
+    """A taskset as ``GET /tasksets``, ``GET /tasksets/{id}`` and ``POST /tasksets`` return it."""
 
     id: uuid.UUID
     name: str
@@ -124,12 +124,7 @@ def diff(local: Taskset, remote: Taskset) -> SyncPlan:
 
 
 def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, str]:
-    """Resolve a taskset name to ``(uuid, display_name)``; uuid is "" if not found.
-
-    A UUID is returned as given, without checking that the taskset exists. A name
-    is matched exactly, after the platform normalizes it, across every Project the
-    caller can read; a name held in several Projects raises ``ValueError``.
-    """
+    """Resolve a taskset name or UUID to ``(uuid, name)``; uuid is "" for an unknown name."""
     try:
         uuid.UUID(name_or_id)
         return name_or_id, name_or_id
@@ -140,9 +135,9 @@ def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, 
     if not page.items:
         return "", name_or_id
     if len(page.items) > 1:
+        ids = " and ".join(str(t.id) for t in page.items)
         raise ValueError(
-            f"Taskset name {name_or_id!r} is held by tasksets in more than one Project, "
-            f"including {' and '.join(str(t.id) for t in page.items)}; "
+            f"Taskset name {name_or_id!r} matches more than one taskset, including {ids}; "
             "pass the taskset id instead."
         )
     return str(page.items[0].id), page.items[0].name

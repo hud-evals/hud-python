@@ -20,14 +20,13 @@ from hud.eval import (
     Taskset,
 )
 from tests.conftest import eventually
-from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Run
     from tests.conftest import HudEnv
-    from tests.fixtures.services import FakeServices, Request
+    from tests.fixtures.services import FakeServices
 
 
 @pytest.mark.parametrize("suffix", [".json", ".jsonl"])
@@ -128,13 +127,12 @@ def test_a_platform_taskset_loads_by_name_or_id(
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
     taskset_id = "eeeeeeee-0000-4000-8000-000000000001"
-
-    def named(request: Request) -> Reply:
-        held = [{"id": taskset_id, "name": "SheetBench-50"}]
-        found = held if request.query.get("name") == ["SheetBench-50"] else []
-        return Reply(json={"items": found, "total": len(found)})
-
-    services.route("api", "GET", "/v2/tasksets", handler=named)
+    services.route(
+        "api",
+        "GET",
+        "/v2/tasksets",
+        json={"items": [{"id": taskset_id, "name": "SheetBench-50"}], "total": 1},
+    )
     services.route(
         "api",
         "GET",
@@ -151,6 +149,8 @@ def test_a_platform_taskset_loads_by_name_or_id(
     loaded = Taskset.from_api(reference)
 
     assert (loaded.name, loaded.taskset_id) == ("SheetBench-50", taskset_id)
+    looked_up = [r.query.get("name") for r in services.requests("api", "GET", "/v2/tasksets")]
+    assert looked_up == ([] if reference == taskset_id else [[reference]])
     assert [(row.slug, row.env, row.id, row.args) for row in loaded] == [
         ("sum-a", "sheets", "sum", {"cell": "A1"}),
         ("sum-b", "sheets", "sum", {}),
@@ -163,13 +163,13 @@ def test_a_platform_taskset_loads_by_name_or_id(
         ([], "taskset not found: SheetBench-50"),
         (
             [
-                {"id": "eeeeeeee-0000-4000-8000-000000000001", "name": "sheetbench-50"},
-                {"id": "eeeeeeee-0000-4000-8000-000000000002", "name": "sheetbench-50"},
+                {"id": "eeeeeeee-0000-4000-8000-000000000001", "name": "SheetBench-50"},
+                {"id": "eeeeeeee-0000-4000-8000-000000000002", "name": "SheetBench-50"},
             ],
             "pass the taskset id instead",
         ),
     ],
-    ids=["missing", "held-in-two-projects"],
+    ids=["missing", "ambiguous"],
 )
 def test_a_platform_taskset_name_that_names_no_single_taskset_does_not_load(
     held: list[dict[str, str]], error: str, services: FakeServices, hud_env: HudEnv
