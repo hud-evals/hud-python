@@ -317,7 +317,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             else Omit()
         )
         output_config: BetaOutputConfigParam | Omit = (
-            {"effort": self.config.effort} if self.config.effort is not None else Omit()
+            {"effort": self.config.reasoning_effort}
+            if self.config.reasoning_effort is not None
+            else Omit()
         )
         betas: list[str] | Omit = list(required_betas) if required_betas else Omit()
         tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)

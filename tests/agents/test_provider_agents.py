@@ -150,7 +150,7 @@ async def test_the_configured_effort_reaches_claude_only_when_set(
         if bedrock
         else None
     )
-    config = ClaudeConfig(model=CLAUDE_MODEL, effort=effort, model_client=client)
+    config = ClaudeConfig(model=CLAUDE_MODEL, reasoning_effort=effort, model_client=client)
 
     task = workspace_task(tmp_path / "ws")
     (run,) = (await task().run(ClaudeAgent(config))).runs
