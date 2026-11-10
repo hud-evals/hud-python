@@ -53,7 +53,7 @@ def platform(signed_in: FakeServices, hud: Hud) -> FakeServices:
     """A directory holding ``tasks.py`` and a platform with no ``demo`` taskset yet, which
     creates one on upload."""
     (hud.cwd / "tasks.py").write_text(TASKS_PY)
-    signed_in.route("api", "GET", "/v2/tasksets/by-name/{name}", status=404, json={"detail": "No"})
+    signed_in.route("api", "GET", "/v2/tasksets", json={"items": [], "total": 0})
     signed_in.route(
         "api",
         "POST",
@@ -68,7 +68,10 @@ def holding(
 ) -> None:
     """Let the platform hold taskset ``name`` with ``tasks`` under ``taskset_id``."""
     services.route(
-        "api", "GET", f"/v2/tasksets/by-name/{name}", json={"taskset_id": taskset_id, "name": name}
+        "api",
+        "GET",
+        "/v2/tasksets",
+        json={"items": [{"id": taskset_id, "name": name}], "total": 1},
     )
     services.route(
         "api", "GET", f"/v2/tasksets/{taskset_id}", json={"id": taskset_id, "name": name}
@@ -171,6 +174,18 @@ def test_syncing_another_taskset_moves_the_link_only_when_asked(
 
     assert result.exit_code == 0, result
     assert linked(hud)["taskset_id"] == (OTHER_ID if relinked else TASKSET_ID)
+
+
+def test_a_taskset_name_matching_two_tasksets_is_a_usage_error_that_uploads_nothing(
+    platform: FakeServices, hud: Hud
+) -> None:
+    matches = [{"id": TASKSET_ID, "name": "demo"}, {"id": OTHER_ID, "name": "demo"}]
+    platform.route("api", "GET", "/v2/tasksets", json={"items": matches, "total": 2})
+
+    result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
+
+    assert (result.exit_code, result.json["error"], uploads(platform)) == (2, "usage", []), result
+    assert TASKSET_ID in result.json["message"]
 
 
 def test_a_linked_taskset_that_was_deleted_is_not_found(platform: FakeServices, hud: Hud) -> None:

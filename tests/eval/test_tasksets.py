@@ -130,8 +130,8 @@ def test_a_platform_taskset_loads_by_name_or_id(
     services.route(
         "api",
         "GET",
-        "/v2/tasksets/by-name/SheetBench-50",
-        json={"taskset_id": taskset_id, "name": "SheetBench-50"},
+        "/v2/tasksets",
+        json={"items": [{"id": taskset_id, "name": "SheetBench-50"}], "total": 1},
     )
     services.route(
         "api",
@@ -149,10 +149,37 @@ def test_a_platform_taskset_loads_by_name_or_id(
     loaded = Taskset.from_api(reference)
 
     assert (loaded.name, loaded.taskset_id) == ("SheetBench-50", taskset_id)
+    looked_up = [r.query.get("name") for r in services.requests("api", "GET", "/v2/tasksets")]
+    assert looked_up == ([] if reference == taskset_id else [[reference]])
     assert [(row.slug, row.env, row.id, row.args) for row in loaded] == [
         ("sum-a", "sheets", "sum", {"cell": "A1"}),
         ("sum-b", "sheets", "sum", {}),
     ]
+
+
+@pytest.mark.parametrize(
+    ("held", "error"),
+    [
+        ([], "taskset not found: SheetBench-50"),
+        (
+            [
+                {"id": "eeeeeeee-0000-4000-8000-000000000001", "name": "SheetBench-50"},
+                {"id": "eeeeeeee-0000-4000-8000-000000000002", "name": "SheetBench-50"},
+            ],
+            "pass the taskset id instead",
+        ),
+    ],
+    ids=["missing", "ambiguous"],
+)
+def test_a_platform_taskset_name_that_names_no_single_taskset_does_not_load(
+    held: list[dict[str, str]], error: str, services: FakeServices, hud_env: HudEnv
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    services.route("api", "GET", "/v2/tasksets", json={"items": held, "total": len(held)})
+
+    with pytest.raises(ValueError, match=error):
+        Taskset.from_api("SheetBench-50")
+    assert services.requests("api", "GET", "/v2/tasksets/{id}/export") == []
 
 
 async def test_each_row_runs_group_times_in_task_major_order_under_one_job() -> None:

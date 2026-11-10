@@ -80,13 +80,7 @@ def importer(signed_in: FakeServices, hud: Hud) -> FakeServices:
     signed_in.route("api", "PUT", "/uploads/{id}", json={})
     signed_in.route("api", "POST", "/v2/data/{id}/complete", json={"id": FILE_ID})
     signed_in.route("api", "DELETE", "/v2/data/{id}", status=204)
-    signed_in.route(
-        "api",
-        "GET",
-        "/v2/tasksets/by-name/{name}",
-        status=404,
-        json={"detail": "Taskset not found"},
-    )
+    signed_in.route("api", "GET", "/v2/tasksets", json={"items": [], "total": 0})
     signed_in.route(
         "api", "POST", "/v2/tasksets", json={"id": TASKSET_ID, "name": "tb2", "can_edit": True}
     )
@@ -121,7 +115,10 @@ def test_an_import_into_an_existing_taskset_creates_none_and_links_only_when_ask
     flags: list[str], linked: bool, importer: FakeServices, hud: Hud
 ) -> None:
     importer.route(
-        "api", "GET", "/v2/tasksets/by-name/tb2", json={"taskset_id": TASKSET_ID, "name": "tb2"}
+        "api",
+        "GET",
+        "/v2/tasksets",
+        json={"items": [{"id": TASKSET_ID, "name": "tb2"}], "total": 1},
     )
     importer.route(
         "api",

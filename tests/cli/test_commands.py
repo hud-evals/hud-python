@@ -69,7 +69,7 @@ MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
         ["eval", "Demo", "openai_compatible", "-m", "scripted"],
         {},
         {
-            "GET /v2/tasksets/by-name/Demo": {"taskset_id": TASKSET_ID, "name": "Demo"},
+            "GET /v2/tasksets": {"items": [{"id": TASKSET_ID, "name": "Demo"}], "total": 1},
             f"GET /v2/tasksets/{TASKSET_ID}/export": {
                 "name": "Demo",
                 "tasks": [{"name": "one", "env": "demo", "scenario": "solve", "args": {}}],
@@ -93,7 +93,7 @@ MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
             "GET /v2/imports/formats": {
                 "formats": [{"format": "harbor", "title": "Harbor", "max_input_bytes": 1024**3}]
             },
-            "GET /v2/tasksets/by-name/tb2": (404, {"detail": "Not found"}),
+            "GET /v2/tasksets": {"items": [], "total": 0},
         },
     ),
     # Answers --dry-run before it reaches the platform.
