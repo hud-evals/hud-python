@@ -1,4 +1,4 @@
-"""The model handle and ``optim_step`` that modality clients such as ``TrainingClient`` share."""
+"""The model handle, optimizer step and checkpoint operations behind ``TrainingClient``."""
 
 from __future__ import annotations
 
@@ -23,10 +23,10 @@ class _Losses(BaseModel):
 
 
 class BaseTrainingClient:
-    """One model handle (a gateway slug or id) + the shared optimizer step.
+    """One model handle (a gateway slug or id) with its optimizer step and checkpoints.
 
-    Training advances the weights behind the model string in place. Use a modality
-    client such as ``TrainingClient``, not this directly.
+    Training advances the weights behind the model string in place. Use
+    ``TrainingClient``, not this directly.
     """
 
     def __init__(
@@ -79,8 +79,10 @@ class BaseTrainingClient:
         return await make_request("GET", url, api_key=self._api_key, reply=reply)
 
     async def available_losses(self) -> list[str]:
-        """The built-in ``loss_fn`` names this model's provider supports
-        (authoritative; ``hud.train.BuiltinLoss`` lists common ones)."""
+        """The built-in ``loss_fn`` names this model's provider supports.
+
+        ``BuiltinLoss`` lists common ones; this list is authoritative.
+        """
         return (await self._get("losses", _Losses)).losses
 
     async def optim_step(
@@ -94,8 +96,7 @@ class BaseTrainingClient:
     ) -> OptimStepResult:
         """Apply accumulated gradients and checkpoint; the gateway then serves the new weights.
 
-        Never retried, since a duplicate submit saves a step twice; the server recovers,
-        so a failed step is safe to re-run from the training loop.
+        Never retried automatically, since a duplicate submit would save a step twice.
         """
         request = OptimStepRequest(
             learning_rate=learning_rate,
@@ -114,8 +115,7 @@ class BaseTrainingClient:
         return await make_request("GET", url, api_key=self._api_key, reply=list[CheckpointResponse])
 
     async def head(self) -> CheckpointResponse | None:
-        """The active checkpoint (the weights the gateway serves now), or
-        ``None`` when the model still serves its base weights."""
+        """The checkpoint the gateway serves, or ``None`` while it serves the base weights."""
         return next((c for c in await self.checkpoints() if c.is_active), None)
 
     async def set_head(self, checkpoint_id: str) -> None:

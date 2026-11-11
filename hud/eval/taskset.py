@@ -203,7 +203,11 @@ class Taskset:
         }
 
     def _resolve_placement(self) -> Provider:
-        """Container rows start their image; rows minted by a live env run against it."""
+        """Pick the provider for this taskset's rows.
+
+        A platform taskset runs on HUD; otherwise image or Compose rows run under Docker
+        and rows an env minted run against that env. Any other row raises ``ValueError``.
+        """
         if self.taskset_id is not None:
             return HUDRuntime()
         rows = list(self)

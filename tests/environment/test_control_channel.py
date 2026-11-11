@@ -1,6 +1,6 @@
 """The control channel as a peer speaks it: a task's typed start and answer, how a
 session's template is torn down, a request at the frame limit, sessions that drop and
-resume, and capability streams tunneled through its port."""
+resume, capability streams tunneled through its port, and malformed frames."""
 
 from __future__ import annotations
 

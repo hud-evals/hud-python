@@ -4,9 +4,8 @@
     uv run baseline.py --variants 24 --group 2
 
 Runs the same agent config training would use, with no optimizer. The decision
-this informs: a ~20-40% pass rate leaves room for GRPO to learn. Near 0% or near
-100% means retune the task instead of spending hours discovering the gradient was
-dead.
+this informs: a 15-55% pass rate leaves room for GRPO to learn; near 0% or near
+100% means retune the task before training.
 """
 
 from __future__ import annotations

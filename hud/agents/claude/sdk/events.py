@@ -147,8 +147,9 @@ class ClaudeEvents:
     def finish(self, *, returncode: int, stderr: str) -> None:
         """Fail the rollout unless the CLI delivered a complete terminal result.
 
-        A nonzero exit after a result event is only recorded on the trace when
-        stderr is empty; the CLI exits that way after successful runs.
+        After a result event, a nonzero exit is an error only when stderr is non-empty; the
+        CLI exits nonzero after successful runs. Every nonzero exit lands in
+        ``trace.extra["returncode"]``.
         """
         trace = self.run.trace
         if returncode != 0:

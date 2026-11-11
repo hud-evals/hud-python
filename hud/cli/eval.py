@@ -136,13 +136,14 @@ def eval_command(
     source: str | None = typer.Argument(None, help="Tasks file (.py, .json) or platform taskset"),
     agent: str | None = typer.Argument(
         None,
-        help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, openai, gemini, openai_compatible)",  # noqa: E501
+        help=f"Model name (e.g. claude-sonnet-4-6) or agent type ({', '.join(AgentType)})",
     ),
-    all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
+    all: bool = typer.Option(False, "--all", help="Run every task instead of only the first."),
     full: bool = typer.Option(
         False,
         "--full",
-        help="Run the entire dataset. Shortcut for --all --auto-respond --max-steps 100",
+        help="Run every task with --auto-respond and --max-steps 100 (an explicit --max-steps "
+        "wins).",
     ),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
     config: list[str] | None = typer.Option(  # noqa: B008
@@ -190,7 +191,7 @@ def eval_command(
         help="Run the whole rollout on the HUD platform (same as --runtime hosted)",
     ),
 ) -> dict[str, Any] | Result:
-    """Run evaluation on datasets or individual tasks with agents.
+    """Run an agent over a tasks file or a platform taskset.
 
     A tasks file (tasks.py, a directory, or JSON/JSONL beside its env source) runs
     locally, each rollout in a fresh subprocess; a platform taskset runs hosted.

@@ -47,7 +47,7 @@ class Frame:
 
 @dataclass
 class ControlPeer:
-    """The peer's record. Use :func:`control_peer`."""
+    """The peer's record. Use ``control_peer``."""
 
     scripts: Sequence[Sequence[Action]]
     upstreams: dict[str, tuple[str, int]]
@@ -164,7 +164,7 @@ async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
 async def control_peer(
     *scripts: Sequence[Action], upstreams: dict[str, tuple[str, int]] | None = None
 ) -> AsyncGenerator[ControlPeer]:
-    """Serve a :class:`ControlPeer` answering connections from ``scripts`` for the block."""
+    """Serve a ``ControlPeer`` answering connections from ``scripts`` for the block."""
     peer = ControlPeer(scripts=scripts or ([],), upstreams=upstreams or {})
     server = await asyncio.start_server(peer.handle, "127.0.0.1", 0)
     peer.server = server

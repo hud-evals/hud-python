@@ -1,35 +1,12 @@
 """Direct control: an LLM drives a ``robot`` capability through MCP motion tools.
 
-The ``robot`` wire takes one action per control tick, which a policy keeps up
-with and a tool-calling LLM does not. ``DirectControl`` serves the same sim
-as an ``mcp`` capability instead: a tool call names targets (or displacements)
-for some action dimensions, the tool plays them out on the wire, and answers
-with the camera frames and the pose it ended on. ``wait`` holds the pose and
-answers the same way. Each call is its own wire
-connection, so the sim holds still while the model thinks. The env keeps
-serving ``robot`` too, so one env serves VLAs and LLMs alike.
-
-The contract derives the tool surface: the action's control kind (``state_type``,
-else ``type``) picks the tool (``CONTROL_KINDS``), its ``names`` are the
-addressable dimensions, its ``limits`` (else ``stats``) ``min``/``max`` bound
-them, ``control_rate`` paces the playout, and ``rgb`` observations are the
-frames returned. An absolute
-end-effector rotation is presented as intrinsic XYZ euler and slerped onto
-whatever the contract stores (quaternion, axis-angle, or euler):
-
-    env = Environment(name="my-sim")
-    sim = env.gym(make_env)
-    DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
-
-An absolute move then holds its goal until the arm (and, after a gripper change, the fingers)
-comes to rest, and reports whether it is at the target, stopped short, or out of time. A
-displacement returns once played. ``timeout`` caps one call.
-Single-env sims only: a tool call claims the sole slot (no slot token).
-
-Every tick of every call also streams to the rollout's trace: numeric state per
-tick plus one H.264 video per camera, so the trace viewer replays the whole
-episode, not only the frames the model is shown. The env process needs
-``HUD_API_KEY`` to upload.
+``DirectControl(...).attach(sim)`` serves the sim's action space as an ``mcp``
+capability beside ``robot``. The action's control kind (``state_type``, else
+``type``) picks the tool from ``CONTROL_KINDS``; its ``names`` are the addressable
+dimensions and its ``limits`` (else ``stats``) bound them. Each call plays out on
+the wire and answers with the camera frames and the pose it ended on. Single-env
+sims only. Every tick streams to the rollout's trace, which needs ``HUD_API_KEY``
+in the env process.
 """
 
 from __future__ import annotations
@@ -171,8 +148,7 @@ _DURATION = {"type": ["number", "null"], "description": "Sim seconds; null is 0.
 
 
 class _SchemaTool(Tool):
-    """A tool that serves exactly the schema it advertises: arguments are validated
-    against ``parameters`` and then passed to ``fn`` by keyword."""
+    """A tool that validates arguments against its advertised ``parameters``, then calls ``fn``."""
 
     fn: Callable[..., Any]
 
@@ -281,7 +257,7 @@ class DirectControl:
         return self
 
     async def start(self, robot: Capability) -> Capability:
-        """Serve the tools derived from *robot*'s contract; returns their ``mcp`` capability."""
+        """Serve the tools derived from ``robot``'s contract; return their ``mcp`` capability."""
         if self._capability is not None:
             return self._capability
         # 1. Read the contract: the action's kind picks the tool, its names are the dimensions.
@@ -394,7 +370,7 @@ class DirectControl:
         self._capability = None
 
     def begin_episode(self, max_ticks: int | None) -> None:
-        """Start an episode capped at *max_ticks* ticks (``None``: no limit).
+        """Start an episode capped at ``max_ticks`` ticks (``None``: no limit).
 
         The bridge enforces the cap; this only tells the model its budget, in the served
         tools' descriptions and the time remaining on each reply. The previous episode's
@@ -430,7 +406,7 @@ class DirectControl:
                 await asyncio.to_thread(flush)
 
     def _bind_tools(self, server: FastMCP) -> None:
-        """Register the contract motion tool. Override to serve an env-specific tool."""
+        """Register the contract motion tool."""
         server.add_tool(
             self._make_tool(
                 self.move, self._tool, self._describe(), {"targets": self._targets_schema()}
@@ -543,8 +519,11 @@ class DirectControl:
         ).strip()
 
     def _addressable(self) -> tuple[dict[str, _Axis], list[str]]:
-        """Tool dimensions. Contract orientation blocks become roll, pitch, yaw; every name
-        becomes its standard name when all have distinct ones."""
+        """Tool dimensions by name, and the ones the tool addresses in order.
+
+        Contract orientation blocks become roll, pitch and yaw; every name becomes
+        its standard name when all standard names are distinct.
+        """
         axes: dict[str, _Axis] = {}
         covered: set[int] = set()
         for block in self._orientations:
@@ -706,8 +685,10 @@ class DirectControl:
                 self._tick += 1
 
     def _start(self, obs: dict[str, Any]) -> NDArray[np.float64]:
-        """Where a move begins: the commanded target (the reference on an episode's first
-        move) for absolute control, zero displacement otherwise."""
+        """Where a move begins: the commanded target for absolute control, else zero.
+
+        On an episode's first absolute move the commanded target is the reference.
+        """
         if not self._absolute:
             return np.zeros(len(self._names), dtype=np.float64)
         return self._command.copy() if self._command is not None else self._proprio(obs)
@@ -936,8 +917,11 @@ def _tool_order(names: list[str], blocks: list[Orientation]) -> list[str]:
 
 
 def _standard_name(name: str) -> str | None:
-    """*name* in the standard convention (``x``, ``roll``, ``grip``, ``joint3``; under
-    ``left_arm.`` / ``right_arm.`` for a ``left_`` / ``right_`` name), or ``None``."""
+    """``name`` in the standard convention, or ``None`` when it has none.
+
+    Standard names are ``x``, ``roll``, ``grip``, ``joint3`` and the like, under
+    ``left_arm.`` or ``right_arm.`` for a ``left_`` or ``right_`` name.
+    """
     side = re.match(r"(left|right)[_.]", name)
     rest = name[side.end() :] if side else name
     leaf = rest.rsplit(".", 1)[-1]

@@ -91,10 +91,11 @@ def validate_rollout_timeouts(
 
 
 def parent_trace(trace_id: str) -> uuid.UUID | None:
-    """The trace a rollout of ``trace_id`` runs inside: the ambient trace, when it is
-    another one. The platform keys traces by UUID, so an ambient id that is not one
-    names no trace it holds, and the rollout has no parent. A caller sends it in the
-    form it sends the rollout's own trace id: hex locally, canonical when hosted."""
+    """The ambient trace a rollout of ``trace_id`` runs inside.
+
+    ``None`` when there is no ambient trace, it is ``trace_id`` itself, or it is not
+    a UUID (the platform keys traces by UUID).
+    """
     ambient = get_current_trace_id() or get_mcp_trace_id()
     if ambient is None or normalize_trace_id(ambient) == normalize_trace_id(trace_id):
         return None
@@ -292,12 +293,11 @@ class Run:
 def _gateway_relay(
     agent: Agent, client: HudClient, connections: Sequence[Connection]
 ) -> list[Connection]:
-    """The ``inference`` connection a CLI agent in a sandboxed workspace reaches the HUD
-    gateway through, holding ``HUD_API_KEY`` outside the sandbox.
+    """The ``inference`` connection a gateway-routed ``CLIAgent`` reaches the HUD gateway through.
 
-    Bound for a ``CLIAgent`` that routes to the gateway, when the
-    session has one workspace that can bind it and the caller brought no ``inference``
-    connection of its own.
+    It holds ``HUD_API_KEY`` outside the agent's sandbox. Empty unless an API key is set,
+    the session has exactly one ``ssh`` binding that supports process connections, and
+    ``connections`` has no ``inference`` entry.
     """
     if not isinstance(agent, CLIAgent) or not routes_to_gateway(
         agent.provider, gateway=agent.config.gateway

@@ -156,7 +156,7 @@ class TrainingDatum(BaseModel):
 
 
 class DatumTensors(TrainingDatum):
-    """LLM per-datum token tensors of equal length.
+    """Per-datum token tensors of equal length.
 
     ``logprobs`` are under the current policy, ``sampling_logprobs`` under the rollout
     policy, and ``mask`` is 1.0 on action tokens and 0.0 on observation tokens.

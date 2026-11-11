@@ -2,14 +2,11 @@
 
     uv run warmpool.py --n 8
 
-Warm pools are absent from the high-level `daytona` SDK; they live in the
-generated client (`WarmPoolsApi`). This measures one concurrent wave of N
+Warm pools are absent from the high-level ``daytona`` SDK; they live in the
+generated client (``WarmPoolsApi``). This measures one concurrent wave of N
 acquisitions with no pool, then creates a pool of N, waits for it to fill, and
-measures an identical wave.
-
-Open question the numbers answer: DaytonaRuntime creates sandboxes with
-ephemeral=True and auto_stop_interval=0, so a pooled sandbox is only reused if
-the pool matches those create parameters.
+measures an identical wave. The difference shows whether pooled sandboxes serve
+DaytonaRuntime's creates, which use ``ephemeral=True`` and ``auto_stop_interval=0``.
 """
 
 from __future__ import annotations

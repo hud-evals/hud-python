@@ -48,8 +48,7 @@ def list_models(
 ) -> Any:
     """List models available through the HUD inference gateway.
 
-    The platform model catalog — the same models `create_agent` and `hud eval`
-    resolve against.
+    These are the models create_agent and hud eval resolve names against.
 
     [not dim]Examples:
         hud models list
@@ -114,8 +113,8 @@ def fork_model(
     """Create a team-owned trainable model derived from an existing one.
 
     The fork starts from the source model's active checkpoint, so you can keep
-    training where it left off. Use the returned model slug with
-    `hud.train.TrainingClient` (or as the gateway model string for sampling).
+    training where it left off. Use the returned slug with hud.train.TrainingClient,
+    or as the gateway model name for sampling.
 
     [not dim]Examples:
         hud models fork claude-sonnet-4-6 --name my-sonnet
@@ -236,8 +235,7 @@ def show_head(
         help="Skip confirmation prompts (required in non-interactive terminals).",
     ),
 ) -> Any:
-    """Show — or with ``--set``, change — the model's active checkpoint (the
-    weights the gateway serves now).
+    """Show the model's active checkpoint, the weights the gateway serves; --set changes it.
 
     [not dim]Examples:
         hud models head <model>

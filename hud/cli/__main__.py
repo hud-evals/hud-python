@@ -66,8 +66,8 @@ def set_command(
         hud set ANTHROPIC_API_KEY=sk-... OPENAI_API_KEY=sk-...
         hud set HUD_API_KEY=sk-... --json
 
-    Values are stored in ~/.hud/.env and are loaded by hud.settings with
-    the lowest precedence (overridden by process env and project .env).[/not dim]
+    Values are stored in ~/.hud/.env and have the lowest precedence: the
+    process environment and a project .env override them.[/not dim]
     """
     hud_console = HUDConsole()
 
@@ -135,7 +135,10 @@ def underlying_error(error: BaseException) -> BaseException | None:
 
 @contextlib.contextmanager
 def recorded_invocation(argv: list[str], cli: typer.Typer) -> Generator[None]:
-    """Record one CLI invocation around the wrapped block, then re-raise as-is."""
+    """Send one anonymous analytics event for the wrapped CLI invocation, unless disabled.
+
+    Exceptions propagate unchanged.
+    """
     started = time.monotonic()
     exit_code = 0
     error_class: str | None = None

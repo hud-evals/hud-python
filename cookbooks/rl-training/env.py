@@ -1,10 +1,7 @@
 """A tiny verifiable environment for the RL-training cookbook.
 
-One template, ``multiply(a, b)``: ask the model for a product and grade it
-**strictly** — the whole reply must be exactly the integer, nothing else. Two-digit
-multiplication is something a small base model gets only sometimes (and often
-wraps in prose), so the baseline reward is well below 1.0 with within-group
-variance — the signal GRPO needs. Serve with ``hud serve env.py`` or drive via
+One template, ``multiply(a, b)``: ask for a product, let the model reason, and
+grade the last integer in its reply. Serve with ``hud serve env.py`` or drive via
 ``LocalRuntime("env.py")``.
 """
 
@@ -20,12 +17,7 @@ env = Environment(name="arithmetic")
 
 @env.template()
 async def multiply(a: int, b: int):
-    """Ask for ``a * b`` as a *direct* answer; reward 1.0 iff reply == product.
-
-    The prompt forbids reasoning and the caller caps output tokens, so the model
-    must answer from "mental math" rather than scratch work — something a small
-    model is unreliable at, giving a sub-1.0 baseline with within-group variance.
-    """
+    """Ask for ``a * b`` with reasoning; reward 1.0 iff the reply's last integer is the product."""
     answer = yield (
         f"What is {a} * {b}? Think it through, then end your reply with the final "
         "integer on its own and nothing after it."

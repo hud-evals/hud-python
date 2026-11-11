@@ -25,7 +25,11 @@ class OpenAICodeInterpreterTool(OpenAIHostedTool):
 
 @dataclass(frozen=True, kw_only=True)
 class OpenAIToolSearchTool(OpenAIHostedTool):
-    """OpenAI tool search for large tool sets."""
+    """OpenAI tool search for large tool sets.
+
+    When the request carries more function tools than ``threshold``, the agent marks them
+    ``defer_loading`` so the model finds them through search.
+    """
 
     threshold: int = 10
 

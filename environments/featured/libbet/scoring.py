@@ -1,22 +1,21 @@
 """Pluggable scorers for the HUD VideoGameBench template.
 
-A scenario builds a :class:`ScoreBoard` from a list of scorers. After every
-agent action, ``ScoreBoard.on_step`` feeds the new screen + emulator to each
-scorer; at the end ``ScoreBoard.result`` collapses them into a single HUD
-``EvaluationResult`` with one ``SubScore`` per scorer.
+A template builds a ``ScoreBoard`` from a list of scorers. After every agent
+action, ``ScoreBoard.on_step`` feeds the new screen and emulator to each scorer;
+at the end ``ScoreBoard.result`` collapses them into one ``EvaluationResult``
+with a ``SubScore`` per scorer.
 
 Three scorers ship:
 
-* :class:`CheckpointScorer` — VideoGameBench-style perceptual-hash matching
-  against ordered checkpoint images. Sparse / staged progress.
-* :class:`RamScorer` — *dense* reward read from per-game RAM (richer than
-  upstream VideoGameBench, which is screenshot-only).
-* :class:`ExplorationScorer` — generic, ROM-agnostic dense reward = number of
-  distinct screens seen / a target. Used by the bundled test game.
+* ``CheckpointScorer``: VideoGameBench-style perceptual-hash matching against
+  ordered checkpoint images (sparse, staged progress).
+* ``RamScorer``: dense reward read from per-game RAM (richer than upstream
+  VideoGameBench, which is screenshot-only).
+* ``ExplorationScorer``: ROM-agnostic dense reward, distinct screens seen over a
+  target. The bundled test game uses it.
 
 Subscore weights are normalized so positive weights sum to 1.0 and
-``reward == sum(value * weight)``, satisfying ``hud.graders.EvaluationResult``
-validation.
+``reward == sum(value * weight)``, which ``EvaluationResult`` validates.
 """
 
 from __future__ import annotations

@@ -543,8 +543,10 @@ class _Forward(socketserver.BaseRequestHandler):
 
 
 class _Severable(socketserver.TCPServer):
-    """A stream server whose ``server_close`` also cuts the connections it accepted,
-    so taking a route away ends the ones already open on it, not only new ones."""
+    """A stream server whose ``server_close`` also cuts the connections it accepted.
+
+    Taking a route away ends the connections already open on it, not only new ones.
+    """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._open: set[socket.socket] = set()
@@ -829,8 +831,7 @@ class Egress:
             self._serve_peer(peer)
 
     def add_peer(self, peer: Peer) -> tuple[str, int, str]:
-        """Serve *peer* too, at an address no other peer holds; returns the route the
-        bridge offers it on."""
+        """Serve ``peer`` at an address no other peer holds; return the bridge's route to it."""
         self._addresses = bind_addresses(
             [*self.peers, peer], reserved_ports=self._reserved_ports, placed=self._addresses
         )
@@ -845,9 +846,11 @@ class Egress:
         return path
 
     def remove_peer(self, peer: Peer) -> None:
-        """Stop serving *peer*, and end the connections open to it: its bridge
-        listener stays bound, and closes whatever connects to it until another peer
-        is given its address."""
+        """Stop serving ``peer`` and end its open connections.
+
+        Its bridge listener stays bound and closes whatever connects to it until
+        another peer is given its address.
+        """
         server, path = self._peer_servers.pop(peer)
         self._servers.remove((server, path))
         _close(server, path)

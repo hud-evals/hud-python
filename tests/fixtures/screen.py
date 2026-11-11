@@ -151,7 +151,7 @@ async def fake_screen(
     drop_on_update: int = 0,
     password: str | None = None,
 ) -> AsyncGenerator[FakeScreen]:
-    """Serve a :class:`FakeScreen` on loopback for the duration of the block."""
+    """Serve a ``FakeScreen`` on loopback for the duration of the block."""
     screen = FakeScreen(width, height, color, drop_on_update=drop_on_update, password=password)
     server = await asyncio.start_server(screen.session, "127.0.0.1", 0)
     screen.port = server.sockets[0].getsockname()[1]

@@ -2,7 +2,7 @@
 
 The proxy and each peer forward serve on a unix socket, and the bridge offers
 them as ports inside the workspace's network. Scenarios speak to them over real
-sockets; the internet behind the proxy is :func:`internet`.
+sockets; the internet behind the proxy is ``internet``.
 """
 
 from __future__ import annotations

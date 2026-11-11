@@ -23,11 +23,11 @@ SegmentCallback = Callable[[int, bytes], None]
 
 
 class SegmentEncoder:
-    """Encode one camera's frames to CMAF: init segment, then one media fragment per
-    ~``segment_seconds`` via ``on_segment`` (called on the encoder thread).
+    """Encode one camera's frames to CMAF segments, passed to ``on_segment`` on the encoder thread.
 
-    Doubles as the file-like sink PyAV muxes into: ``write`` reassembles the MP4 boxes
-    and dispatches each segment as soon as it is whole.
+    Segment 0 is the init segment; each later one is a fragment of about
+    ``segment_seconds``. The encoder is also the file-like sink PyAV muxes into, so
+    ``write`` dispatches each segment as soon as it is whole.
     """
 
     def __init__(
@@ -204,10 +204,10 @@ class VideoStreamer:
         self._encoders: dict[str, SegmentEncoder] = {}
 
     def record(self, obs: dict[str, Any]) -> None:
-        """Submit each camera frame in ``obs['data']`` to its (lazy) encoder. Non-blocking.
+        """Submit each camera frame in ``obs["data"]`` to that camera's encoder.
 
-        Only ``HxWxC`` arrays with 1, 3 or 4 channels count as frames; a batched
-        ``[num_envs, dim]`` state would otherwise encode as a garbage video.
+        Blocks only when ``lossless``. Only ``HxWxC`` arrays with 1, 3 or 4 channels
+        count as frames, so batched ``[num_envs, dim]`` state is skipped.
         """
         for name, arr in obs.get("data", {}).items():
             shape = cast("tuple[int, ...]", getattr(arr, "shape", ()))
@@ -244,8 +244,10 @@ class VideoStreamer:
 
 
 def _to_rgb24(arr: NDArray[Any]) -> NDArray[np.uint8] | None:
-    """Coerce a raw camera array to contiguous HxWx3 uint8 with even dims
-    (yuv420p needs even width/height). Returns ``None`` if it isn't an image."""
+    """Coerce a camera array to contiguous ``HxWx3`` uint8, or ``None`` if it is not an image.
+
+    Odd heights and widths are cropped to even, which yuv420p needs.
+    """
     if arr.ndim == 2:
         arr = np.stack([arr] * 3, axis=-1)
     if arr.ndim != 3:

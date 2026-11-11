@@ -21,7 +21,7 @@ TAG = "robot-libero:test"
 
 
 class OneMove(Agent):
-    """Lowers the gripper once through the `move_to` tool."""
+    """Lowers the gripper once through the ``move_to`` tool."""
 
     def __init__(self) -> None:
         super().__init__()

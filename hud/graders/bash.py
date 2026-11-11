@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class BashGrader(Grader):
-    """Run a shell command and score by exit code. Fully async."""
+    """Run a shell command and score ``1.0`` on exit code ``0``, else ``0.0``."""
 
     name = "BashGrader"
 

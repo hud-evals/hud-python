@@ -136,8 +136,7 @@ async def test_a_session_that_asks_for_a_terminal_gets_one(
 async def test_a_resize_does_not_cost_the_session_its_keyboard(
     tmp_path: Path, backing: dict[str, Any]
 ) -> None:
-    """asyncssh delivers a resize as an exception on the stdin read, and it is
-    not an asyncssh.Error — unhandled it escapes the relay and input stops."""
+    """Resizing the terminal leaves the session reading its input."""
     async with shell(tmp_path / "root", **backing) as (_, client):
         process = await client.conn.create_process(
             "cat", term_type="xterm-256color", term_size=(80, 24)

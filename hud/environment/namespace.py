@@ -89,7 +89,7 @@ class Privileges:
     """What a sandboxed process gives up as it enters the sandbox.
 
     It always loses sys_admin, net_admin and net_raw from its capability
-    bounding set; *identity* is the (uid, gid) it switches to, with no
+    bounding set; ``identity`` is the (uid, gid) it switches to, with no
     supplementary groups.
     """
 
@@ -103,12 +103,12 @@ def entry_argv(
     into: list[tuple[str, str]],
     privileges: Privileges | None = None,
 ) -> list[str]:
-    """The argv that runs *argv* entered *into* a view, under *privileges* when given.
+    """The argv that runs ``argv`` entered into a view, under ``privileges`` when given.
 
-    *into* pairs a namespace (``user``, ``ipc``, ``uts``, ``net``, ``pid``,
+    ``into`` pairs a namespace (``user``, ``ipc``, ``uts``, ``net``, ``pid``,
     ``mnt``) or ``cwd`` with the path that names it, such as
     ``/proc/<pid>/ns/mnt`` or ``/proc/self/fd/<descriptor>``. Entry runs
-    ``enter.py`` from this interpreter, so the view supplies only *argv*.
+    ``enter.py`` from this interpreter, so the view supplies only ``argv``.
     """
     options = [value for kind, path in into for value in ("--enter", f"{kind}={path}")]
     if privileges is not None:
@@ -130,7 +130,7 @@ async def start_holder(
 ) -> tuple[ProcessGroup, int]:
     """Start a bwrap holder whose payload prints ``ready``; the holder and its child's pid.
 
-    *launcher_depth* counts the processes from the one *argv* starts down to
+    ``launcher_depth`` counts the processes from the one ``argv`` starts down to
     bwrap's child, for a bwrap in a pid namespace of its own whose reported
     pid means nothing out here; 0 trusts the reported pid.
     """
@@ -202,12 +202,12 @@ async def start_holder(
 
 
 async def _end_holder(holder: ProcessGroup, pid: int) -> None:
-    """End a holder by killing its placeholder, *pid*, so bwrap and whatever
-    launched it exit on their own and each process is reaped by its parent.
+    """End a holder by killing its placeholder ``pid``, letting bwrap and its launcher exit.
 
-    Killing the group instead would orphan the placeholder, and a pid 1 that
-    never reaps it, such as a server serving as a container's init, keeps
-    the group alive as a zombie until the group kill's grace period runs out.
+    Each process is then reaped by its parent. Killing the group instead would
+    orphan the placeholder, and a pid 1 that never reaps it, such as a server
+    serving as a container's init, keeps the group alive as a zombie until the
+    group kill's grace period runs out.
     """
     with contextlib.suppress(ProcessLookupError):
         os.kill(pid, signal.SIGKILL)
@@ -233,7 +233,7 @@ async def hold_view(
 
     Payloads enter a view rather than run under bwrap: Ubuntu's AppArmor
     profile for bwrap strips capabilities from everything bwrap starts.
-    Returns the ``entry_argv`` *into* for the view's *kinds*, and the
+    Returns the ``entry_argv`` ``into`` for the view's ``kinds``, and the
     descriptors it names, which hold the view open until the caller passes
     them to that command and closes them.
     """
@@ -257,7 +257,7 @@ async def hold_view(
 
 
 def _map_identities(pid: int) -> None:
-    """Map the caller's identities into *pid*'s user namespace, as they are.
+    """Map the caller's identities into ``pid``'s user namespace, as they are.
 
     Where only its own ids can be mapped, they are mapped to root: everything
     mapped is a namespace trusted code joins, and only root inside keeps its

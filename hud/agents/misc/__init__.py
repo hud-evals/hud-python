@@ -1,1 +1,1 @@
-"""Miscellaneous agents."""
+"""Auto-respond helper for ``ToolAgent``."""

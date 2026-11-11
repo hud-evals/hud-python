@@ -33,16 +33,13 @@ def serve_command(
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs."),
 ) -> None:
-    """Serve a HUD Environment locally (its tcp control channel).
+    """Serve an Environment's control channel locally over TCP.
 
     [not dim]Examples:
         hud serve                # auto-detect env.py
         hud serve env:env        # explicit module:attribute
         hud serve env.py -p 9000 # serve on a specific port
-        hud serve pkg.mod:make_env --arg name=demo  # call a factory
-
-    In v6, ``hud serve`` serves a ``hud.Environment``. The old
-    MCP-server hot-reload / Docker dev mode is no longer supported.[/not dim]
+        hud serve pkg.mod:make_env --arg name=demo  # call a factory[/not dim]
     """
     if verbose:
         logging.basicConfig(level=logging.INFO)

@@ -49,7 +49,7 @@ class GatewayModelInfo(BaseModel):
 
 
 async def _inject_trace_id(request: httpx2.Request) -> None:
-    """httpx2 request hook."""
+    """Attach the current trace headers to an outgoing request."""
     request.headers.update(get_trace_headers())
 
 
@@ -72,9 +72,11 @@ def routes_to_gateway(provider: str, *, gateway: bool) -> bool:
 def build_model_client(
     provider: str, *, model: str | None = None, gateway: bool = False
 ) -> GatewayClient:
-    """The provider's own key when set, otherwise the HUD gateway; ``gateway`` skips the
-    provider key. A Bedrock inference-profile ARN as the Anthropic ``model`` is only
-    reachable through Bedrock, so it cannot be combined with ``gateway``.
+    """A ``provider`` SDK client using the provider's own key when set, otherwise the HUD
+    gateway; ``gateway`` forces the gateway.
+
+    A Bedrock inference-profile ARN as the Anthropic ``model`` needs the AWS credentials
+    and cannot use the gateway.
     """
     bedrock = provider == "anthropic" and model is not None and model.startswith("arn:aws:bedrock:")
     if bedrock and gateway:

@@ -135,8 +135,7 @@ class TraceRecorder:
         self._video.record({"data": data})
 
     def record_inference(self, chunk: Any, *, tick: int) -> None:
-        """One inference: the freshly inferred ``[T, A]`` chunk (an executed
-        single action is a length-1 chunk)."""
+        """Record one inference's ``[T, A]`` action chunk; a single action is a length-1 chunk."""
         rows = np.atleast_2d(to_numpy(chunk).astype(float))
         self._emit(
             InferenceStep(

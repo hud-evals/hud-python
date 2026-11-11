@@ -1,4 +1,4 @@
-"""AgentTool + AgentToolSpec."""
+"""Provider-facing tool base class, its spec, and naming and result helpers."""
 
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ class AgentTool(ABC, Generic[ClientT]):
 
     @classmethod
     def from_config(cls, *, spec: AgentToolSpec, client: ClientT, config: ToolAgentConfig) -> Self:
-        """This tool as an agent with *config* runs it; a tool reads what it needs from it."""
+        """Build this tool for an agent running with ``config``; subclasses read what they need."""
         del config
         return cls(spec=spec, client=client)
 

@@ -127,7 +127,7 @@ class RuntimeConfig(BaseModel):
 
 
 class Provider(Protocol):
-    """Acquires one fresh env substrate for a task and yields its connectable ``Runtime``."""
+    """Places a task: an async context manager yielding a connectable ``Runtime`` for its scope."""
 
     def __call__(self, task: Task, /) -> AbstractAsyncContextManager[Runtime]: ...
 

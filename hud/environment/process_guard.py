@@ -441,7 +441,7 @@ def _forward_signals(original: int) -> None:
 
 
 def _drop_to(identity: Optional[tuple[int, int]]) -> None:
-    """Become *identity*, with no supplementary groups; no-new-privs is already set."""
+    """Become ``identity``, with no supplementary groups; no-new-privs is already set."""
     if identity is None:
         return
     assert sys.platform == "linux"
@@ -724,8 +724,7 @@ def guarded_exec(
     argv: Sequence[str],
     identity: Optional[tuple[int, int]] = None,
 ) -> None:
-    """Install the guard, register this process, and replace it with ``argv``,
-    run as *identity* when given."""
+    """Install the guard, register this process, and exec ``argv`` as ``identity`` if given."""
     if not argv:
         raise ValueError("guarded execution requires a command")
     channel = socket.socket(socket.AF_UNIX)

@@ -38,7 +38,10 @@ class RobotAgent(Agent):
     adapter: Adapter | None = None
 
     def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:
-        """Return whether to stop before selecting the next action."""
+        """Whether to end the episode before acting on ``obs``.
+
+        The default stops on ``obs['terminated']``.
+        """
         return bool(np.asarray(obs["terminated"]).reshape(-1)[0])
 
     async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:

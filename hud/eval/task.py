@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 class Task(BaseModel):
-    """A task row: env name, task id and arguments; pure data, shared across rollouts."""
+    """A task row: env name, task id and arguments, shared across rollouts."""
 
     model_config = ConfigDict(validate_assignment=True)
 

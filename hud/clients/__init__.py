@@ -1,4 +1,4 @@
-"""HUD wire client: ``Manifest``, ``HudClient``."""
+"""HUD control-channel client: ``connect``, ``HudClient``, ``Manifest`` and ``HudProtocolError``."""
 
 from __future__ import annotations
 

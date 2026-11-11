@@ -86,7 +86,7 @@ class AgentType(StrEnum):
 
     @property
     def config_cls(self) -> type[AgentConfig]:
-        """Get config class without importing agent (avoids SDK dependency)."""
+        """The agent's config class, importable without the agent's provider SDK."""
         from hud.agents.types import (
             ClaudeCLIConfig,
             ClaudeConfig,

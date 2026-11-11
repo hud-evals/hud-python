@@ -90,8 +90,10 @@ def _guarded_process_argv(
     *,
     identity: tuple[int, int] | None,
 ) -> list[str]:
-    """*argv* under the process-connection guard, which drops it to *identity* once
-    guarded: the guard itself stays out of reach of the identity it drops to."""
+    """``argv`` under the process-connection guard, which drops it to ``identity`` once guarded.
+
+    The guard itself stays out of reach of the identity it drops to.
+    """
     return [
         interpreter,
         guard.sandbox_helper,
@@ -373,7 +375,7 @@ _MOUNT_FLAGS: dict[MountKind, tuple[str, str | None, bool]] = {
 
 @dataclass(slots=True, frozen=True)
 class Mount:
-    """One bwrap mount entry: ``Mount(kind, src=..., dst=..., optional=...)``."""
+    """One bubblewrap mount in the workspace sandbox; an ``optional`` bind skips missing sources."""
 
     kind: MountKind
     src: str = ""
@@ -503,22 +505,20 @@ def _payload_argv(
 
 
 class Workspace:
-    """Directory + bwrap-isolated SSH.
+    """A directory served over bubblewrap-isolated SSH as an ``ssh/2`` capability.
 
-    The standard shell daemon: ``env.workspace(root)`` attaches one to an
-    ``Environment``, which starts it and publishes its
-    concrete ``ssh/2`` capability when the env serves. Construction is pure
-    data — keys, sockets, and the root directory materialize only at serve
-    time. Drive it directly (``start()`` / ``capability`` / ``stop()``)
-    to publish the capability yourself.
+    ``env.workspace(root)`` attaches one to an ``Environment``, which starts it and
+    publishes the capability when the env serves. Construction writes nothing:
+    keys, sockets and the root directory are created on first use. Drive it
+    directly with ``start()``, ``capability()`` and ``stop()`` to publish the
+    capability yourself.
 
-    ``shell_uid`` and ``shell_gid`` drop agent sessions to that identity
-    when the serving process is root — the privilege wall for
-    substrates where bwrap is unavailable and the env process holds secrets
-    the agent must not read.
-    No-op off root. Only the workspace directory itself is handed to the uid
-    at start (O(1), on the serving path); pre-staged content is the author's
-    to own via ``COPY --chown`` or task setup.
+    When the server runs as root on Linux, ``shell_uid`` and ``shell_gid`` drop
+    agent sessions to that identity: the privilege wall for substrates where bwrap
+    is unavailable and the env process holds secrets the agent must not read. Off
+    root they do nothing; as root on another platform, ``start`` refuses. Unless
+    ``hand_over_root`` is false, only the root directory itself is handed to that
+    uid; content staged in the image is the author's to chown.
     """
 
     def __init__(
@@ -687,9 +687,11 @@ class Workspace:
         return not self.network or self.allowed_hosts is not None
 
     async def add_peer(self, peer: Peer, *, first: bool = False) -> None:
-        """Add a substrate service, to a running sandbox too: its address answers and
-        its name resolves before this returns, and every other peer keeps the address
-        it was bound at."""
+        """Add a substrate service, to a running sandbox too.
+
+        Its address answers and its name resolves before this returns, and every
+        other peer keeps the address it was bound at.
+        """
         async with self._sandbox_lock:
             if self._egress is not None:
                 host, port, path = self._egress.add_peer(peer)
@@ -704,9 +706,11 @@ class Workspace:
                 self._hosts_path = self._write_hosts()
 
     def remove_peer(self, peer: Peer) -> None:
-        """Remove a substrate service, from a running sandbox too: its name stops
-        resolving and its address stops answering, while every other peer keeps
-        the address it was bound at."""
+        """Remove a substrate service, from a running sandbox too.
+
+        Its name stops resolving and its address stops answering, while every other
+        peer keeps the address it was bound at.
+        """
         self.peers = tuple(candidate for candidate in self.peers if candidate != peer)
         if self._egress is not None and peer in self._egress.peers:
             self._egress.remove_peer(peer)
@@ -715,8 +719,11 @@ class Workspace:
 
     @property
     def addresses(self) -> Mapping[str, str]:
-        """Which loopback address each peer name answers on inside the workspace: where
-        the running sandbox's bridge bound it, or where the next sandbox will."""
+        """The loopback address each peer name answers on inside the workspace.
+
+        That is where the running sandbox's bridge bound it, or where the next
+        sandbox will.
+        """
         if self._egress is not None:
             return self._egress.addresses
         return bind_addresses(self.peers, reserved_ports=self.ports)
@@ -900,7 +907,6 @@ class Workspace:
 
     @property
     def ssh_user(self) -> str:
-        """SSH username."""
         return self._ssh_user
 
     def capability(self, name: str = "shell") -> Capability:
@@ -1163,8 +1169,11 @@ class Workspace:
     def _command_env(
         self, env: Mapping[str, str] | None = None, *, inherit_workspace_env: bool = True
     ) -> dict[str, str]:
-        """The environment a workspace command starts from: the serving process's, less
-        HUD's own; then the workspace's own, unless left out; then *env*."""
+        """The environment a workspace command starts from.
+
+        The serving process's minus ``HUD_`` variables, then the workspace's own
+        unless ``inherit_workspace_env`` is false, then ``env``.
+        """
         workspace_env = self.env if inherit_workspace_env else {}
         return {**_without_harness_config(os.environ), **workspace_env, **(env or {})}
 
@@ -1212,8 +1221,8 @@ class Workspace:
     async def sandbox_pid(self) -> int | None:
         """The live sandbox's init pid, starting one if none is running.
 
-        ``None`` where bwrap cannot sandbox: sessions then run directly, as
-        they always have, and nothing persists between them beyond the files.
+        ``None`` where bwrap cannot sandbox: sessions then run directly, and
+        nothing persists between them beyond the files.
         """
         if self._bwrap is None:
             return None
@@ -1333,7 +1342,7 @@ class Workspace:
             raise
 
     async def _route_out(self, routes: bytes) -> None:
-        """Have the bridge listen on *routes*, one line of its stdin."""
+        """Have the bridge listen on ``routes``, one line of its stdin."""
         assert self._bridge is not None
         self._bridge.stdin.write(routes)
         await self._bridge.stdin.drain()
@@ -1388,10 +1397,10 @@ class Workspace:
             await self._namespace.terminate_sessions()
 
     def _credentials_dir(self) -> Path:
-        """Key material lives outside the served root: the root is the agent's
-        shell cwd and diff-tracking surface, so secrets don't belong in it.
+        """The private directory holding the workspace's keys, outside the served root.
 
-        ``mkdtemp`` creates a fresh 0700 directory with an unpredictable name
+        The root is the agent's shell cwd and diff-tracking surface, so secrets
+        don't belong in it. ``mkdtemp`` creates a fresh 0700 directory with an unpredictable name
         atomically, so a local user can't pre-place a symlink at the path to
         redirect the private keys the server writes here. A caller that masks
         part of the filesystem from sessions should pass ``credentials_dir``

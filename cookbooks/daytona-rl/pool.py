@@ -1,11 +1,10 @@
 """Daytona warm pools: create one, wait until it is genuinely full, drop it.
 
-Warm pools are absent from the high-level `daytona` SDK — they live in the
-generated client (`WarmPoolsApi`). The subtlety worth knowing: a pool's own
-`current_size` reports full roughly 12s before the sandboxes exist, so
-`wait_full` counts real sandboxes instead. Counting them needs
-`include_warm=True`; unclaimed pool members are excluded from `list_sandboxes`
-by default, which makes a naive count return 0 forever.
+Warm pools are absent from the high-level ``daytona`` SDK; they live in the
+generated client (``WarmPoolsApi``). A pool's own ``current_size`` reports full
+before the sandboxes exist, so ``wait_full`` counts real sandboxes instead.
+Counting them needs ``include_warm=True``: ``list_sandboxes`` excludes unclaimed
+pool members by default, so a naive count stays at 0.
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ def _state(sandbox) -> str:
 
 
 async def _live_ids(snapshot: str, *, include_warm: bool) -> set[str]:
-    """Live sandbox ids on *snapshot*, paginated (`limit` caps at 200)."""
+    """Live sandbox ids on ``snapshot``, paginated (``limit`` caps at 200)."""
     ids: set[str] = set()
     cursor = None
     async with _api() as api:
@@ -85,7 +84,7 @@ async def drop(snapshot: str) -> None:
 
 
 async def wait_full(snapshot: str, size: int, timeout_s: float = 1800, poll_s: float = 5) -> int:
-    """Block until *size* sandboxes really exist. Returns how many."""
+    """Block until ``size`` unclaimed sandboxes exist or ``timeout_s`` passes; returns the last count."""
     started = time.perf_counter()
     last = -1
     while time.perf_counter() - started < timeout_s:

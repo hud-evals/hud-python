@@ -1,18 +1,15 @@
-"""HUD environment: VideoGameBench Game Boy games as turn-based, scored evals.
+"""VideoGameBench Game Boy games as turn-based, scored HUD evals.
 
-A v6 HUD environment. An external HUD agent observes the game screen (returned as
-an image from every action tool) and acts via button tools, served over an
-in-process ``mcp`` capability. The emulator only advances inside tool calls, so
-the game is naturally "paused" while the agent thinks — VideoGameBench's
-``--lite`` semantics, which fit MCP cleanly.
+An external HUD agent observes the game screen (returned as an image from every
+action tool) and acts through button tools served over an in-process ``mcp``
+capability. The emulator advances only inside tool calls, so the game pauses
+while the agent thinks, matching VideoGameBench's ``--lite`` semantics.
 
-Design notes:
-  * VideoGameBench's agent / LLM client / real-time eval loop are intentionally
-    NOT used — HUD's external agent replaces them.
-  * Per-step scoring (checkpoint / RAM / exploration) runs inside each tool call,
-    because a HUD template only yields twice (setup prompt, then final reward).
-  * One emulator instance lives in module state. HUD runs one container per
-    evaluation, so a single global instance is safe (no in-process parallelism).
+VideoGameBench's own agent, LLM client and real-time loop are not used; the HUD
+agent replaces them. Per-step scoring (checkpoint, RAM, exploration) runs inside
+each tool call, because a template yields only twice (setup prompt, then final
+reward). One emulator lives in module state, since HUD runs one container per
+evaluation.
 """
 
 from __future__ import annotations
@@ -171,13 +168,11 @@ def _record_frame() -> None:
 
 
 async def press_buttons(buttons: list[str], frames: int | None = None) -> list[ContentBlock]:
-    """Press one or more Game Boy buttons, then return the new screen.
+    """Press one or more Game Boy buttons together this turn, then return the new screen.
 
-    Args:
-        buttons: Buttons to press together this turn. Valid values:
-            A, B, START, SELECT, UP, DOWN, LEFT, RIGHT.
-        frames: How long the buttons are held / how far the game advances
-            (1-600). Omit to use the game-specific default shown in the prompt.
+    Valid buttons: A, B, START, SELECT, UP, DOWN, LEFT, RIGHT. frames (1-600) sets how long
+    the buttons are held and how far the game advances; omit it to use the game-specific
+    default shown in the prompt.
     """
     emu = _session["emulator"]
     if emu is None:
@@ -197,11 +192,7 @@ async def press_buttons(buttons: list[str], frames: int | None = None) -> list[C
 
 
 async def wait(frames: int = 30) -> list[ContentBlock]:
-    """Advance the game without pressing anything (let animations/dialogue play).
-
-    Args:
-        frames: How many frames to advance (1-600, default 30).
-    """
+    """Advance the game 1-600 frames (default 30) without pressing anything, letting animations and dialogue play."""
     emu = _session["emulator"]
     if emu is None:
         return _no_game()
@@ -275,10 +266,9 @@ async def play_game(
 ) -> AsyncGenerator[Any, str | None]:
     """Explore the bundled Game Boy game through screenshots and button presses.
 
-    Args:
-        game: Folder under games/ to load; the bundled game is "test" (Libbet).
-        max_steps: Advisory step budget surfaced to the agent.
-        threshold: Optional override of the checkpoint perceptual-hash threshold.
+    ``game`` is a folder under ``games/`` (the bundled one is ``test``, Libbet); ``max_steps``
+    is an advisory budget shown to the agent; ``threshold`` overrides the checkpoint
+    perceptual-hash threshold.
     """
     _teardown()
     spec = games_loader.load_game_spec(game, threshold_override=threshold)

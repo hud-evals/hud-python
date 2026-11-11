@@ -4,12 +4,12 @@
     uv run reap.py --delete               # delete stranded sandboxes
     uv run reap.py --snapshots --delete   # also delete snapshots except the current hash
 
-Sandboxes: DaytonaRuntime sets auto_stop_interval=0 (never auto-stop) and relies
-on its own teardown, wrapped in contextlib.suppress. A killed client or a failed
-delete strands them, billing until someone notices.
+Sandboxes: DaytonaRuntime sets ``auto_stop_interval=0`` (never auto-stop) and
+deletes each sandbox on exit. A killed client or a failed delete leaves it running
+and billing.
 
-Snapshots: content-addressed names (see snapshot.py) mean every edit to env.py or
-Dockerfile.hud mints a new one, and nothing reaps the old.
+Snapshots: content-addressed names (see ``snapshot.py``) mean every edit to
+``env.py`` or ``Dockerfile.hud`` mints a new one, and nothing reaps the old.
 """
 
 from __future__ import annotations

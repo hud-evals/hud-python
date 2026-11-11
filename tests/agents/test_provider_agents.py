@@ -1,6 +1,5 @@
-"""What the provider agents do when their provider misbehaves or they run alongside
-themselves: a fault ends or retries the run, a capped reply ends it as truncated, one
-agent drives concurrent rollouts, and what Claude retries and Gemini refuses or prunes."""
+"""What the provider agents do against a scripted provider: faults, retries and
+truncation, concurrent rollouts, and each provider's own request and tool handling."""
 
 from __future__ import annotations
 

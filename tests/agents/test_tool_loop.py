@@ -1,9 +1,9 @@
-"""What the provider agents' shared tool loop decides: how long a tool may take, when a
-lost workspace ends the run, and that colliding MCP tool names fail it.
+"""What the provider agents' shared tool loop decides: that a call cut off mid-arguments
+is refused, how long a tool may take, when a lost workspace ends the run, and that
+colliding MCP tool names fail it.
 
-The loop is one implementation every provider agent runs, so each rule is checked once,
-on the chat completions agent; what each provider does differently is
-``test_provider_agents``."""
+The loop is one implementation every provider agent runs, so each rule is checked on
+one agent; what each provider does differently is ``test_provider_agents``."""
 
 from __future__ import annotations
 

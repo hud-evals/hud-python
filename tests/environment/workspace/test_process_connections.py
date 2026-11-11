@@ -1,8 +1,8 @@
 """Controller connections bound to one process: only that process reaches them.
 
-A control session hands the environment a :class:`~hud.capabilities.Connection`;
-the workspace serves it behind a credential-owning relay that only the process
-it was requested for may connect to. The guard that enforces this has one
+A control session hands the environment a ``Connection``; the workspace serves it
+behind a credential-owning relay that only the process it was requested for may
+connect to. The guard that enforces this has one
 backend per kernel facility (seccomp user notification, ptrace), each held to
 the same table; the served workspace is the sandbox-lane scenario.
 """

@@ -40,7 +40,7 @@ class RobotClient(CapabilityClient):
         return dict(self.capability.params.get("contract") or {})
 
     def get_control_rate(self, default: int = 10) -> int:
-        """The env's control rate in Hz (frames/actions per second), rounded to at least 1."""
+        """Control rate in Hz, rounded and at least 1; ``default`` when the contract sets none."""
         return max(1, round(self.contract.get("control_rate") or default))
 
     def spaces(self) -> tuple[dict[str, Any], dict[str, Any]]:

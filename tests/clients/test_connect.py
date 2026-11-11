@@ -1,8 +1,5 @@
 """The control channel's client side: ``hud.clients.connect`` and ``HudClient`` against a
 scripted peer that answers each connection and records every frame it receives.
-
-Not covered: the 120 s control heartbeat. Its interval is a module constant with no
-public knob, and waiting it out has no place in the default lane.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""CLI infrastructure: the I/O contract, error mapping, and workspace pins."""
+"""CLI infrastructure: the JSON output contract, error mapping, and ``.hud/config.json`` links."""
 
 from __future__ import annotations
 

@@ -2,9 +2,9 @@
 
 Every test runs against an isolated SDK configuration: a temporary home, no
 developer credentials, telemetry uploads off, and every HUD service URL pointed
-at a closed local port. :class:`HudEnv` is the only place tests touch
+at a closed local port. ``HudEnv`` is the only place tests touch
 ``hud.settings``: the SDK reads its configuration from environment variables
-once, when ``hud.settings`` is imported, so :class:`HudEnv` sets them for this
+once, when ``hud.settings`` is imported, so ``HudEnv`` sets them for this
 process and every subprocess it starts and rebuilds the settings object from
 them. A test that talks to HUD services asks for the
 ``services`` fixture, which points the SDK at the fake backend instead.

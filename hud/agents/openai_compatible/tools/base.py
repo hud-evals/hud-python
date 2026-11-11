@@ -1,4 +1,4 @@
-"""OpenAI-compatible tool spec + result formatting."""
+"""Chat Completions tool params and tool-result messages."""
 
 from __future__ import annotations
 

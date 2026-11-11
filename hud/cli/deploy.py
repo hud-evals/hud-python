@@ -1,4 +1,4 @@
-"""Deploy HUD environments to the platform via direct build."""
+"""``hud deploy``: upload an environment and build it on the HUD platform."""
 
 from __future__ import annotations
 
@@ -46,9 +46,10 @@ from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
 
+# Never uploaded. Applied last, so a ``.dockerignore`` negation cannot re-include them.
 SENSITIVE_EXCLUDES = [".git", ".env", ".env.*", "*.env"]
-"""Never uploaded. Applied last, so a ``.dockerignore`` negation cannot re-include them."""
 
+# Local junk no image needs. Applied first, so ``.dockerignore`` can re-include any of it.
 DEFAULT_EXCLUDES = [
     "__pycache__",
     "*.pyc",
@@ -62,8 +63,8 @@ DEFAULT_EXCLUDES = [
     ".DS_Store",
     "Thumbs.db",
 ]
-"""Local junk no image needs. Applied first, so ``.dockerignore`` can re-include any of it."""
 
+# Directories skipped when looking for ``Environment(...)`` declarations.
 _UNSEARCHED_DIRS = {
     ".git",
     ".venv",
@@ -74,10 +75,9 @@ _UNSEARCHED_DIRS = {
     ".pytest_cache",
     ".ruff_cache",
 }
-"""Directories skipped when looking for ``Environment(...)`` declarations."""
 
+# The runtimes --runtime can save as a registry's default.
 _REGISTRY_RUNTIMES = ("hud", "modal")
-"""Default runtimes a registry accepts (the platform's ``RequestedRuntimeProvider``)."""
 
 
 def _dockerignore_re(pattern: str) -> re.Pattern[str]:
@@ -229,15 +229,12 @@ async def deploy_command(
         help="Skip confirmation prompts (required in non-interactive terminals).",
     ),
 ) -> Any:
-    """Deploy HUD environment to the platform.
+    """Build an environment on the HUD platform and stream the build logs.
 
-    Accepts a directory or an env.py file. The environment name comes from the
-    ``Environment(...)`` declaration in code; pass ``--name`` when the tree
-    declares more than one. A file supplies the declaration by itself while its
-    parent directory is still the uploaded tree, so a nested source tree with
-    its own declaration cannot make the name ambiguous. Streams the remote
-    build. Compose and other run settings belong in ``--runtime-config`` or on
-    the task, not inferred from filenames.
+    DIRECTORY is an environment directory or an env.py file. The name comes from
+    the Environment(...) declaration; pass --name when the tree declares more than
+    one. For a file, only its own declarations count and its parent directory is
+    uploaded. Set Compose and other run settings with --runtime-config.
 
     [not dim]Examples:
         hud deploy

@@ -1,8 +1,8 @@
 """A served workspace, reached the way an agent reaches it: over its ``ssh/2`` binding.
 
 ``shell`` serves ``env.workspace(root, ...)`` on loopback and yields the
-:class:`~hud.environment.Workspace` it attached (for what the environment itself
-does with it: verifier runs, launches) with an SSH client on its published binding.
+``Workspace`` it attached (for what the environment itself does with it: verifier
+runs, launches) with an SSH client on its published binding.
 
 Rows marked ``SANDBOX`` need Linux, root and bubblewrap; they run in the sandbox
 lane (``-m "e2e and sandbox"``), where every session runs in the bubblewrap

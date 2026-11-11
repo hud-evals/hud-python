@@ -217,7 +217,6 @@ async def start_from_an_mcp_tool(ambient: str, start: Callable[[], Awaitable[Non
 
     @server.tool
     async def start_rollout() -> str:
-        """Start the rollout."""
         await start()
         return "started"
 

@@ -1,4 +1,4 @@
-"""Shared env helpers: JSON-RPC framing + byte splicing for the control channel."""
+"""JSON-RPC framing and byte splicing shared by the environment's servers and clients."""
 
 from __future__ import annotations
 

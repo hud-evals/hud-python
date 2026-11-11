@@ -31,7 +31,7 @@ def _check(libc: ctypes.CDLL, result: int) -> None:
 
 
 def _join(libc: ctypes.CDLL, descriptors: dict[str, int]) -> None:
-    """Join every namespace in *descriptors*; the user namespace as nsenter does.
+    """Join every namespace in ``descriptors``, the user namespace the way nsenter does.
 
     Joined first, a user namespace leaves no capability to join the others;
     joined last, it may be the one that grants them. So join the others

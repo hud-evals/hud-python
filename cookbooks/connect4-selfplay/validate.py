@@ -5,13 +5,13 @@ the model is actually getting stronger. This script fixes the opponent to a
 static model and measures win rate — if training is working, win rate vs the
 same opponent should climb over time.
 
-Default opponent: Qwen3 (separate Tinker-hosted model, never changes with RL steps).
-You can swap in any gateway model slug with --opponent.
+Default opponent: ``Qwen/Qwen3.5-4B``, a fixed model that RL steps never change.
+Swap in any gateway model slug with ``--opponent``.
 
 Usage:
     uv run python cookbooks/connect4-selfplay/validate.py
     uv run python cookbooks/connect4-selfplay/validate.py --games 20
-    uv run python cookbooks/connect4-selfplay/validate.py --opponent Qwen3 --games 10
+    uv run python cookbooks/connect4-selfplay/validate.py --opponent Qwen/Qwen3.5-4B --games 10
 """
 
 from __future__ import annotations

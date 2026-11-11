@@ -23,7 +23,7 @@ SECONDARY = "rgb(108,113,196)"
 
 
 class Symbols:
-    """Unicode symbols for consistent CLI output with default colors."""
+    """Rich-markup glyphs shared across CLI output."""
 
     ITEM = f"[{GOLD}]•[/{GOLD}]"
 
@@ -39,13 +39,11 @@ class HUDConsole:
         self._logger = logger or logging.getLogger()
 
     def header(self, title: str, icon: str = "🚀", stderr: bool = True) -> None:
-        """Print a header panel with gold border."""
         console = self._stderr_console if stderr else self._stdout_console
         label = f"{icon} [bold]{title}[/bold]" if icon else f"[bold]{title}[/bold]"
         console.print(Panel.fit(label, border_style=GOLD))
 
     def section_title(self, title: str, stderr: bool = True) -> None:
-        """Print a section title in gold."""
         console = self._stderr_console if stderr else self._stdout_console
         console.print(f"\n[bold {GOLD}]{title}[/bold {GOLD}]")
 
@@ -86,7 +84,6 @@ class HUDConsole:
         )
 
     def link(self, url: str, stderr: bool = True) -> None:
-        """Print an underlined link."""
         console = self._stderr_console if stderr else self._stdout_console
         console.print(f"[{SECONDARY} underline]{escape(url)}[/{SECONDARY} underline]")
 

@@ -124,7 +124,7 @@ def _check_groups(
 
 
 class TrainingClient(BaseTrainingClient):
-    """Train an LLM model through the HUD training service.
+    """Train a model through the HUD training service.
 
     As in Tinker, ``forward_backward`` accumulates gradients and ``optim_step`` applies
     them; ``step`` chains the two.
@@ -247,7 +247,10 @@ class TrainingClient(BaseTrainingClient):
         num_substeps: int = 1,
         weight_decay: float = 0.0,
     ) -> OptimStepResult:
-        """Convenience: one ``forward_backward`` followed by one ``optim_step``."""
+        """Run one ``forward_backward`` then one ``optim_step``.
+
+        The ``forward_backward`` metrics are discarded.
+        """
         await self.forward_backward(
             trajectories,
             loss_fn=loss_fn,

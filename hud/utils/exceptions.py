@@ -24,7 +24,7 @@ from hud.utils.hints import (
 
 
 class HudException(Exception):
-    """Base exception class for all HUD SDK errors."""
+    """Base class for HUD API and credential errors."""
 
     default_hints: ClassVar[list[Hint]] = []
 
@@ -122,7 +122,7 @@ class HudRequestError(HudException):
 
     @classmethod
     def from_httpx_error(cls, error: httpx2.HTTPStatusError, context: str = "") -> Self:
-        """Build from an httpx status error, prefixed with ``context``; also logs the error."""
+        """Build from an httpx status error, the message prefixed with ``context``."""
         response = error.response
         status_code = response.status_code
         response_text = response.text

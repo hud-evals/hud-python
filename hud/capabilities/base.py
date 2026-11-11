@@ -38,10 +38,10 @@ def normalize_url(url: str, *, default_scheme: str, default_port: int | None) ->
 
 @dataclass(frozen=True, slots=True)
 class Capability:
-    """``(name, protocol, url, params)`` — concrete wire data for one slice of env access.
+    """One way into an environment: a named server speaking ``protocol`` at ``url``.
 
-    ``url`` is the real address of a server speaking ``protocol``: what the manifest
-    publishes and a ``CapabilityClient`` dials.
+    ``url`` is the real address of that server: what the manifest publishes and a
+    ``CapabilityClient`` dials. ``params`` carry protocol-specific settings.
     """
 
     name: str
@@ -204,7 +204,7 @@ class Capability:
 
 
 class CapabilityClient(ABC):
-    """Live connection to a Capability. Subclasses expose protocol-native methods."""
+    """Live connection to a ``Capability``; subclasses expose protocol-native methods."""
 
     protocol: ClassVar[str]
 

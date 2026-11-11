@@ -55,7 +55,7 @@ class Orientation:
 
 
 def euler_columns(names: list[str]) -> list[int]:
-    """Columns of *names* that hold euler angles (radians), in any euler block."""
+    """Columns of ``names`` that hold euler angles (radians), in any euler block."""
     blocks = (_block_at(names, index) for index in range(len(names)))
     return sorted({c for block in blocks if block and block.kind == "euler" for c in block.columns})
 

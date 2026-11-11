@@ -65,7 +65,7 @@ async def _connect_capability(
 
 
 class HudProtocolError(RuntimeError):
-    """Raised when the env returns a JSON-RPC error frame."""
+    """A JSON-RPC error from the env, or a reply that breaks the protocol."""
 
     def __init__(self, code: int, message: str) -> None:
         super().__init__(f"hud rpc error {code}: {message}")
@@ -245,7 +245,7 @@ class HudClient:
     async def bind(
         self, connections: Sequence[Connection], *, reply_timeout: float | None = None
     ) -> None:
-        """Bind *connections* to this session in place of the ones it holds."""
+        """Bind ``connections`` to this session in place of the ones it holds."""
         assert self.manifest is not None
         params: dict[str, Any] = {"session_id": self.manifest.session_id}
         if self.workspace_routes:
@@ -308,7 +308,8 @@ class HudClient:
         return cap_client
 
     async def list_tasks(self) -> list[dict[str, Any]]:
-        """Return ``[{id, description}, ...]`` for every registered task."""
+        """The env's task manifest entries: ``id``, ``description``, the ``args`` schema,
+        and ``input``/``returns`` schemas when declared."""
         result = await self._call("tasks.list", {})
         tasks = result.get("tasks") or []
         if not isinstance(tasks, list):

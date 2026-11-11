@@ -1,4 +1,4 @@
-"""Make the environment project importable when tests run from the SDK root."""
+"""Make the environment importable from the SDK root and provide sandboxed workspaces for grading tests."""
 
 import os
 import sys

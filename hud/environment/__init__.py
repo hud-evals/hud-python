@@ -1,18 +1,9 @@
-"""HUD environment authoring: declarations and the wire protocol that serves them.
+"""HUD environment authoring: workspaces, mounts, typed answers, and ``load_environment``.
 
-``Environment`` (exported from ``hud``) is the declaration
-(capabilities + tasks behind the wire protocol); this package exports its
-building blocks (``Workspace``, ``Mount``, ``Answer``) and
-``load_environment``, which resolves an env reference (source path, or dotted
-module attr/factory); ``server`` is the serving entry point
-substrates run.
-How a substrate comes up — placement — belongs to the eval engine: see
-``hud.runtime`` (``Runtime``, the ``Provider``
-contract, ``LocalRuntime``, ``DockerRuntime``, ``HUDRuntime``).
-
-The env-side robot runtime (bridges, action providers, sim runners, contract
-tooling, recording glue) lives in ``hud.environment.robot``; import it
-directly — it pulls optional dependencies (numpy/msgpack, the ``robot`` extra).
+``Environment`` itself is exported from ``hud``; ``hud.environment.server`` is the
+serving entry point substrates run. The robot runtime (``RobotBridge``,
+``RobotEndpoint``, ``DirectControl``, ``wrap``) lives in ``hud.environment.robot``;
+import it directly, since it needs the ``robot`` extra.
 """
 
 from __future__ import annotations
@@ -35,13 +26,11 @@ def load_environment(
 ) -> Environment:
     """Resolve an environment reference to the one ``Environment`` it names.
 
-    A source path (``.py`` file or directory) is scanned for ``Environment``
-    instances and environments bound to exported tasks; *name* selects among
-    them, matching the module attribute or ``Environment.name``.
-    A dotted importable module reads attribute *name*
-    (default ``env``): an ``Environment`` directly, or a factory called with
-    *args* to build one — how programmatic envs (integrations, adapted
-    images) are served without a source file. Raises when nothing resolves.
+    A source path (a ``.py`` file or directory) is scanned for ``Environment``
+    instances and for environments bound to exported tasks; ``name`` selects among
+    them by module attribute or ``Environment.name``. A dotted module name reads
+    attribute ``name`` (default ``env``): an ``Environment``, or a factory called
+    with ``args``. Raises when nothing resolves.
     """
     # Three forms of reference, decided by what the target *is* rather than by
     # importability — every directory in the working tree is an importable

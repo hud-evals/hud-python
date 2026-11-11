@@ -146,7 +146,6 @@ class RFBClient(CapabilityClient):
         return client
 
     async def _reconnect(self) -> None:
-        """Tear down the current VNC session and open a fresh one."""
         LOGGER.info("RFB stream desynced; reconnecting to %s", self.capability.url)
         await self.close()
         self._session = await _open(self.capability)
@@ -244,7 +243,6 @@ class RFBClient(CapabilityClient):
         self._pointer()
 
     def button_up(self, button: int) -> None:
-        """Release pointer button ``button``."""
         self._buttons &= ~(1 << button)
         self._pointer()
 
@@ -275,7 +273,6 @@ class RFBClient(CapabilityClient):
         self._key(_KEYSYMS[key], down=True)
 
     def key_up(self, key: str) -> None:
-        """Release ``key``."""
         self._key(_KEYSYMS[key], down=False)
 
     @contextlib.contextmanager

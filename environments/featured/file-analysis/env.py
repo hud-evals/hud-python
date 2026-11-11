@@ -1,16 +1,11 @@
-"""Minimal environment showing what argument hints do.
+"""File analysis: the agent reads staged files and writes a report graded against weighted criteria.
 
-Three of this template's arguments carry an ``x-hud-hint`` in their JSON
-Schema, which is all it takes for the console to edit them with purpose-built
-controls instead of JSON boxes:
-
-- ``prompt`` -> a text box
-- ``attachments`` -> a picker over the team's data files, with upload
-- ``criteria`` -> a table of grading rows
-
-The environment then does the ordinary work: it pulls the referenced data files
-into the solver's workspace, hands the agent the prompt, and passes the criteria
-straight to ``LLMJudgeGrader``, whose input shape they are.
+The templates' ``prompt``, ``attachments`` and ``criteria`` arguments carry an
+``x-hud-hint`` in their JSON Schema, so the console edits them as a text box, a
+picker over the team's data files, and a table of grading rows. The environment
+pulls the referenced data files into the solver's workspace, and
+``LLMJudgeGrader`` grades the saved report against the criteria.
+``reconcile_supplier_payments`` also stages the bundled ``fixtures/`` records.
 """
 
 from __future__ import annotations

@@ -3,14 +3,14 @@
 6x7 board, drop-a-disc moves, decisive outcomes (draws are rare on a full
 42-cell board), so the reward keeps real spread as the policy improves.
 
-Starting order is randomized per task (seed % 2 decides who drops first). The
+Starting order is randomized per task (``seed % 2`` decides who drops first). The
 outer agent plays one side for a full game; the inner model (same slug) plays
 the other. Reward is always from the outer agent's perspective: win=1.0,
 draw=0.5, loss=0.0.
 
-Inner-model token data (prompt_token_ids, token_ids, logprobs) is captured from
-the HUD gateway response and stored in EvaluationResult.info so the training
-loop can train on both sides of each game at once.
+Inner-model token data (``prompt_token_ids``, ``token_ids``, ``logprobs``) is
+captured from the HUD gateway response and stored in ``EvaluationResult.info``, so
+the training loop can train on both sides of each game at once.
 """
 
 from __future__ import annotations

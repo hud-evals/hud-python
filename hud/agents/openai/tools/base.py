@@ -1,4 +1,4 @@
-"""OpenAI tool spec + result formatting."""
+"""Responses API tool-result formatting."""
 
 from __future__ import annotations
 

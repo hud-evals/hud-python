@@ -95,8 +95,11 @@ def probe_success(info: Any, *, num_envs: int = 1) -> NDArray[Any] | None:
 
 
 def _with_final_obs(obs: Any, info: Any, done: NDArray[Any]) -> Any:
-    """*obs* with each finished env's row replaced by its last frame from ``info["final_obs"]``:
-    an obs-shaped batch (Isaac Lab) or one obs per env (gymnasium same-step autoreset)."""
+    """``obs`` with each finished env's row replaced by its last frame from ``info["final_obs"]``.
+
+    ``final_obs`` is an obs-shaped batch (Isaac Lab) or one obs per env (gymnasium
+    same-step autoreset).
+    """
     final = info.get("final_obs") if isinstance(info, dict) else None
     if final is None or not done.any():
         return obs
@@ -288,7 +291,7 @@ class GymBridge(RobotBridge):
         await super().start()
 
     def reset(self, **task_args: Any) -> str:
-        """Build/reset the gym env on the sim thread (base claim hops here)."""
+        """Build or reset the gym env on the sim thread; return the task prompt."""
         # Defaults from env.gym(..., num_envs=N) fill in when the task omits them.
         merged = {**self._defaults, **task_args}
         build = {k: v for k, v in merged.items() if k in self._build_params}

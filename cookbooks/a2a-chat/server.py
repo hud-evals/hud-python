@@ -184,10 +184,11 @@ def serve(task: Task, agent: Agent, *, runtime: Provider, host: str, port: int) 
 
 
 def main() -> None:
-    """Serve `HUD_TASK` (default: this directory's chat_env.py) over A2A.
+    """Serve ``HUD_TASK`` (default ``chat_full``) over A2A.
 
-    Placement: `HUD_ENV_URL` attaches each turn to an already-served control
-    channel; otherwise every turn spawns `HUD_SOURCE` locally.
+    ``HUD_ENV_URL`` attaches each turn to an already-served control channel;
+    otherwise every turn spawns ``HUD_SOURCE`` (default: this directory's
+    ``chat_env.py``) locally.
     """
     task_id = os.getenv("HUD_TASK", "chat_full").strip()
     env_name = os.getenv("HUD_ENV", "chat").strip()

@@ -74,7 +74,11 @@ def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
 
 
 def queue_span(span: dict[str, Any]) -> None:
-    """Export a span: to the local file exporter (if set) and the HUD backend."""
+    """Write a span to the local span dir (if set) and queue it for the HUD backend.
+
+    Spans without a ``hud.task_run_id`` attribute are dropped. The backend upload needs
+    telemetry enabled and an API key.
+    """
     from hud.settings import settings
 
     if not span.get("attributes", {}).get(TASK_RUN_ID_ATTRIBUTE):

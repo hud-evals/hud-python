@@ -75,7 +75,7 @@ def gym_env(factory: Callable[..., Any], **defaults: Any) -> Environment:
 
 
 async def step_once(env: Environment, action: list[float]) -> tuple[dict[str, Any], Any]:
-    """Start ``episode`` on *env*, play *action* once, and grade: the stepped observation
+    """Start ``episode`` on ``env``, play ``action`` once, and grade: the stepped observation
     and the grade."""
     async with (
         LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,

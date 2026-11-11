@@ -494,9 +494,7 @@ def qa_command(
         None, "--level", case_sensitive=False, help="Only the checks that run at this level."
     ),
 ) -> Any:
-    """List QA checks, or run and inspect them.
-
-    Without a verb, lists the checks. ``hud qa`` is an alias for ``hud qa list``.
+    """List QA checks (same as hud qa list), or run and inspect them with a subcommand.
 
     [not dim]Examples:
         hud qa

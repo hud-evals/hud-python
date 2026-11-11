@@ -79,7 +79,7 @@ async def init_and_evaluate(
     uv: Uv,
     wheel: Path,
 ) -> dict[str, Any]:
-    """Generate *template*, list its tasks, pass its own checks, and evaluate its first task."""
+    """Generate ``template``, list its tasks, pass its own checks, and evaluate its first task."""
     project = generate(hud, template, directory, wheel=wheel, uv=uv, environment=environment)
     listed = project.hud("task", "list", "--json")
     assert listed.exit_code == 0, listed

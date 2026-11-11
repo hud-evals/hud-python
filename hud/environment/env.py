@@ -1,8 +1,9 @@
-"""Environment: declarative capabilities + tasks behind the HUD wire protocol.
+"""Environment: capabilities and task templates behind the HUD wire protocol.
 
-Pure declaration — what exists (identity, capabilities, registered tasks) and
-the daemon hooks a substrate runs around serving. The protocol server that
-puts a declaration on the wire lives in ``hud.environment.server``.
+It declares what exists (identity, capabilities, registered templates) and the
+daemon hooks a substrate runs around serving, and holds the per-session
+connections and routes the server binds. ``hud.environment.server`` puts it on
+the wire.
 """
 
 from __future__ import annotations
@@ -59,11 +60,10 @@ class Answer(BaseModel, Generic[T]):
 
 
 def _args_json_schema(sig: inspect.Signature) -> dict[str, Any]:
-    """JSON Schema for a task function's parameters — the task's args contract.
+    """JSON Schema for a task function's parameters, published in the ``tasks.list`` manifest.
 
-    Published in the manifest (`tasks.list`) so the platform can validate
-    stored task args at sync time and render argument forms. Unannotated params
-    accept anything.
+    The platform validates stored task args against it and renders argument forms
+    from it. Unannotated parameters accept anything.
     """
     fields: dict[str, Any] = {}
     allow_additional = False
@@ -83,14 +83,9 @@ def _args_json_schema(sig: inspect.Signature) -> dict[str, Any]:
 
 
 class _TaskFactory(Generic[P]):
-    """Registered ``@env.template`` callable that creates concrete public tasks.
+    """A registered ``@env.template``: calling it with args binds a runnable ``Task``.
 
-    The server side (``TaskRunner``) drives its
-    async-generator ``func`` (prompt → score); calling this object with args
-    binds a runnable ``Task``:
-
-        task = fix_bug(difficulty=3)  # -> Task
-        job = await task.run(agent)
+    ``TaskRunner`` drives its async-generator ``func`` when the env is served.
     """
 
     def __init__(
@@ -199,15 +194,13 @@ class Environment:
         input: Any = None,
         returns: Any = None,
     ) -> Callable[[_TaskFunction[P]], _TaskFactory[P]]:
-        """Register a **task template** — an async generator that mints tasks.
+        """Register an async-generator task template; calling it with args returns a ``Task``.
 
-        The generator yields a prompt, then — once the answer is sent back — a
-        reward. Either form works (both normalized to the wire protocol):
-        friendly (``yield prompt`` → ``yield reward``) or explicit (``yield
-        {"prompt": ...}`` → ``yield {"score": ...}``). ``input``/``returns``
-        optionally declare the agent's I/O types (surfaced in the manifest as
-        JSON schemas). The decorated callable is a *template*: calling it with
-        args returns a concrete ``Task`` row.
+        The generator yields a prompt, then, once the answer is sent back, a reward:
+        ``yield prompt`` then ``yield reward``, or ``yield {"prompt": ...}`` then
+        ``yield {"score": ...}``. ``input`` and ``returns`` declare the agent's input
+        and answer types, published in the manifest as JSON schemas; ``returns`` also
+        parses the answer into ``Answer[T]``.
         """
 
         def decorate(func: _TaskFunction[P]) -> _TaskFactory[P]:
@@ -452,8 +445,7 @@ class Environment:
                 raise
 
     def release_session(self, session: str) -> None:
-        """Release what a control session bound: its relays close and its routes go
-        once no other session holds them, so a later session inherits neither."""
+        """Release a control session's relays, and its routes once no other session holds them."""
         for name, bound in reversed(list(self._connections.items())):
             if bound.session == session:
                 bound.release()

@@ -1,4 +1,4 @@
-"""ClaudeComputerTool: Claude's native ``computer_use`` schema, driven over RFB/VNC."""
+"""Claude's ``computer`` tool, executed over RFB."""
 
 from __future__ import annotations
 
@@ -158,7 +158,11 @@ _COMPUTER_INPUT_SCHEMA: dict[str, Any] = {
 
 
 class ClaudeComputerTool(RFBTool):
-    """Claude's native ``computer_use`` schema, executed over an RFB capability."""
+    """Claude's ``computer`` tool over RFB.
+
+    The computer toolset for current Claude models, a versioned native schema for the older
+    models in ``CLAUDE_COMPUTER_SPECS``, and a function schema for other models.
+    """
 
     name = "computer"
 

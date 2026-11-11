@@ -1,4 +1,4 @@
-"""The `move_to` / `wait` tools on the absolute contract, driven by a fake arm (no MuJoCo)."""
+"""The ``move_to`` / ``wait`` tools on the absolute contract, driven by a fake arm (no MuJoCo)."""
 
 from __future__ import annotations
 

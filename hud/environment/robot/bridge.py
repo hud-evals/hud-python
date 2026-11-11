@@ -415,8 +415,10 @@ class RobotBridge(ABC):
             self._action_event.set()
 
     async def serve_control(self, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:
-        """Serve the JSON-RPC side channel: ``capabilities`` / ``url`` / ``contract`` /
-        ``reset`` / ``result``."""
+        """Serve the JSON-RPC side channel.
+
+        Its methods are ``capabilities``, ``url``, ``contract``, ``reset`` and ``result``.
+        """
         return await asyncio.start_server(self._handle_control, host, port)
 
     async def _handle_control(

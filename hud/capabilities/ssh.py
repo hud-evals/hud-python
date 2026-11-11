@@ -30,7 +30,7 @@ class SSHConnectionError(ConnectionError):
 
 
 class SSHClient(CapabilityClient):
-    """Thin asyncssh wrapper. Exposes the raw connection via ``conn``.
+    """asyncssh session that reconnects a dropped transport; ``conn`` is the raw connection.
 
     File helpers pass paths verbatim, so a path names what it would in a shell
     command: relative paths resolve against the session cwd.
@@ -84,7 +84,11 @@ class SSHClient(CapabilityClient):
         *,
         connections: Sequence[Connection] = (),
     ) -> asyncssh.SSHClientProcess[bytes]:
-        """Open a binary exec channel after restoring a dropped SSH transport."""
+        """Open a binary exec channel, reconnecting a dropped transport first.
+
+        ``connections`` are exposed to this process only. The capability must set
+        ``process_connections``, and each connection's ``capability`` must name this one.
+        """
         if connections and self.capability.params.get("process_connections") is not True:
             raise ValueError("SSH capability does not support process-bound connections")
         capability_refs = {
@@ -280,11 +284,9 @@ def _is_closed(conn: asyncssh.SSHClientConnection) -> bool:
 
 
 def _powershell(script: str) -> str:
-    """Wrap a script as ``-EncodedCommand``, which leaves no quotes to mangle.
+    """Wrap a script as ``-EncodedCommand``.
 
-    The built-in Windows workspace splits exec commands with
-    ``shlex.split(posix=False)`` and ``subprocess`` re-quotes them, so a
-    ``-Command "..."`` script would arrive as a string literal.
+    No command-line splitting or re-quoting on the way to PowerShell can alter it.
     """
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     return f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"

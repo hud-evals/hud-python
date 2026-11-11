@@ -83,7 +83,10 @@ _TEXT_EDITOR_INPUT_SCHEMA: dict[str, Any] = {
 
 
 class ClaudeBashTool(SSHTool):
-    """Claude's native ``bash_20250124`` schema, executed over SSH."""
+    """Claude's ``bash`` tool over SSH.
+
+    The native ``bash_20250124`` schema for Claude models, a function schema otherwise.
+    """
 
     name = "bash"
 
@@ -131,7 +134,10 @@ class ClaudeBashTool(SSHTool):
 
 
 class ClaudeTextEditorTool(SSHTool):
-    """Claude's native ``text_editor_20250728`` schema, executed over SSH."""
+    """Claude's ``str_replace_based_edit_tool`` over SSH.
+
+    The native ``text_editor_20250728`` schema for Claude models, a function schema otherwise.
+    """
 
     name = "str_replace_based_edit_tool"
 

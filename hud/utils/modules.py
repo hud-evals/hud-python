@@ -114,8 +114,7 @@ def iter_modules(path: str | Path) -> Iterator[ModuleType]:
     """Import a ``.py`` file, or every ``.py`` in a directory, yielding modules.
 
     A file import fails loudly. Directory scans skip packaging/test scaffolding
-    and files that fail to import (a source dir may contain unrelated files).
-    Directory imports use Python's module cache.
+    and files that raise ``ImportError``, and use Python's module cache.
     """
     target = Path(path).resolve()
     if target.is_file():

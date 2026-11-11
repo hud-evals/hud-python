@@ -44,7 +44,7 @@ def workspace_task(
     ``files`` seed the workspace before each run; the task scores 1.0 when
     ``passes(root)`` holds ``settle`` seconds after the agent finishes, long
     enough for anything the agent left running to show. ``workspace`` goes to
-    :meth:`Environment.workspace` (``env=`` for the shell environment).
+    ``Environment.workspace`` (``env=`` for the shell environment).
     """
     env = Environment("ws", capabilities=capabilities)
     env.workspace(root, guest_path=str(root), **workspace)

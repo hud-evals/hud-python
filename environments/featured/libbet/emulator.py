@@ -77,12 +77,10 @@ class GameBoyEmulator:
         self.render = render
 
     def load_game(self, rom_path: str, boot_frames: int = 600) -> None:
-        """Boot a ROM and run past the BIOS/boot logo.
+        """Boot the ``.gb``/``.gbc`` ROM at ``rom_path`` and run past the boot logo.
 
-        Args:
-            rom_path: Path to a ``.gb`` / ``.gbc`` ROM.
-            boot_frames: Number of frames to tick after boot to clear the
-                Nintendo logo (and, for some titles, the attract loop).
+        ``boot_frames`` is how many frames to tick after boot to clear the Nintendo logo
+        (and, for some titles, the attract loop).
         """
         if not os.path.exists(rom_path):
             raise FileNotFoundError(

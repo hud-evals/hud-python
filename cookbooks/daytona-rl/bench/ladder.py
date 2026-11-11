@@ -4,12 +4,12 @@
     uv run ladder.py --mode rollout       # real Claude rollouts (costs tokens)
     uv run ladder.py --levels 1,8         # override the ladder
 
-Infra mode measures the thing we actually doubt: how sandbox spin-up and the
-one-SSH-connection-per-sandbox transport (runtime.py:780) behave under fan-out.
-Each worker acquires a sandbox, opens a *fresh control connection* to it, does
-one real handshake (`client.manifest()`), and exits — no agent, no tokens.
+Infra mode measures how sandbox spin-up and the one-SSH-connection-per-sandbox
+transport behave under fan-out. Each worker acquires a sandbox, opens a fresh
+control connection, reads ``client.manifest`` (one real handshake), and exits; no
+agent, no tokens.
 
-Writes ladder.csv and ladder.svg.
+Writes ``ladder.csv`` and ``ladder.svg``.
 """
 
 from __future__ import annotations

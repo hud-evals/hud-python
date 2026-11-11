@@ -3,7 +3,7 @@
 One HTTP and WebSocket server answers for the API, telemetry, inference gateway,
 runtime gateway, training service and web app, each under its own path prefix.
 Every request is recorded. Tests declare the replies they need with
-:meth:`FakeServices.route`; anything undeclared answers 404, so a test notices
+``FakeServices.route``; anything undeclared answers 404, so a test notices
 traffic it did not expect.
 
 The server runs on its own thread and event loop, so the SDK reaches it the
@@ -161,7 +161,7 @@ class FakeServices:
         """Answer ``method path`` on ``service``.
 
         ``replies`` are served in order and the last repeats; ``handler`` computes a
-        reply from each :class:`Request`; with neither, the route answers ``json``
+        reply from each ``Request``; with neither, the route answers ``json``
         with ``status``. Later routes win over earlier ones, so a test can override
         a fixture's default.
         """

@@ -9,7 +9,7 @@ Layout (mirrors VideoGameBench's ``configs/<game>/`` so its assets drop in):
       preload.txt      # menu/difficulty setup script (optional)
       ram_map.py       # read(emulator)->dict + reward(values)->float (optional)
 
-``config.yaml`` ``scoring`` is a list of scorer specs, e.g.::
+``config.yaml``'s ``scoring`` is a list of scorer specs, for example:
 
     scoring:
       - type: exploration
@@ -54,8 +54,8 @@ DEFAULT_PROMPT = (
 
 @dataclass
 class GameSpec:
-    """Everything needed to boot and score one game. ``new_board`` builds a
-    fresh :class:`ScoreBoard` so re-running the scenario resets scoring state."""
+    """Everything needed to boot and score one game; ``new_board`` builds a fresh
+    ``ScoreBoard`` so each run starts with clean scoring state."""
 
     name: str
     rom_path: str

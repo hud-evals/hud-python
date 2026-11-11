@@ -1,4 +1,4 @@
-"""``hud eval``: run real rollouts of a taskset with a scripted model, where each row says."""
+"""``hud eval``: real rollouts of a taskset with a scripted model, placed where each row says."""
 
 from __future__ import annotations
 
@@ -185,9 +185,9 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     config: str,
     expected: dict[str, Any],
 ) -> None:
-    """Provider SDKs read their own ``*_BASE_URL``, which here points at the scripted model."""
     signed_in.route("api", "GET", "/v2/models", json={"items": [GLM], "total": 1})
     (hud.cwd / ".hud_eval.toml").write_text(config)
+    # Provider SDKs read their own ``*_BASE_URL``; point them at the scripted model.
     hud_env.set(
         OPENAI_BASE_URL=gateway.url,
         ANTHROPIC_BASE_URL=gateway.url,

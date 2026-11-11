@@ -19,7 +19,10 @@ _TRACE_ID_META_KEY = "hud/trace-id"
 
 
 def get_mcp_trace_id() -> str | None:
-    """Get the trace ID propagated with the active inbound MCP request."""
+    """The trace id on the active inbound MCP request, or ``None``.
+
+    The ``hud/trace-id`` request meta key wins over the ``trace-id`` HTTP header.
+    """
     from fastmcp.server.dependencies import get_context, get_http_headers
 
     try:
@@ -67,7 +70,7 @@ class MCPClient(CapabilityClient):
         return cls(cap, client, stack)
 
     async def list_tools(self) -> list[Tool]:
-        """Tools advertised by the MCP server (initialize already complete)."""
+        """Tools advertised by the MCP server."""
         tools = await self._client.list_tools()
         return [Tool.model_validate(tool.model_dump(mode="json", by_alias=True)) for tool in tools]
 

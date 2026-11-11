@@ -84,7 +84,7 @@ async def _docker_deadline(
 
 
 async def _wait_serving(container: str, name: str, seconds: float) -> None:
-    """Return once the env in *container* announces its port; raise if it exits first."""
+    """Return once the env in ``container`` announces its port; raise if it exits first."""
     logs = await create_process_group_exec(
         "docker",
         "logs",
@@ -143,9 +143,11 @@ async def _docker_output(*args: str) -> AsyncGenerator[None]:
 class DockerRuntime:
     """Start a HUD environment from an image or a Docker Compose file.
 
-    An image is started with ``docker run``. A Compose file is started unchanged
-    except for a small provider override that publishes the ``main`` service's
-    control-channel port and applies HUD's nested-workspace security profile.
+    An image is started with ``docker run``. A Compose file is normalized (interpolated
+    against its project ``.env``) and started with a provider override: the control-channel
+    port is published on the service that owns ``main``'s network, and ``main`` gets HUD's
+    nested-workspace security profile, session volumes, bind mounts, env vars, resource
+    limits and, with ``service_access``, the Docker socket.
     """
 
     def __init__(

@@ -96,7 +96,7 @@ async def serving(sim: Sim) -> AsyncGenerator[tuple[int, RobotEndpoint, Capabili
 
 
 def slot_env(port: int) -> Environment:
-    """An env whose ``episode`` claims a slot of the sim on *port* and grades it."""
+    """An env whose ``episode`` claims a slot of the sim on ``port`` and grades it."""
     env = Environment("slots")
     endpoint = RobotEndpoint.remote("127.0.0.1", port).attach(env)
 

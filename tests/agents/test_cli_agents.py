@@ -71,15 +71,15 @@ async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_cli(
 async def test_the_agent_timeout_ends_the_run_and_the_cli_while_the_workspace_lives_on(
     agent_type: str, cli: str, tmp_path: Path
 ) -> None:
-    """A pooled workspace outlives the run, so only the agent can end the CLI it started.
-    The timeout is a margin over a whole run on this machine just now, so the CLI has
-    started before it lands."""
+    """A pooled workspace outlives the run, so only the agent can end the CLI it started."""
     kind = AgentType(agent_type).cls
     stub = clis.Stub(tmp_path / "ws" / ".stub", cli, stdout=clis.answer(cli, "done"))
     stub.install()
     started = time.monotonic()
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
     await task().run(kind())
+    # One second plus twice a measured full run, so the hung CLI has started before the
+    # timeout lands.
     timeout = 1.0 + 2 * (time.monotonic() - started)
     hung = clis.Stub(
         tmp_path / "ws" / ".stub",

@@ -97,10 +97,11 @@ class FileTrackingClient:
 
 @asynccontextmanager
 async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
-    """Stream workspace diffs and final artifacts during the block.
+    """Stream workspace diffs and final artifacts as spans during the block.
 
-    The env's ``filetracking`` binding is the opt-in, so ``track_files=True``
-    streams even when ``HUD_FILE_TRACKING_ENABLED`` is off.
+    A no-op unless telemetry is on and the env binds ``filetracking``; the binding
+    alone opts in, whatever ``HUD_FILE_TRACKING_ENABLED`` says. A failed tracking
+    setup logs a warning and the block runs untracked.
     """
     from hud.settings import settings
 

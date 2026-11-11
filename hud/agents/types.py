@@ -261,7 +261,7 @@ class Usage(BaseModel):
 
 
 class AgentStep(Step[StepSource]):
-    """The model's turn: one LLM call."""
+    """One model output: a ``ToolAgent``'s LLM call, or one streamed item from a CLI agent."""
 
     source: StepSource = "agent"
 

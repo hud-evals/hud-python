@@ -1,8 +1,8 @@
 """Stand-ins for the ``claude`` and ``codex`` executables a CLI agent launches.
 
 Each records what the agent handed it (argv, the variables it set, stdin, ``.hud_*``
-files), prints the JSONL stream the real CLI would, and exits as told. :func:`answer`,
-:func:`shell`, :func:`fault` and :func:`prompt` speak either CLI's stream by its
+files), prints the JSONL stream the real CLI would, and exits as told. ``answer``,
+``shell``, ``fault`` and ``prompt`` speak either CLI's stream by its
 executable name.
 """
 

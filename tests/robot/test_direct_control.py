@@ -1,7 +1,7 @@
 """Direct control: a tool-calling agent drives a robot sim through MCP motion tools.
 
 Each case is a whole rollout: an in-process bridge serving the ``openpi/0`` wire,
-an env publishing it plus :class:`DirectControl`'s ``mcp`` capability, and a
+an env publishing it plus ``DirectControl``'s ``mcp`` capability, and a
 scripted agent calling the tools through the tunneled manifest binding, graded
 by the sim. Every case asserts what the sim was commanded and where the arm ended
 up, with the tools and verdicts the model saw.

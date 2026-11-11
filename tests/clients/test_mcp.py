@@ -36,7 +36,6 @@ def tools() -> FastMCP:
 
     @server.tool
     def add(a: int, b: int) -> int:
-        """Add two numbers."""
         return a + b
 
     @server.tool

@@ -1,7 +1,7 @@
 """Serving an environment: the entry points that own a process, and the lifecycle they run.
 
 Both entry points, ``python -m hud.environment.server`` (what images run) and
-``hud serve``, are rows of each table. They resolve a reference in a fixture tree
+``hud serve``, are rows of the table below. They resolve a reference in a fixture tree
 whose environments leave a ``stopped-<name>`` marker from a shutdown hook, print
 ``HUD_SERVE_PORT=<port>`` once the control channel accepts, and stop cleanly on a
 signal, even with a session still grading.

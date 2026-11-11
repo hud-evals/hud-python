@@ -774,7 +774,7 @@ class _FileTrackingHandler:
 async def serve_file_tracking(
     tracker: FileTracker, host: str = "127.0.0.1", port: int = 0
 ) -> asyncio.Server:
-    """Bind a ``filetracking/1`` server for ``tracker``. Caller drives the port."""
+    """Bind a ``filetracking/1`` server for ``tracker``; the caller closes it."""
     handler = _FileTrackingHandler(tracker)
     server = await asyncio.start_server(handler.handle, host, port)
     sock = server.sockets[0].getsockname()

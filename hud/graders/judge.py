@@ -149,7 +149,10 @@ def _parse_verdict(content: str) -> tuple[bool, str]:
 
 
 def _rubric_value(subscores: list[SubScore]) -> float:
-    """Aggregate criterion verdicts into a rubric score."""
+    """Met positive weight minus met penalty weight, over total positive weight, in ``[0, 1]``.
+
+    With only penalties, ``1.0`` minus the met share of penalty weight.
+    """
     total_positive = sum(max(0.0, subscore.weight) for subscore in subscores)
     total_negative = sum(abs(subscore.weight) for subscore in subscores if subscore.weight < 0)
     weighted_sum = sum(subscore.value * subscore.weight for subscore in subscores)

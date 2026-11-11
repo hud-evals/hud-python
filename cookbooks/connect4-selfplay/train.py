@@ -14,8 +14,8 @@ Setup:
     hud models fork Qwen/Qwen3.5-4B --name c4-selfplay
 
 Run:
-    python train.py --model c4-selfplay
-    python train.py --model c4-selfplay --steps 20 --lr 1e-5 --validate-every 5
+    uv run python cookbooks/connect4-selfplay/train.py --model c4-selfplay
+    uv run python cookbooks/connect4-selfplay/train.py --model c4-selfplay --steps 20 --lr 1e-5 --validate-every 5
 """
 
 from __future__ import annotations

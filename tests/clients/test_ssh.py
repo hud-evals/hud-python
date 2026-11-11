@@ -1,7 +1,7 @@
 """``SSHClient`` against a real ``env.workspace`` served on loopback.
 
 Most tests connect to the workspace's ``ssh`` binding through
-:func:`tests.clients.conftest.relayed`, which can sever the connection
+``relayed`` (``tests/clients/conftest.py``), which can sever the connection
 mid-command, refuse reconnects, or stall a handshake.
 """
 
