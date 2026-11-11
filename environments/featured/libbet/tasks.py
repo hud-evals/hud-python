@@ -2,8 +2,7 @@
 
 from hud import Taskset
 
-# `env` is re-exported so `hud eval tasks.py` can serve the Environment from here.
-from env import env, play_game  # noqa: F401
+from env import play_game
 
 explore = play_game(game="test", max_steps=40)
 explore.slug = "libbet-explore-40"

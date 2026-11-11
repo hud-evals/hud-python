@@ -71,14 +71,6 @@ class HudProtocolError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class ServerInfo:
-    """Identity of the env serving this session (for compatibility / observability)."""
-
-    name: str
-    version: str
-
-
-@dataclass(frozen=True, slots=True)
 class Manifest:
     """Env welcome frame returned by ``HudClient.hello()``.
 
@@ -87,8 +79,6 @@ class Manifest:
     """
 
     session_id: str
-    protocol_version: str  # e.g. "hud/1.0"
-    server_info: ServerInfo
     bindings: list[Capability]
 
 
@@ -97,8 +87,6 @@ class HudClient:
 
     Prefer ``connect``, which yields a client with ``manifest`` set and closes it.
     """
-
-    PROTOCOL_VERSION = "hud/1.0"
 
     def __init__(
         self,
@@ -167,17 +155,8 @@ class HudClient:
         result = await self._call("hello", params)
         self.workspace_routes = tuple(workspace_routes)
         self.connections = ()
-        env = result["env"]
         bindings = [Capability.from_manifest(binding) for binding in result["bindings"]]
-        self.manifest = Manifest(
-            session_id=result["session_id"],
-            protocol_version=self.PROTOCOL_VERSION,
-            server_info=ServerInfo(
-                name=env["name"],
-                version=env["version"],
-            ),
-            bindings=bindings,
-        )
+        self.manifest = Manifest(session_id=result["session_id"], bindings=bindings)
         self._routes.clear()
         if self._endpoint is not None:
             host, port = self._endpoint
