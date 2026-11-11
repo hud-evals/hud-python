@@ -20,9 +20,9 @@ async def test_a_screenshot_after_the_connection_drops_reconnects() -> None:
     ):
         client = await RFBClient.connect(capability)
         try:
-            await client.screenshot_png()
+            await client.screenshot()
             flaky.sever()
-            data, _ = await client.screenshot_png()
+            data, _ = await client.screenshot()
         finally:
             await client.close()
 

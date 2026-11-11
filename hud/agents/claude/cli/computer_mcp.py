@@ -148,7 +148,7 @@ async def bridge_computer_mcp(
         local = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
-            "hud.agents.claude.sdk.computer_mcp",
+            "hud.agents.claude.cli.computer_mcp",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

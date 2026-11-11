@@ -361,7 +361,7 @@ class ClaudeComputerTool(RFBTool):
             x0, y0, x1, y1 = (int(v) for v in region_seq)
         except (TypeError, ValueError):
             return tool_err("region must contain 4 integers")
-        screenshot, _ = await self.client.screenshot_png("image/png")
+        screenshot, _ = await self.client.screenshot("image/png")
         cropped, mime_type = _crop_png(screenshot, (x0, y0, x1, y1), self.screenshot_encoding)
         return ToolResult(
             content=[

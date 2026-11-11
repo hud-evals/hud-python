@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from typing import TypeAlias
 
     from hud.agents.claude.agent import ClaudeAgent
-    from hud.agents.claude.sdk.agent import ClaudeCLIAgent
+    from hud.agents.claude.cli.agent import ClaudeCLIAgent
     from hud.agents.codex.agent import CodexCLIAgent
     from hud.agents.gemini.agent import GeminiAgent
     from hud.agents.openai.agent import OpenAIAgent
@@ -53,7 +53,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
 _LAZY_EXPORTS = {
     "ClaudeAgent": "hud.agents.claude.agent",
-    "ClaudeCLIAgent": "hud.agents.claude.sdk.agent",
+    "ClaudeCLIAgent": "hud.agents.claude.cli.agent",
     "CodexCLIAgent": "hud.agents.codex.agent",
     "GeminiAgent": "hud.agents.gemini.agent",
     "OpenAIAgent": "hud.agents.openai.agent",

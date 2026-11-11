@@ -66,7 +66,7 @@ class AgentType(StrEnum):
 
                 return ClaudeAgent
             case AgentType.CLAUDE_CLI:
-                from hud.agents.claude.sdk.agent import ClaudeCLIAgent
+                from hud.agents.claude.cli.agent import ClaudeCLIAgent
 
                 return ClaudeCLIAgent
             case AgentType.CODEX_CLI:

@@ -10,10 +10,10 @@ import pytest
 from anthropic import AsyncAnthropicBedrock
 from fastmcp import FastMCP
 
-from hud.agents import ClaudeAgent, GeminiAgent
+from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent
 from hud.agents.claude.tools.hosted import ClaudeToolSearchTool
 from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
-from hud.agents.types import ClaudeConfig, ClaudeEffort, GeminiConfig
+from hud.agents.types import ClaudeConfig, ClaudeEffort, GeminiConfig, OpenAIConfig
 from hud.capabilities import Capability
 from hud.types import AgentType
 from tests.fixtures.asgi import mcp_server
@@ -23,8 +23,10 @@ from tests.fixtures.screen import fake_screen
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
+    from hud.agents.base import Agent
     from tests.conftest import HudEnv
     from tests.fixtures.models import Models
 
@@ -285,25 +287,28 @@ async def test_a_tuple_argument_is_offered_with_every_type_its_positions_take(
 
 
 @pytest.mark.parametrize(
-    ("agent_type", "model", "search"),
+    "agent",
     [
-        ("claude", CLAUDE_MODEL, ClaudeToolSearchTool(threshold=1)),
-        ("openai", "gpt-5.6", OpenAIToolSearchTool(threshold=1)),
+        lambda: ClaudeAgent(
+            ClaudeConfig(model=CLAUDE_MODEL, hosted_tools=[ClaudeToolSearchTool(threshold=1)])
+        ),
+        lambda: OpenAIAgent(
+            OpenAIConfig(model="gpt-5.6", hosted_tools=[OpenAIToolSearchTool(threshold=1)])
+        ),
     ],
     ids=["claude", "openai"],
 )
 async def test_tools_past_the_search_threshold_are_deferred_to_tool_search(
-    agent_type: str, model: str, search: object, models: Models, tmp_path: Path
+    agent: Callable[[], Agent], models: Models, tmp_path: Path
 ) -> None:
     notes = FastMCP("notes")
     notes.tool(name="first", description="First.")(lambda: "1")
     notes.tool(name="second", description="Second.")(lambda: "2")
     models.script([Turn(text="done")])
-    kind = AgentType(agent_type).cls
 
     async with mcp_server(notes, name="notes") as tools:
         task = workspace_task(tmp_path / "ws", capabilities=(tools,))
-        await task().run(kind(kind.config_cls(model=model, hosted_tools=[search])))
+        await task().run(agent())
 
     (request,) = models.requests()
     deferred = {

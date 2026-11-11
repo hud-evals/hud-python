@@ -94,7 +94,7 @@ class RFBTool(AgentTool[RFBClient]):
 
     async def screenshot(self) -> ToolResult:
         """Capture a screenshot and return it as a single ``ImageContent`` block."""
-        screenshot, mime_type = await self.client.screenshot_png(self.screenshot_encoding)
+        screenshot, mime_type = await self.client.screenshot(self.screenshot_encoding)
         return ToolResult(
             content=[
                 ImageContent(

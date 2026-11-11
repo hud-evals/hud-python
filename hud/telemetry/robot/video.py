@@ -42,14 +42,14 @@ class SegmentEncoder:
         segment_seconds: float = 2.0,
         crf: int = 23,  # x264 quality: 0=best, 51=worst
         max_queued_frames: int = 16,
-        lossless: bool = False,  # block on a full queue instead of dropping frames
+        keep_every_frame: bool = False,
     ) -> None:
         self.camera = camera
         self.fps = max(1, int(fps))
         self._on_segment = on_segment
         self._gop = max(1, round(self.fps * segment_seconds))  # keyframe interval, in frames
         self._crf = int(crf)
-        self._lossless = lossless
+        self._keep_every_frame = keep_every_frame
         self._queue: queue.Queue[NDArray[Any] | None] = queue.Queue(max_queued_frames)
         # Box-assembly state, touched only on the encoder thread.
         self._buf = bytearray()
@@ -63,9 +63,10 @@ class SegmentEncoder:
         self._thread.start()
 
     def submit(self, frame: NDArray[Any]) -> None:
-        """Hand one frame to the encoder; drops it under backpressure unless ``lossless``."""
+        """Hand one frame to the encoder; under backpressure it is dropped, unless
+        ``keep_every_frame``, which waits."""
         frame = np.array(frame, copy=True)
-        if self._lossless:
+        if self._keep_every_frame:
             self._put_blocking(frame)
             return
         with contextlib.suppress(queue.Full):
@@ -73,7 +74,7 @@ class SegmentEncoder:
 
     def finalize(self, timeout: float = 15.0) -> None:
         """Flush the tail fragment and stop the encoder thread (best-effort)."""
-        if self._lossless:
+        if self._keep_every_frame:
             self._put_blocking(None)
         else:
             try:
@@ -140,7 +141,7 @@ class SegmentEncoder:
 
     def _run(self) -> None:
         container = stream = None
-        n = 0  # counts frames actually encoded
+        encoded = 0
         try:
             av: Any = importlib.import_module("av")
 
@@ -172,10 +173,10 @@ class SegmentEncoder:
                     }
                 assert stream is not None
                 vframe = av.VideoFrame.from_ndarray(frame, format="rgb24")
-                vframe.pts, vframe.time_base = n, Fraction(1, self.fps)
+                vframe.pts, vframe.time_base = encoded, Fraction(1, self.fps)
                 for packet in stream.encode(vframe):
                     container.mux(packet)
-                n += 1
+                encoded += 1
         except Exception:  # isolate encoder faults from the rollout
             logger.warning("video encode failed (camera %s)", self.camera, exc_info=True)
         finally:
@@ -192,7 +193,7 @@ class VideoStreamer:
     The spans carry ``trace_id`` explicitly, since encoder threads lack the trace context.
     """
 
-    def __init__(self, *, fps: int, trace_id: str | None, lossless: bool = False) -> None:
+    def __init__(self, *, fps: int, trace_id: str | None, keep_every_frame: bool = False) -> None:
         try:
             importlib.import_module("av")
         except Exception as exc:
@@ -201,13 +202,13 @@ class VideoStreamer:
             ) from exc
         self._fps = fps
         self._trace_id = trace_id
-        self._lossless = lossless
+        self._keep_every_frame = keep_every_frame
         self._encoders: dict[str, SegmentEncoder] = {}
 
     def record(self, obs: dict[str, Any]) -> None:
         """Submit each camera frame in ``obs["data"]`` to that camera's encoder.
 
-        Blocks only when ``lossless``. Only ``HxWxC`` arrays with 1, 3 or 4 channels
+        Blocks only when ``keep_every_frame``. Only ``HxWxC`` arrays with 1, 3 or 4 channels
         count as frames, so batched ``[num_envs, dim]`` state is skipped.
         """
         for name, arr in obs.get("data", {}).items():
@@ -239,7 +240,7 @@ class VideoStreamer:
                 },
             ).emit(trace_id=trace_id)
 
-        return SegmentEncoder(camera, on_segment, fps=fps, lossless=self._lossless)
+        return SegmentEncoder(camera, on_segment, fps=fps, keep_every_frame=self._keep_every_frame)
 
 
 def _to_rgb24(arr: NDArray[Any]) -> NDArray[np.uint8] | None:

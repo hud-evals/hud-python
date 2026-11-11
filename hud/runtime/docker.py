@@ -257,7 +257,7 @@ class DockerRuntime:
                         "--detach",
                         "--build",
                         "--remove-orphans",
-                        deadline=startup_timeout,
+                        timeout_s=startup_timeout,
                     )
                     if awaited := compose_config.healthchecked_services():
                         await _docker(
@@ -268,7 +268,7 @@ class DockerRuntime:
                             "--no-recreate",
                             "--no-build",
                             *awaited,
-                            deadline=(
+                            timeout_s=(
                                 None if startup_deadline is None else startup_deadline - loop.time()
                             ),
                         )
@@ -330,7 +330,7 @@ class DockerRuntime:
         session_volume = f"hud-runtime-sessions-{uuid.uuid4().hex}"
         container = ""
         try:
-            await _docker("volume", "create", session_volume, deadline=startup_timeout)
+            await _docker("volume", "create", session_volume, timeout_s=startup_timeout)
             out, _ = await _docker(
                 "run",
                 "--detach",
@@ -346,7 +346,7 @@ class DockerRuntime:
                 "--publish",
                 f"127.0.0.1::{self.port}",
                 config.image,
-                deadline=startup_timeout,
+                timeout_s=startup_timeout,
             )
             container = out.strip()
             teardown = ("rm", "--force", container)

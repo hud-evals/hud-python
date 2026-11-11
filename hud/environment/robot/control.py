@@ -569,7 +569,7 @@ class DirectControl:
                         fps=max(1, round(self._rate)),
                         obs_space=self._obs_space,
                         sim_clock=True,
-                        lossless_video=True,
+                        keep_every_video_frame=True,
                     )
                     await self._record(obs)  # the episode's opening scene
                 rows, goal, named = (
@@ -680,7 +680,7 @@ class DirectControl:
     async def _record_tick(self, recorder: TraceRecorder, obs: dict[str, Any]) -> None:
         async with self._recording:
             if recorder is self._recorder:  # the episode may have ended while waiting
-                # Off the loop: a lossless encoder blocks while its queue drains.
+                # Off the loop: an encoder that keeps every frame blocks while its queue drains.
                 await asyncio.to_thread(recorder.record_observation, obs["data"], tick=self._tick)
                 self._tick += 1
 

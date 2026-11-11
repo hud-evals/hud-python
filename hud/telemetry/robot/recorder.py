@@ -55,7 +55,7 @@ class TraceRecorder:
     ``state_names``/``action_names`` are the contract-free fallback labels.
     ``sim_clock`` stamps each observation at ``tick / fps`` after the first, so the
     viewer's clock follows the video even when the sim idles between ticks.
-    ``lossless_video`` makes ``record_observation`` wait for the encoder instead of
+    ``keep_every_video_frame`` makes ``record_observation`` wait for the encoder instead of
     dropping frames, so video frame N is always tick N.
     """
 
@@ -70,7 +70,7 @@ class TraceRecorder:
         action_names: list[str] | None = None,
         state_names: dict[str, list[str]] | None = None,
         sim_clock: bool = False,
-        lossless_video: bool = False,
+        keep_every_video_frame: bool = False,
     ) -> None:
         assert trace_id or run, "TraceRecorder needs a trace_id or a run"
         self._run = run
@@ -82,7 +82,7 @@ class TraceRecorder:
         self._state_names = state_names or {}
         self._sim_clock = sim_clock
         self._clock_start: datetime | None = None
-        self._lossless_video = lossless_video
+        self._keep_every_video_frame = keep_every_video_frame
         self.reward = 0.0
         self._video: VideoStreamer | None = None  # lazy, one per trace
         # A Run records its own prompt step, so only the bare-trace path emits one.
@@ -130,7 +130,7 @@ class TraceRecorder:
         self._emit(step)
         if self._video is None:
             self._video = VideoStreamer(
-                fps=self._fps, trace_id=self.trace_id, lossless=self._lossless_video
+                fps=self._fps, trace_id=self.trace_id, keep_every_frame=self._keep_every_video_frame
             )
         self._video.record({"data": data})
 

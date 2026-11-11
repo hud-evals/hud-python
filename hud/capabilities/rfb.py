@@ -204,7 +204,7 @@ class RFBClient(CapabilityClient):
             case _:
                 raise ConnectionError(f"the VNC server sent unknown message type {kind}")
 
-    async def screenshot_png(
+    async def screenshot(
         self,
         encoding: ScreenshotEncoding | ScreenshotMimeType = "image/png",
     ) -> tuple[bytes, ScreenshotMimeType]:
