@@ -14,6 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx2
 from websockets.exceptions import ConnectionClosedOK
 
+from hud.eval.job import reporting_enabled
 from hud.eval.run import Run, rollout
 from hud.telemetry.context import get_current_trace_id
 
@@ -153,7 +154,8 @@ class HUDRuntime:
     async def _create_runtime_session(self, runtime_url: str, api_key: str, task: Task) -> str:
         payload: dict[str, Any] = {"environment": task.env}
         trace_id = get_current_trace_id()
-        if trace_id is not None:
+        # Only a trace the platform has registered can own the session.
+        if trace_id is not None and reporting_enabled():
             with contextlib.suppress(ValueError):
                 payload["trace_id"] = str(uuid.UUID(trace_id))
         async with httpx2.AsyncClient(timeout=30.0) as client:

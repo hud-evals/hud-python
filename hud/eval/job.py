@@ -82,7 +82,8 @@ class Job:
         return out
 
 
-def _reporting_enabled() -> bool:
+def reporting_enabled() -> bool:
+    """Whether runs are reported to the platform: telemetry is on and an API key is set."""
     from hud.settings import settings
 
     return bool(settings.telemetry_enabled and settings.api_key)
@@ -95,7 +96,7 @@ async def job_enter(job_id: str, *, name: str, group: int, taskset_id: str | Non
     ``Taskset.from_api``); ``None`` for ad-hoc/local tasksets. The platform
     creates no taskset on its own — remote rollouts carry the scenario inline.
     """
-    if not _reporting_enabled():
+    if not reporting_enabled():
         return
     await _report(
         f"/trace/job/{job_id}/enter",
@@ -122,7 +123,7 @@ async def trace_enter(
     known); the platform resolves it and attributes the trace immediately on
     enter.
     """
-    if not _reporting_enabled():
+    if not reporting_enabled():
         return
     await _report(
         f"/trace/{trace_id}/enter",
@@ -138,7 +139,7 @@ async def trace_enter(
 
 async def trace_exit(run: Run) -> None:
     """Report one finished rollout (status / reward / error / metadata) from its ``Run``."""
-    if not _reporting_enabled() or run.trace.trace_id is None:
+    if not reporting_enabled() or run.trace.trace_id is None:
         return
     await _report(
         f"/trace/{run.trace.trace_id}/exit",
