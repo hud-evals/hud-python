@@ -29,21 +29,13 @@ _UPLOAD_RETRY_DELAY = 0.5
 _HTTP_TIMEOUT = httpx2.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0)
 
 
-class _Marker(threading.Event):
-    """An in-band flush (or stop) marker the intake worker honors in queue order."""
-
-    def __init__(self, *, stop: bool = False) -> None:
-        super().__init__()
-        self.stop = stop
-
-
 _Upload = tuple[str, list[dict[str, Any]], str, str]
 
 # The intake worker owns all batching state; it and the upload workers are
 # daemons that run for the process's life. ``_lock`` guards the thread/client
 # handles and ``_pending``, the count of uploads queued but not yet finished.
-_queue: queue.Queue[dict[str, Any] | _Marker] = queue.Queue()
-_uploads: queue.Queue[_Upload | None] = queue.Queue()
+_queue: queue.Queue[dict[str, Any] | threading.Event] = queue.Queue()
+_uploads: queue.Queue[_Upload] = queue.Queue()
 _pending = 0
 _worker: threading.Thread | None = None
 _uploaders: list[threading.Thread] = []
@@ -101,35 +93,12 @@ def flush(timeout: float = 10.0) -> bool:
         return True
 
     deadline = time.monotonic() + timeout
-    marker = _Marker()
+    marker = threading.Event()
     _queue.put(marker)
     if not marker.wait(max(0.0, deadline - time.monotonic())):
         return False
     with _idle:
         return _idle.wait_for(lambda: _pending == 0, max(0.0, deadline - time.monotonic()))
-
-
-def reset(timeout: float = 30.0) -> None:
-    """Flush, stop the workers, and close the HTTP client (tests/benchmarks)."""
-    global _worker, _client, _pending
-    with _lock:
-        worker, uploaders, client = _worker, list(_uploaders), _client
-    if worker is not None and worker.is_alive():
-        flush(timeout)
-        stop = _Marker(stop=True)
-        _queue.put(stop)
-        stop.wait(timeout)
-        worker.join(timeout)
-    for _ in uploaders:
-        _uploads.put(None)
-    for uploader in uploaders:
-        uploader.join(timeout)
-    if client is not None:
-        client.close()
-    with _lock:
-        _worker = _client = None
-        _uploaders.clear()
-        _pending = 0
 
 
 def _ensure_worker() -> None:
@@ -166,11 +135,9 @@ def _run() -> None:
         except queue.Empty:
             batch, nbytes = _dispatch(batch)
             continue
-        if isinstance(item, _Marker):
+        if isinstance(item, threading.Event):
             batch, nbytes = _dispatch(batch)
             item.set()
-            if item.stop:
-                return
             continue
         batch.append(item)
         nbytes += _span_bytes(item)
@@ -198,7 +165,8 @@ def _dispatch(batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
 
 def _upload_loop() -> None:
     global _pending
-    while (upload := _uploads.get()) is not None:
+    while True:
+        upload = _uploads.get()
         try:
             _do_upload(*upload)
         finally:

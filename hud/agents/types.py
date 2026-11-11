@@ -25,13 +25,11 @@ from hud.capabilities.rfb import (
 )
 from hud.types import (
     ROBOT_STEP_SCHEMA,
-    ContentBlock,
     ImageContent,
     RobotStepSource,
     Step,
     StepSource,
     StopCondition,
-    TextContent,
     ToolCall,
     ToolResult,
     Trace,
@@ -410,23 +408,3 @@ class VideoSegmentStep(Step[RobotStepSource]):
     fps: int = 10
     # A ``video`` content block (base64 MP4), which ingest offloads to S3 like an image.
     segment: dict[str, Any] = Field(default_factory=dict[str, Any])
-
-
-class ContentResult(BaseModel):
-    """A custom MCP tool's common text-plus-image return."""
-
-    output: str | None = None
-    error: str | None = None
-    base64_image: str | None = None
-
-    def to_content_blocks(self) -> list[ContentBlock]:
-        """Text block(s) for ``output``/``error``, plus an image for ``base64_image``."""
-        blocks: list[ContentBlock] = []
-        if self.output:
-            blocks.append(TextContent(type="text", text=self.output))
-        if self.error:
-            blocks.append(TextContent(type="text", text=self.error))
-        if self.base64_image:
-            mime = "image/jpeg" if self.base64_image.startswith("/9j/") else "image/png"
-            blocks.append(ImageContent(type="image", data=self.base64_image, mimeType=mime))
-        return blocks

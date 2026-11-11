@@ -5,20 +5,19 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from hud.agents.tools.base import result_text
+from hud.agents.tools.base import AgentToolSpec, result_text
 from hud.agents.tools.ssh import SSHTool
 from hud.types import TextContent, ToolResult
 
-from .base import GeminiToolSpec
 from .coding import required_str, tool_decl
 
 if TYPE_CHECKING:
     from google.genai import types as genai_types
 
-GEMINI_READ_SPEC = GeminiToolSpec(api_type="read_file", api_name="read_file")
-GEMINI_SEARCH_SPEC = GeminiToolSpec(api_type="grep_search", api_name="grep_search")
-GEMINI_GLOB_SPEC = GeminiToolSpec(api_type="glob", api_name="glob")
-GEMINI_LIST_SPEC = GeminiToolSpec(api_type="list_directory", api_name="list_directory")
+GEMINI_READ_SPEC = AgentToolSpec(api_type="read_file", api_name="read_file")
+GEMINI_SEARCH_SPEC = AgentToolSpec(api_type="grep_search", api_name="grep_search")
+GEMINI_GLOB_SPEC = AgentToolSpec(api_type="glob", api_name="glob")
+GEMINI_LIST_SPEC = AgentToolSpec(api_type="list_directory", api_name="list_directory")
 
 
 class GeminiReadTool(SSHTool):
@@ -35,7 +34,7 @@ class GeminiReadTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_READ_SPEC
 
@@ -74,7 +73,7 @@ class GeminiSearchTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_SEARCH_SPEC
 
@@ -104,7 +103,7 @@ class GeminiGlobTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_GLOB_SPEC
 
@@ -130,7 +129,7 @@ class GeminiListTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_LIST_SPEC
 

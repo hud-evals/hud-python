@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 class _InstrumentedCallable(Protocol):
     _hud_instrumented: bool
-    _hud_original: Callable[..., Any]
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
@@ -234,7 +233,6 @@ def instrument(
         wrapper = async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
         wrapper_state = cast("_InstrumentedCallable", wrapper)
         wrapper_state._hud_instrumented = True
-        wrapper_state._hud_original = func
 
         return wrapper
 

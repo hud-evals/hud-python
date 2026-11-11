@@ -15,14 +15,11 @@ from openai.types.responses import (
 from openai.types.responses.response_input_param import FunctionCallOutput, ResponseInputItemParam
 
 from hud import types
-from hud.agents.tools.base import AgentToolSpec
 
 if TYPE_CHECKING:
     from hud.types import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
-
-OpenAIToolSpec = AgentToolSpec
 
 
 def format_openai_result(call: ToolCall, result: ToolResult) -> ResponseInputItemParam | None:

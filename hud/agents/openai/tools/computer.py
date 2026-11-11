@@ -5,24 +5,16 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from hud.agents.tools.base import tool_err
+from hud.agents.tools.base import AgentToolSpec, tool_err
 from hud.agents.tools.rfb import RFBTool
 from hud.types import ImageContent, TextContent, ToolResult
 
-from .base import OpenAIToolSpec
-
 logger = logging.getLogger(__name__)
 
-OPENAI_COMPUTER_SPEC = OpenAIToolSpec(
+OPENAI_COMPUTER_SPEC = AgentToolSpec(
     api_type="computer",
     api_name="computer",
 )
-
-
-def last_image_data(result: ToolResult) -> str | None:
-    """Base64 data of the most recent screenshot block in a tool result."""
-    image = last_image_content(result)
-    return image.data if image is not None else None
 
 
 def last_image_content(result: ToolResult) -> ImageContent | None:
@@ -73,7 +65,7 @@ class OpenAIComputerTool(RFBTool):
     name = "computer"
 
     @classmethod
-    def default_spec(cls, model: str) -> OpenAIToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return OPENAI_COMPUTER_SPEC
 

@@ -7,16 +7,13 @@ from typing import TYPE_CHECKING, Any, Self
 
 from google.genai import types as genai_types
 
-from hud.agents.tools.base import tool_err
+from hud.agents.tools.base import AgentToolSpec, tool_err
 from hud.agents.tools.rfb import RFBTool, keysym
 from hud.agents.types import GeminiConfig
-
-from .base import GeminiToolSpec
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from hud.agents.tools.base import AgentToolSpec
     from hud.agents.types import ToolAgentConfig
     from hud.capabilities.rfb import RFBClient, ScreenshotEncoding
     from hud.types import ToolResult
@@ -50,7 +47,7 @@ PREDEFINED_COMPUTER_USE_FUNCTIONS = (
 
 _MAC_COMMAND = frozenset({"meta", "cmd", "command"})
 
-GEMINI_COMPUTER_SPEC = GeminiToolSpec(
+GEMINI_COMPUTER_SPEC = AgentToolSpec(
     api_type="computer_use",
     api_name="gemini_computer",
 )
@@ -94,7 +91,7 @@ class GeminiComputerTool(RFBTool):
         )
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_COMPUTER_SPEC
 

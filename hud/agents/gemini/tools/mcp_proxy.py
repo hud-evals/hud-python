@@ -4,18 +4,17 @@ from __future__ import annotations
 
 from google.genai import types as genai_types
 
+from hud.agents.tools.base import AgentToolSpec
 from hud.agents.tools.mcp import MCPTool
-
-from .base import GeminiToolSpec
 
 
 class GeminiMCPProxyTool(MCPTool):
     """Expose one discovered MCP tool as a Gemini FunctionDeclaration."""
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
-        return GeminiToolSpec(api_type="function", api_name="function")
+        return AgentToolSpec(api_type="function", api_name="function")
 
     def to_params(self) -> genai_types.Tool:
         if self.mcp_tool.description is None:

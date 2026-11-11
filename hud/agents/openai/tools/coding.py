@@ -5,13 +5,12 @@ from __future__ import annotations
 import shlex
 from typing import Any, cast
 
+from hud.agents.tools.base import AgentToolSpec
 from hud.agents.tools.ssh import MAX_SHELL_OUTPUT_LENGTH, SSHTool
 from hud.types import TextContent, ToolResult
 from hud.utils.process import bound_shell_output
 
-from .base import OpenAIToolSpec
-
-OPENAI_SHELL_SPEC = OpenAIToolSpec(
+OPENAI_SHELL_SPEC = AgentToolSpec(
     api_type="shell",
     api_name="shell",
 )
@@ -21,7 +20,7 @@ class OpenAIShellTool(SSHTool):
     name = "shell"
 
     @classmethod
-    def default_spec(cls, model: str) -> OpenAIToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return OPENAI_SHELL_SPEC
 

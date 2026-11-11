@@ -111,23 +111,6 @@ class AgentType(StrEnum):
             case AgentType.OPENAI_COMPATIBLE:
                 return OpenAIChatConfig
 
-    @property
-    def gateway_provider(self) -> str:
-        """Default provider client used when this agent type is a gateway shortcut."""
-        match self:
-            case AgentType.CLAUDE:
-                return "anthropic"
-            case AgentType.CLAUDE_CLI:
-                return "anthropic"
-            case AgentType.CODEX_CLI:
-                return "openai"
-            case AgentType.OPENAI:
-                return "openai"
-            case AgentType.GEMINI:
-                return "gemini"
-            case AgentType.OPENAI_COMPATIBLE:
-                return "openai"
-
     @classmethod
     def of(cls, agent: object) -> AgentType | None:
         """The registered agent type ``agent`` is an instance of, or ``None``.

@@ -26,31 +26,20 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def declare(name: str, variable: str = "env") -> str:
+def declare(name: str) -> str:
     """Source declaring Environment ``name``, whose shutdown hook leaves a marker in cwd."""
     return (
         "from pathlib import Path\n"
         "from hud import Environment\n"
-        f"{variable} = Environment({name!r})\n"
-        f"@{variable}.shutdown\n"
-        f"async def _stopped_{variable}():\n"
+        f"env = Environment({name!r})\n"
+        "@env.shutdown\n"
+        "async def _stopped():\n"
         f"    Path('stopped-{name}').write_text('stopped')\n"
     )
 
 
 TREE = {
     "env.py": declare("from-env-py"),
-    "pkg/__init__.py": (
-        "from pathlib import Path\n"
-        "from hud import Environment\n"
-        "def make_env(name='from-factory'):\n"
-        "    env = Environment(name)\n"
-        "    @env.shutdown\n"
-        "    async def _stopped():\n"
-        "        Path(f'stopped-{name}').write_text('stopped')\n"
-        "    return env\n"
-    ),
-    "multi.py": declare("env-one", "first") + declare("env-two", "second"),
     "stalls.py": declare("stalls")
     + "import asyncio\n"
     + '@env.template(id="stall")\nasync def stall():\n    yield "go"\n'
@@ -64,10 +53,9 @@ HUD_SERVE = [sys.executable, "-m", "hud.cli", "serve", "--port", "0"]
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     root = tmp_path / "project"
+    root.mkdir()
     for name, content in TREE.items():
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
+        (root / name).write_text(content)
     return root
 
 
