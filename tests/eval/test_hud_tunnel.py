@@ -23,26 +23,42 @@ if TYPE_CHECKING:
     from tests.fixtures.services import FakeServices
 
 
-async def test_a_platform_taskset_runs_over_the_tunnel_and_releases_its_session(
+async def test_a_reported_run_opens_its_hosted_environment_under_its_trace(
+    reporting: FakeServices,
+) -> None:
+    row = Task(env="checked", id="check")
+
+    async with LocalRuntime(checked())(row) as served:
+        host_on_runtime(reporting, served.url)
+        job = await Taskset("remote", [row], taskset_id="ts-1").run(ScriptedAgent("yes"))
+
+    (run,) = job.runs
+    assert run.reward == 1.0
+    trace_id = str(uuid.UUID(run.trace_id))
+    (entered,) = reporting.requests("api", "POST", "/v2/trace/{id}/enter")
+    assert entered.path == f"/v2/trace/{run.trace_id}/enter"
+    (created,) = reporting.requests("runtime", "POST", SESSIONS)
+    assert (created.bearer, created.json) == ("k", {"environment": "checked", "trace_id": trace_id})
+    assert {
+        (tunnel.params["id"], tunnel.bearer) for tunnel in reporting.requests("runtime", "WS")
+    } == {("sess-1", "k")}
+    assert len(reporting.requests("runtime", "DELETE", SESSION)) == 1
+
+
+async def test_with_telemetry_off_the_hosted_environment_opens_without_a_trace(
     services: FakeServices, hud_env: HudEnv
 ) -> None:
-    hud_env.set(HUD_API_KEY="k")
+    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="0")
     row = Task(env="checked", id="check")
 
     async with LocalRuntime(checked())(row) as served:
         host_on_runtime(services, served.url)
         job = await Taskset("remote", [row], taskset_id="ts-1").run(ScriptedAgent("yes"))
 
-    (run,) = job.runs
-    assert run.reward == 1.0
+    assert job.runs[0].reward == 1.0
     (created,) = services.requests("runtime", "POST", SESSIONS)
-    assert (created.bearer, created.json) == (
-        "k",
-        {"environment": "checked", "trace_id": str(uuid.UUID(run.trace_id))},
-    )
-    assert {
-        (tunnel.params["id"], tunnel.bearer) for tunnel in services.requests("runtime", "WS")
-    } == {("sess-1", "k")}
+    assert created.json == {"environment": "checked"}
+    assert services.requests("api", "POST", "/v2/trace/{id}/enter") == []
     assert len(services.requests("runtime", "DELETE", SESSION)) == 1
 
 

@@ -31,9 +31,12 @@ Spans also include execution metadata such as step order, timings, status, and e
 uploads require your API key and power the trace viewer.
 
 - **No API key (the default):** spans are not uploaded anywhere.
-- **`HUD_TELEMETRY_ENABLED=0`:** spans are not uploaded. Emitted spans are written to
+- **`HUD_TELEMETRY_ENABLED=0`:** spans are not uploaded, and runs are not registered on
+  the platform, so they do not appear in the trace viewer. Emitted spans are written to
   `~/.hud/spans` so `hud trace` can still read them. Override the directory with
   `HUD_TELEMETRY_LOCAL_DIR`. Disabling uploads also stops workspace file-tracking spans.
+  An environment HUD hosts (`HUDRuntime`) still runs; the platform just does not link it
+  to a run.
 - **`HUD_TELEMETRY_LOCAL_DIR=./spans`:** write spans there even when uploads are on
   (and without an API key). Local writes are best-effort; filesystem errors do not fail
   the evaluation. A project `.env` or the process environment is the right place for a
