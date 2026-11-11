@@ -343,8 +343,7 @@ def usable_bwrap() -> Bubblewrap | None:
 
     _bwrap_usable = "; ".join(failures)
     LOGGER.warning(
-        "bwrap is installed but cannot create an isolated process namespace (%s); "
-        "sessions will run WITHOUT isolation.",
+        "bwrap is installed but cannot sandbox here (%s); sessions will run WITHOUT isolation.",
         _bwrap_usable,
     )
     return None
@@ -824,10 +823,9 @@ class Workspace:
         if self._require_isolation and self._bwrap is None:
             detail = f" Probe failures: {_bwrap_usable}" if isinstance(_bwrap_usable, str) else ""
             raise RuntimeError(
-                "isolation was required but bwrap cannot sandbox here: install "
-                "bubblewrap and use a container runtime that allows unprivileged "
-                "user namespaces. Refusing to serve sessions that would silently "
-                f"run unisolated.{detail}"
+                "isolation was required but bwrap cannot sandbox here: it needs "
+                "bubblewrap installed, unprivileged user namespaces, and a container "
+                f"that is not emulated.{detail}"
             )
         try:
             self._prepare_runtime()

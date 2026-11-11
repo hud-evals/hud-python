@@ -7,12 +7,15 @@ COPY install.sh /tmp/hud-install.sh
 RUN sh /tmp/hud-install.sh --system-only && rm /tmp/hud-install.sh
 
 FROM ${VERIFIER_IMAGE} AS verifier-root
-FROM docker:28.3.3-cli AS docker-cli
-FROM python:3.12-slim AS runtime
+
+# bubblewrap cannot sandbox under emulation, so the controller builds natively.
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:0.8.15 AS uv
+FROM --platform=$BUILDPLATFORM docker:28.3.3-cli AS docker-cli
+FROM --platform=$BUILDPLATFORM python:3.12-slim AS runtime
 
 USER root
 ARG HUD_REQUIREMENT=hud
-COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /controller/bin/uv
+COPY --from=uv /uv /controller/bin/uv
 COPY install.sh /controller/
 COPY packages /controller/packages
 RUN sh /controller/install.sh "${HUD_REQUIREMENT}" && mkdir -p /runtime
