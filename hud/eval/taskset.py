@@ -75,9 +75,7 @@ class Taskset:
         from hud.utils.modules import iter_modules
 
         path = Path(source).resolve()
-        found = {
-            id(task): task for module in iter_modules(path) for task in cls._scan_tasks(module)
-        }
+        found = {id(task): task for module in iter_modules(path) for task in module_tasks(module)}
         return cls(path.stem if path.is_file() else path.name, found.values())
 
     @classmethod
@@ -107,21 +105,6 @@ class Taskset:
             lines = (json.dumps(entry, default=str) for entry in data)
             target.write_text("\n".join(lines) + ("\n" if data else ""), encoding="utf-8")
         return target
-
-    @staticmethod
-    def _scan_tasks(module: Any) -> list[Task]:
-        tasks: list[Task] = []
-        for name in dir(module):
-            if name.startswith("_"):
-                continue
-            value = getattr(module, name, None)
-            if isinstance(value, Task):
-                tasks.append(value)
-            elif isinstance(value, Taskset):
-                tasks.extend(value)
-            elif isinstance(value, list | tuple):
-                tasks.extend(item for item in value if isinstance(item, Task))
-        return tasks
 
     @staticmethod
     def _load_tasks_json(path: Path) -> list[Task]:
@@ -210,7 +193,7 @@ class Taskset:
             for task in self
             if task.verifier is not None and not task.shares_verifier_runtime
         )
-        placeable = [_is_container_row(task) or task._env is not None for task in rows]
+        placeable = [_is_container_row(task) or task.environment is not None for task in rows]
         if not rows or not all(placeable):
             raise ValueError(
                 "no placement: pass runtime= — "
@@ -221,12 +204,12 @@ class Taskset:
         docker = DockerRuntime()
         live: dict[int, LocalRuntime] = {}
         for task in rows:
-            if not _is_container_row(task) and id(task._env) not in live:
-                assert task._env is not None
-                live[id(task._env)] = LocalRuntime(task._env)
+            if not _is_container_row(task) and id(task.environment) not in live:
+                assert task.environment is not None
+                live[id(task.environment)] = LocalRuntime(task.environment)
 
         def place(task: Task) -> AbstractAsyncContextManager[Runtime]:
-            return docker(task) if _is_container_row(task) else live[id(task._env)](task)
+            return docker(task) if _is_container_row(task) else live[id(task.environment)](task)
 
         return place
 
@@ -342,3 +325,20 @@ class Taskset:
         if not await asyncio.to_thread(flush, timeout=120.0):
             logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")
         return job
+
+
+def module_tasks(module: Any) -> list[Task]:
+    """The tasks a module declares: its public ``Task`` globals, ``Taskset`` members, and
+    ``Task`` items of public lists and tuples, ordered by attribute name."""
+    tasks: list[Task] = []
+    for name in dir(module):
+        if name.startswith("_"):
+            continue
+        value = getattr(module, name, None)
+        if isinstance(value, Task):
+            tasks.append(value)
+        elif isinstance(value, Taskset):
+            tasks.extend(value)
+        elif isinstance(value, list | tuple):
+            tasks.extend(item for item in value if isinstance(item, Task))
+    return tasks

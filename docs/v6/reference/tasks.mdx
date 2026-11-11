@@ -79,10 +79,11 @@ Parameterize across difficulties, inputs, or seeds and one definition becomes an
 
 ## Task
 
-A `Task` is a Pydantic model - one portable, validated row of data. It holds no live environment: `env`
-is a *name*, the join key between the row and whatever brings that environment up at run time. So a task
-runs anywhere without an env object in-process - the prompt and reward arrive over the wire from the
-substrate that placement brings up.
+A `Task` is a Pydantic model - one portable, validated row of data. `env` is a *name*, the join key
+between the row and whatever brings that environment up at run time. So a task runs anywhere without an
+env object in-process - the prompt and reward arrive over the wire from the substrate that placement
+brings up. A row a template minted also carries that live `environment`, which placement can serve in-process;
+it is never serialized.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -95,6 +96,7 @@ substrate that placement brings up.
 | `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50, "timeout_seconds": 900}`). |
 | `runtime_config` | `RuntimeConfig \| None` | Per-row launch requirements; the [runtime](/v6/reference/runtime) applies what it supports. |
 | `verifier` | `Task \| None` | Agent-less task whose evaluation replaces the actor task's grade. Nested verifiers are rejected. |
+| `environment` | `Environment \| None` | The live environment whose template minted the row; never serialized. |
 
 When you don't have the template in hand (data pipelines, generated rows), build the model directly -
 the model *is* the row, so `task.model_dump()` and `Task.model_validate(data)` are the whole codec:

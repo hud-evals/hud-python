@@ -10,7 +10,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    PrivateAttr,
     SerializationInfo,
     field_serializer,
     field_validator,
@@ -30,9 +29,7 @@ if TYPE_CHECKING:
 class Task(BaseModel):
     """A task row: env name, task id and arguments, shared across rollouts."""
 
-    model_config = ConfigDict(validate_assignment=True)
-
-    _env: Environment | None = PrivateAttr(default=None)
+    model_config = ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
 
     env: str = Field(min_length=1)
     id: str = Field(min_length=1)
@@ -59,6 +56,9 @@ class Task(BaseModel):
     runtime_config: RuntimeConfig | None = None
     # An agent-less task graded after this one, with the same answer; its grade is the record.
     verifier: Task | None = None
+    # The live Environment whose template minted this row; rows read from files or the
+    # platform have none, and it is never serialized.
+    environment: Environment | None = Field(default=None, exclude=True, repr=False)
 
     @field_validator("verifier")
     @classmethod

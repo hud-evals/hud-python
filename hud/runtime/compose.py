@@ -33,6 +33,9 @@ if TYPE_CHECKING:
 
 
 _COMPOSE_VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Applied to every HUD environment, and default-allow on purpose: Workspace's bwrap
+# sessions need the namespace and mount syscalls; unrelated kernel interfaces stay denied.
+SECCOMP_PROFILE = Path(__file__).parent / "docker-seccomp.json"
 
 
 class ComposeUnboundVariableError(ValueError):

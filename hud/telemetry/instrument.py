@@ -6,7 +6,8 @@ import functools
 import inspect
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast, overload
+import weakref
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
@@ -31,10 +32,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class _InstrumentedCallable(Protocol):
-    _hud_instrumented: bool
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+# The wrappers ``instrument`` made, so instrumenting one again returns it unchanged.
+_INSTRUMENTED: weakref.WeakSet[Callable[..., Any]] = weakref.WeakSet()
 
 
 def _serialize_value(value: Any, max_items: int = 10) -> JsonValue:
@@ -99,7 +98,7 @@ def instrument(
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        if hasattr(func, "_hud_instrumented"):
+        if func in _INSTRUMENTED:
             return func
 
         func_module = getattr(func, "__module__", "unknown")
@@ -231,8 +230,7 @@ def instrument(
                 _emit_span(task_run_id, args, kwargs, start_time, start_perf, result, error)
 
         wrapper = async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
-        wrapper_state = cast("_InstrumentedCallable", wrapper)
-        wrapper_state._hud_instrumented = True
+        _INSTRUMENTED.add(wrapper)
 
         return wrapper
 

@@ -18,7 +18,7 @@ On this page: [What we start with](#what-we-start-with) · [Start point: the sch
 Before anything runs, we start with an `env.py` file with the **environment** declaration and **task
 templates** registered on it. 
 
-An `@env.template()` decorator turns an async generator into a `_TaskFactory` and stores it in
+An `@env.template()` decorator turns an async generator into a `TaskTemplate` and stores it in
 `env.tasks`. The generator body *is* the task: advancing the generator to first `yield` returns (yields) 
 the prompt, the value sent back is
 the answer, second `yield` is the score.
@@ -53,19 +53,22 @@ is exactly the `asend(...)` call.
 def decorate(func):
     if not inspect.isasyncgenfunction(func):
         raise TypeError(...)                 # must be `async def ... yield`
-    task = _TaskFactory(self, id or func.__name__, description, func, ...)
+    task = TaskTemplate(self, id or func.__name__, description, func, ...)
     self.tasks[task_id] = task               # registered on the env
     return task
 ```
 
-Calling the factory runs nothing. It binds the args and returns a `Task` row - the row's `env` is
-the environment's *name* (a string), not a live object.
+Calling the template runs nothing. It binds the args and returns a `Task` row - the row's `env` is
+the environment's *name* (a string). The live object rides along as `environment`, so a local run
+can serve it, and is never serialized.
 
-```python hud/environment/env.py · _TaskFactory.__call__
+```python hud/environment/env.py · TaskTemplate.__call__
 def __call__(self, *args, **kwargs) -> EvalTask:
     from hud.eval.task import Task
     bound = self.sig.bind(*args, **kwargs)
-    return Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
+    return Task(
+        env=self.env.name, id=self.id, args=dict(bound.arguments), environment=self.env
+    )
 ```
 
 A `Taskset` is just a named collection of those rows, indexed by slug:

@@ -68,8 +68,8 @@ def _resolve(
     selected = matches[0]
     if url is not None:
         placement: AbstractAsyncContextManager[Runtime] = nullcontext(Runtime(url))
-    elif selected._env is not None:
-        placement = SubprocessRuntime(selected._env)(selected)
+    elif selected.environment is not None:
+        placement = SubprocessRuntime(selected.environment)(selected)
     else:
         # A data row (JSON/JSONL) names its env; the env source lives beside the file.
         path = Path(source or ".").resolve()

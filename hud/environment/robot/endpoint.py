@@ -14,11 +14,12 @@ from hud.environment.env import current_session_id
 from hud.environment.utils import read_frame, send_frame
 from hud.utils.process import create_process_group_exec
 
-from .bridge import _HUD_STATE, PORT_ANNOUNCEMENT, RobotBridge
+from .bridge import HUD_STATE, PORT_ANNOUNCEMENT, RobotBridge
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from hud.environment.env import Environment
     from hud.environment.robot.control import DirectControl
     from hud.utils.process import ProcessGroup
 
@@ -31,7 +32,7 @@ def _bridge_init_kwargs(bridge: RobotBridge) -> dict[str, Any]:
     base = set(inspect.signature(RobotBridge.__init__).parameters) - {"self"}
     out: dict[str, Any] = {}
     for name, param in inspect.signature(type(bridge).__init__).parameters.items():
-        if name == "self" or name in base or name == _HUD_STATE:
+        if name == "self" or name in base or name == HUD_STATE:
             continue
         if param.kind not in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY):
             continue
@@ -59,7 +60,7 @@ def _bridge_init_kwargs(bridge: RobotBridge) -> dict[str, Any]:
     if bridge.num_envs != 1:
         state["num_envs"] = bridge.num_envs
     if state:
-        out[_HUD_STATE] = state
+        out[HUD_STATE] = state
     return out
 
 
@@ -118,9 +119,9 @@ class RobotEndpoint:
         """An endpoint attached to a sim process something else runs."""
         return cls(host=host, port=port, connect_timeout_s=connect_timeout_s)
 
-    def attach(self, env: Any) -> RobotEndpoint:
-        """Hook slot release into ``env`` task teardown (``env.gym`` does this)."""
-        env._on_task_teardown.append(self.release_claim)
+    def attach(self, env: Environment) -> RobotEndpoint:
+        """Release this endpoint's slot claim whenever a task session on ``env`` ends."""
+        env.task_teardown(self.release_claim)
         return self
 
     def add_direct_control(self, control: DirectControl) -> None:

@@ -53,7 +53,7 @@ def load_environment(
     )
     if path.exists() and not package_attribute:
         # Avoid the environment -> eval -> runtime import cycle.
-        from hud.eval.taskset import Taskset
+        from hud.eval.taskset import module_tasks
 
         if args:
             raise ValueError(f"args= applies to factory targets, not source path {target}")
@@ -65,11 +65,11 @@ def load_environment(
             if isinstance(env, Environment) and (name is None or name in (attr, env.name))
         }
         for module in modules:
-            for task in Taskset._scan_tasks(module):
+            for task in module_tasks(module):
                 for row in (task, task.verifier):
                     if (
                         row is not None
-                        and (env := row._env) is not None
+                        and (env := row.environment) is not None
                         and (name is None or name == env.name)
                     ):
                         matched[id(env)] = env

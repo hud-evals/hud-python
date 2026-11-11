@@ -63,7 +63,11 @@ class RuntimeResources(BaseModel):
     os: str | None = Field(default=None, min_length=1)
     tpu: RuntimeTPU | None = None
 
-    def _require_support(self, provider: str, supported: set[str]) -> None:
+    def require_support(self, provider: str, supported: set[str]) -> None:
+        """Raise naming every resource set here that ``provider`` cannot honor.
+
+        ``supported`` names the fields it can; ``storage_mb`` is never refused.
+        """
         unsupported = self.model_dump(exclude_none=True).keys() - supported
         unsupported.discard("storage_mb")
         if unsupported:

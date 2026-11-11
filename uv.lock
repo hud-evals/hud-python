@@ -1300,7 +1300,7 @@ requires-dist = [
     { name = "asyncssh", specifier = ">=2.23.0,<3" },
     { name = "av", marker = "extra == 'robot'", specifier = ">=12,<20" },
     { name = "cryptography", specifier = ">=43,<51" },
-    { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.100,<1" },
+    { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.231,<1" },
     { name = "fastmcp", specifier = ">=4.1.2,<4.2" },
     { name = "google-genai", specifier = ">=3.0.0,<4" },
     { name = "gymnasium", marker = "extra == 'robot'", specifier = ">=1.0,<2" },

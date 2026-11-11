@@ -548,7 +548,7 @@ async def rollout(
                 if run is not None:
                     run.trace.stop_reason = "timeout"
                 if client is not None:
-                    await client._abandon_task()
+                    await client.abandon_task()
                 if phase not in {"actor cleanup", "cleanup"}:
                     driver.cancel()
                 driver.add_done_callback(_consume_task_result)
@@ -563,7 +563,7 @@ async def rollout(
                     run.trace.stop_reason = "timeout"
         except asyncio.CancelledError as cancel:
             if client is not None:
-                await client._abandon_task()
+                await client.abandon_task()
             driver.cancel()
             driver.add_done_callback(_consume_task_result)
             cancellation = cancel

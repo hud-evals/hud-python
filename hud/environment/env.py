@@ -87,7 +87,7 @@ def _args_json_schema(sig: inspect.Signature) -> dict[str, Any]:
     return schema
 
 
-class _TaskFactory(Generic[P]):
+class TaskTemplate(Generic[P]):
     """A registered ``@env.template``: calling it with args binds a runnable ``Task``.
 
     ``TaskRunner`` drives its async-generator ``func`` when the env is served.
@@ -131,9 +131,7 @@ class _TaskFactory(Generic[P]):
         from hud.eval.task import Task
 
         bound = self.sig.bind(*args, **kwargs)
-        task = Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
-        task._env = self.env
-        return task
+        return Task(env=self.env.name, id=self.id, args=dict(bound.arguments), environment=self.env)
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,12 +170,11 @@ class Environment:
             self.add_capability(entry)
         # Registered task templates by id (the ``@env.template`` registry).
         # Each value mints concrete ``Task`` rows when called.
-        self.tasks: dict[str, _TaskFactory[Any]] = {}
+        self.tasks: dict[str, TaskTemplate[Any]] = {}
         # Backing-daemon lifecycle hooks run once by the serving substrate
         # around its lifetime.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
-        # Per task-session end (cancel / bye / post-grade cleanup).
         self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
         self._workspaces: dict[str, Workspace] = {}
         # Controller routes by the control sessions holding them; ``None`` peer when
@@ -187,7 +184,7 @@ class Environment:
         self._binding = asyncio.Lock()
 
     @property
-    def templates(self) -> dict[str, _TaskFactory[Any]]:
+    def templates(self) -> dict[str, TaskTemplate[Any]]:
         """The registered ``@env.template`` factories by id (alias of ``tasks``)."""
         return self.tasks
 
@@ -198,7 +195,7 @@ class Environment:
         description: str = "",
         input: Any = None,
         returns: Any = None,
-    ) -> Callable[[_TaskFunction[P]], _TaskFactory[P]]:
+    ) -> Callable[[_TaskFunction[P]], TaskTemplate[P]]:
         """Register an async-generator task template; calling it with args returns a ``Task``.
 
         The generator yields a prompt, then, once the answer is sent back, a reward:
@@ -208,7 +205,7 @@ class Environment:
         parses the answer into ``Answer[T]``.
         """
 
-        def decorate(func: _TaskFunction[P]) -> _TaskFactory[P]:
+        def decorate(func: _TaskFunction[P]) -> TaskTemplate[P]:
             if not inspect.isasyncgenfunction(func):
                 raise TypeError(
                     f"@env.template: {getattr(func, '__qualname__', func)} must be an async "
@@ -219,7 +216,7 @@ class Environment:
                 raise ValueError(
                     f"template {task_id!r} already registered on env {self.name!r}",
                 )
-            task = _TaskFactory(
+            task = TaskTemplate(
                 self,
                 task_id,
                 description,
@@ -227,7 +224,7 @@ class Environment:
                 input=input,
                 returns=returns,
             )
-            self.tasks[task_id] = cast("_TaskFactory[Any]", task)
+            self.tasks[task_id] = cast("TaskTemplate[Any]", task)
             return task
 
         return decorate
@@ -246,6 +243,19 @@ class Environment:
         """Register a teardown hook (run in reverse order on stop)."""
         self._on_stop.append(fn)
         return fn
+
+    def task_teardown(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
+        """Register a hook run each time a task session ends: cancelled, closed or graded."""
+        self._on_task_teardown.append(fn)
+        return fn
+
+    async def end_task(self) -> None:
+        """Run every task-teardown hook; one that fails is logged and the rest still run."""
+        for hook in self._on_task_teardown:
+            try:
+                await hook()
+            except Exception:
+                LOGGER.exception("task teardown hook %r failed", hook)
 
     def add_capability(self, cap: Capability) -> None:
         """Publish concrete wire data, replacing any same-named entry.

@@ -16,9 +16,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.utils.process import finish_output, stream_output
 
-from .compose import ComposeConfig
+from .compose import SECCOMP_PROFILE, ComposeConfig
 from .core import Runtime, RuntimeConfig, validate_session_id
-from .docker import _DOCKER_SECCOMP_PROFILE
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -179,7 +178,7 @@ class ModalRuntime:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         resources = config.resources
         if resources is not None:
-            resources._require_support("ModalRuntime", {"cpu", "memory_mb", "gpu"})
+            resources.require_support("ModalRuntime", {"cpu", "memory_mb", "gpu"})
             if resources.gpu is not None and len(resources.gpu.acceptable_types) > 1:
                 raise ValueError("ModalRuntime does not support alternative GPU types")
         project = config.compose
@@ -333,7 +332,7 @@ class ModalRuntime:
                     await sb.filesystem.copy_from_local.aio(files.override, "/hud/override.json")
                     await sb.filesystem.copy_from_local.aio(files.ports, "/hud/ports.yaml")
                     await sb.filesystem.copy_from_local.aio(
-                        _DOCKER_SECCOMP_PROFILE, "/hud/docker-seccomp.json"
+                        SECCOMP_PROFILE, "/hud/docker-seccomp.json"
                     )
                 compose_command = (
                     f"docker compose --project-directory {shlex.quote(project_directory)} "

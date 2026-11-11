@@ -18,7 +18,7 @@ import numpy as np
 from hud.telemetry.robot.recorder import JobRecorder, to_numpy
 from hud.utils.modules import load_module
 
-from .bridge import RobotBridge, serve_bridge
+from .bridge import RobotBridge
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -634,10 +634,8 @@ def main() -> None:
     if args.bridge is not None:  # a sim process that serves more than the wire
         path, _, attr = args.bridge.rpartition(":")
         bridge_cls = getattr(load_module(path), attr)
-    serve_bridge(
-        bridge_cls(target, fps=args.fps, contract=args.contract, **defaults),
-        host=args.host,
-        port=args.port,
+    bridge_cls(target, fps=args.fps, contract=args.contract, **defaults).serve(
+        host=args.host, port=args.port
     )
 
 

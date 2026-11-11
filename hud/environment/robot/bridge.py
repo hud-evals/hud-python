@@ -23,7 +23,7 @@ import websockets.exceptions
 
 # The agent-side openpi codec, shared so both ends of the wire stay in lockstep.
 from hud.capabilities.base import Capability
-from hud.capabilities.robot import _packb, _unpackb
+from hud.capabilities.robot import packb, unpackb
 from hud.environment.utils import error, read_frame, reply, send_frame
 from hud.utils.modules import load_module
 
@@ -38,7 +38,7 @@ PORT_ANNOUNCEMENT = "HUD_SIM_PORT="
 
 # Reserved ``--init`` key for declaration-time attrs (contract / metadata / num_envs)
 # applied after the child ctor — keeps them out of subclass ``__init__`` signatures.
-_HUD_STATE = "__hud_state__"
+HUD_STATE = "__hud_state__"
 
 
 @dataclass
@@ -118,7 +118,7 @@ class RobotBridge(ABC):
 
     Subclasses implement ``reset``, ``step`` and ``get_observation``, set ``contract``
     before serving, and may set ``num_envs`` (default 1). Every hook is sync and runs on
-    the sim thread (the main thread under ``serve_bridge``). Override ``result`` for
+    the sim thread (the main thread under ``serve``). Override ``result`` for
     richer grading, or ``result_slots`` for per-slot scores.
     """
 
@@ -153,7 +153,7 @@ class RobotBridge(ABC):
         self._episode_kwargs: dict[str, Any] = {}
 
     async def _run_on_sim(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Await ``fn`` on the sim thread, or inline before ``serve_bridge`` binds one."""
+        """Await ``fn`` on the sim thread, or inline before ``serve`` binds one."""
         if self._sim_ident is None or threading.get_ident() == self._sim_ident:
             result = fn(*args, **kwargs)
             # Only the inline path can await an ``async def`` hook; the sim thread cannot.
@@ -161,6 +161,75 @@ class RobotBridge(ABC):
         fut: Future[Any] = Future()
         self._sim_q.put((lambda: fn(*args, **kwargs), fut))
         return await asyncio.wrap_future(fut)
+
+    def serve(self, *, host: str = "127.0.0.1", port: int = 0) -> None:
+        """Serve this bridge until SIGTERM or Ctrl-C; it blocks, so call it last.
+
+        Serving runs on a background loop thread while the calling thread becomes the sim
+        thread, running every touch the bridge queues, through teardown too.
+        """
+        # Claim main as the sim thread before serving starts, so no touch slips
+        # through inline on the wrong thread.
+        self._sim_ident = threading.get_ident()
+        loop = asyncio.new_event_loop()
+        done = threading.Event()
+        serve_task: asyncio.Task[Any] | None = None
+
+        async def _serve() -> None:
+            nonlocal serve_task
+            serve_task = asyncio.current_task()
+            await self.start()  # WS bound first, so `url` is concrete before any control call
+            server = await self.serve_control(host, port)
+            print(f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}", flush=True)
+            try:
+                await asyncio.Event().wait()  # until SIGTERM / Ctrl-C cancels
+            finally:
+                server.close()
+                await self.stop()
+
+        def _thread() -> None:
+            asyncio.set_event_loop(loop)
+            try:
+                with contextlib.suppress(asyncio.CancelledError):
+                    loop.run_until_complete(_serve())
+            finally:
+                done.set()
+
+        def _cancel(*_: object) -> None:
+            if serve_task is not None:
+                loop.call_soon_threadsafe(serve_task.cancel)
+
+        with contextlib.suppress(ValueError):  # signals are main-thread-only; tests may not be
+            signal.signal(signal.SIGTERM, _cancel)
+        thread = threading.Thread(target=_thread, name="hud-serve", daemon=True)
+        thread.start()
+
+        # The sim loop: execute queued touches until serving exits, pumping Kit when
+        # Omniverse is loaded (it needs continuous main-thread updates).
+        while not done.is_set():
+            try:
+                # Re-checked every pass: Kit may finish loading after serving starts.
+                kit = sys.modules.get("omni.kit.app")
+                touches: list[tuple[Callable[[], Any], Future[Any]]] = []
+                with contextlib.suppress(queue.Empty):
+                    touches.append(self._sim_q.get(timeout=0.002 if kit else 0.05))
+                    while True:  # drain the backlog behind the first touch
+                        touches.append(self._sim_q.get_nowait())
+                for fn, fut in touches:
+                    if fut.set_running_or_notify_cancel():
+                        try:
+                            result = fn()
+                            if inspect.iscoroutine(result):  # async hook: unawaitable here
+                                result.close()
+                                raise TypeError("bridge hooks must be sync when serving")
+                            fut.set_result(result)
+                        except BaseException as exc:  # propagate to the awaiting caller
+                            fut.set_exception(exc)
+                if kit:
+                    kit.get_app().update()
+            except KeyboardInterrupt:  # Ctrl-C: cancel serving, keep draining through teardown
+                _cancel()
+        thread.join(timeout=30)
 
     async def _claim_episode(self, max_ticks: int | None = None, **kwargs: Any) -> dict[str, Any]:
         """Control-plane reset: global sim reset when all free, else claim a free slot.
@@ -283,12 +352,12 @@ class RobotBridge(ABC):
         slot: _Slot | None = None
         try:
             # ``claim_required`` lets a client without a token fail fast, not await an observation.
-            await ws.send(_packb({**self.metadata, "claim_required": True}))
+            await ws.send(packb({**self.metadata, "claim_required": True}))
             # Bounded, or a client that never claims deadlocks: each side awaits the other.
             raw = await asyncio.wait_for(ws.recv(), timeout=self.step_timeout)
             if isinstance(raw, str):
                 raise RuntimeError(raw)
-            claim = _unpackb(raw)
+            claim = unpackb(raw)
             if not isinstance(claim, dict) or "claim" not in claim:
                 raise ValueError('first frame must be {"claim": <token or None>}')
             slot = self._registry.resolve(claim["claim"])
@@ -300,7 +369,7 @@ class RobotBridge(ABC):
             self._action_event.set()  # wake tick loop waiting for dialing to finish
             await self._send_slot_observation(slot, await self._run_on_sim(self.get_observation))
             async for frame in ws:
-                action = _unpackb(frame)["actions"]  # codec already returns an ndarray
+                action = unpackb(frame)["actions"]  # codec already returns an ndarray
                 slot.action = np.asarray(action, dtype=np.float32)
                 slot.idle = False
                 self._action_event.set()
@@ -409,7 +478,7 @@ class RobotBridge(ABC):
             "terminated": slot_terminated,
         }
         with contextlib.suppress(websockets.exceptions.ConnectionClosed):
-            await slot.ws.send(_packb(msg))
+            await slot.ws.send(packb(msg))
         if slot_terminated:
             # Drop out of the barrier so live peers can keep stepping.
             slot.idle = True
@@ -466,76 +535,6 @@ class RobotBridge(ABC):
         raise ValueError(f"unknown method {method!r}")
 
 
-def serve_bridge(bridge: RobotBridge, *, host: str = "127.0.0.1", port: int = 0) -> None:
-    """Serve ``bridge`` until SIGTERM or Ctrl-C; it blocks, so call it last.
-
-    Serving runs on a background loop thread while the calling thread becomes the sim
-    thread, running every touch the bridge queues, through teardown too.
-    """
-    # Claim main as the sim thread before serving starts, so no touch slips
-    # through inline on the wrong thread.
-    bridge._sim_ident = threading.get_ident()
-    loop = asyncio.new_event_loop()
-    done = threading.Event()
-    serve_task: asyncio.Task[Any] | None = None
-
-    async def _serve() -> None:
-        nonlocal serve_task
-        serve_task = asyncio.current_task()
-        await bridge.start()  # WS bound first, so `url` is concrete before any control call
-        server = await bridge.serve_control(host, port)
-        print(f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}", flush=True)
-        try:
-            await asyncio.Event().wait()  # until SIGTERM / Ctrl-C cancels
-        finally:
-            server.close()
-            await bridge.stop()
-
-    def _thread() -> None:
-        asyncio.set_event_loop(loop)
-        try:
-            with contextlib.suppress(asyncio.CancelledError):
-                loop.run_until_complete(_serve())
-        finally:
-            done.set()
-
-    def _cancel(*_: object) -> None:
-        if serve_task is not None:
-            loop.call_soon_threadsafe(serve_task.cancel)
-
-    with contextlib.suppress(ValueError):  # signals are main-thread-only; tests may not be
-        signal.signal(signal.SIGTERM, _cancel)
-    thread = threading.Thread(target=_thread, name="hud-serve", daemon=True)
-    thread.start()
-
-    # The sim loop: execute queued touches until serving exits, pumping Kit when
-    # Omniverse is loaded (it needs continuous main-thread updates).
-    while not done.is_set():
-        try:
-            # Re-checked every pass: Kit may finish loading after serving starts.
-            kit = sys.modules.get("omni.kit.app")
-            touches: list[tuple[Callable[[], Any], Future[Any]]] = []
-            with contextlib.suppress(queue.Empty):
-                touches.append(bridge._sim_q.get(timeout=0.002 if kit else 0.05))
-                while True:  # drain the backlog behind the first touch
-                    touches.append(bridge._sim_q.get_nowait())
-            for fn, fut in touches:
-                if fut.set_running_or_notify_cancel():
-                    try:
-                        result = fn()
-                        if inspect.iscoroutine(result):  # async hook: unawaitable here
-                            result.close()
-                            raise TypeError("bridge hooks must be sync when serving")
-                        fut.set_result(result)
-                    except BaseException as exc:  # propagate to the awaiting caller
-                        fut.set_exception(exc)
-            if kit:
-                kit.get_app().update()
-        except KeyboardInterrupt:  # Ctrl-C: cancel serving, keep draining through teardown
-            _cancel()
-    thread.join(timeout=30)
-
-
 def _apply_declaration_state(bridge: RobotBridge, state: dict[str, Any]) -> None:
     """Apply declaration-time attrs the parent packed into ``--init`` (after ctor)."""
     if "contract" in state:
@@ -544,7 +543,6 @@ def _apply_declaration_state(bridge: RobotBridge, state: dict[str, Any]) -> None
         bridge.metadata = state["metadata"]
     if "num_envs" in state:
         bridge.num_envs = int(state["num_envs"])
-        bridge._registry.configure(bridge.num_envs)
 
 
 def main() -> None:
@@ -554,11 +552,11 @@ def main() -> None:
     if len(sys.argv) >= 4 and sys.argv[2] == "--init":
         kwargs = json.loads(sys.argv[3])
     # Pop portable declaration state before the ctor — subclasses rarely accept it.
-    state = kwargs.pop(_HUD_STATE, {}) or {}
+    state = kwargs.pop(HUD_STATE, {}) or {}
     bridge = getattr(load_module(path), name)(**kwargs)
     if state:
         _apply_declaration_state(bridge, state)
-    serve_bridge(bridge)
+    bridge.serve()
 
 
 if __name__ == "__main__":

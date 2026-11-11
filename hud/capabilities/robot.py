@@ -18,8 +18,8 @@ LOGGER = logging.getLogger(__name__)
 
 # openpi's msgpack-numpy codec serializes nested numpy arrays, so neither end wraps
 # obs/action fields by hand.
-_packb = msgpack_numpy.packb
-_unpackb = msgpack_numpy.unpackb
+packb = msgpack_numpy.packb
+unpackb = msgpack_numpy.unpackb
 
 
 class RobotClient(CapabilityClient):
@@ -72,10 +72,10 @@ class RobotClient(CapabilityClient):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
         # HUD bridges require a claim frame binding this connection to an episode slot;
         # plain openpi servers have no slots.
-        meta = _unpackb(raw)
+        meta = unpackb(raw)
         seed: dict[str, Any] | None = None
         if token is not None or (isinstance(meta, dict) and meta.get("claim_required")):
-            await ws.send(cast("Any", _packb({"claim": token})))
+            await ws.send(cast("Any", packb({"claim": token})))
             try:
                 first = await asyncio.wait_for(ws.recv(), timeout=30.0)
             except TimeoutError as exc:
@@ -86,7 +86,7 @@ class RobotClient(CapabilityClient):
                 with contextlib.suppress(Exception):
                     await ws.close()
                 raise RuntimeError(f"robot env error on claim:\n{first}")
-            seed = _unpackb(first)
+            seed = unpackb(first)
         return cls(cap, ws, seed=seed)
 
     async def get_observation(self) -> dict[str, Any]:
@@ -115,7 +115,7 @@ class RobotClient(CapabilityClient):
 
     async def send_action(self, action: Any) -> None:
         """Send a single action under the openpi ``"actions"`` key (sync path)."""
-        await self._ws.send(_packb({"actions": np.asarray(action, dtype=np.float32)}))
+        await self._ws.send(packb({"actions": np.asarray(action, dtype=np.float32)}))
 
     async def send_chunk(
         self, chunk: Any, *, obs_index: int | None = None, delay_used: int | None = None
@@ -130,7 +130,7 @@ class RobotClient(CapabilityClient):
             msg["obs_index"] = int(obs_index)
         if delay_used is not None:
             msg["delay_used"] = int(delay_used)
-        await self._ws.send(_packb(msg))
+        await self._ws.send(packb(msg))
 
     async def close(self) -> None:
         self._mailman.cancel()
@@ -143,7 +143,7 @@ class RobotClient(CapabilityClient):
         try:
             async for raw in self._ws:
                 # A string frame is the env's error convention (a traceback), not an obs.
-                msg = {"error": raw} if isinstance(raw, str) else _unpackb(raw)
+                msg = {"error": raw} if isinstance(raw, str) else unpackb(raw)
                 if self._queue.full():
                     self._queue.get_nowait()
                 await self._queue.put(msg)

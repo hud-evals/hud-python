@@ -280,9 +280,9 @@ class ProcessGroup:
                     for reader in pending:
                         reader.cancel()
                     if pending:
-                        # asyncio exposes no public way to close subprocess pipes
-                        # still held by a child which left the managed group.
-                        cast("Any", self.process)._transport.close()
+                        # A child that left the group still holds the pipes, and asyncio
+                        # has no public way to close a subprocess's pipes.
+                        cast("Any", self.process)._transport.close()  # noqa: SLF001
                     await asyncio.gather(*pending, return_exceptions=True)
                     for reader in done:
                         reader.result()

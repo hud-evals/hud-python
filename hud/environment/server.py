@@ -38,7 +38,7 @@ from .utils import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
-    from .env import Environment, _TaskFactory
+    from .env import Environment, TaskTemplate
 
 LOGGER = logging.getLogger("hud.environment.server")
 
@@ -121,7 +121,7 @@ def _score_value(result: Any) -> float:
 class TaskRunner:
     """Holds one task's suspended generator between ``tasks.start`` and ``tasks.grade``."""
 
-    def __init__(self, task: _TaskFactory[Any], args: dict[str, Any] | None = None) -> None:
+    def __init__(self, task: TaskTemplate[Any], args: dict[str, Any] | None = None) -> None:
         self.task = task
         self._args = args or {}
         self._gen: AsyncGenerator[Any, Any] | None = None
@@ -174,9 +174,7 @@ class TaskRunner:
             with contextlib.suppress(Exception):
                 await self._gen.aclose()
             self._gen = None
-        for hook in self.task.env._on_task_teardown:
-            with contextlib.suppress(Exception):
-                await hook()
+        await self.task.env.end_task()
 
 
 class _NoTaskInProgress(RuntimeError):
@@ -204,23 +202,23 @@ class _ControlChannel:
 
     def __init__(self, env: Environment) -> None:
         self.env = env
-        # A runner whose session is not in ``_live`` is parked.
-        self._runners: dict[str, TaskRunner] = {}
-        self._live: set[str] = set()
+        # A runner whose session is not in ``live`` is parked.
+        self.runners: dict[str, TaskRunner] = {}
+        self.live: set[str] = set()
 
     async def start(self, session_id: str, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
         await self._cancel_runner(session_id)
         runner = TaskRunner(self.env.tasks[task_id], args)
-        self._runners[session_id] = runner
+        self.runners[session_id] = runner
         try:
             return await runner.start()
         except BaseException:
-            self._runners.pop(session_id, None)
+            self.runners.pop(session_id, None)
             await runner.cancel()
             raise
 
     async def grade(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        runner = self._runners.pop(session_id, None)
+        runner = self.runners.pop(session_id, None)
         claim_sid = session_id
         if runner is None:
             # Grade under the parked session's id, so its session-keyed state is
@@ -231,11 +229,11 @@ class _ControlChannel:
             return await runner.grade(payload)
         finally:
             current_session_id.reset(token)
-            self._release_if_idle(claim_sid)
+            self.release_if_idle(claim_sid)
 
     def _adopt_parked(self) -> tuple[str, TaskRunner]:
         """Claim the parked session iff unambiguous — the blind-reconnect grade path."""
-        parked = sorted(sid for sid in self._runners if sid not in self._live)
+        parked = sorted(sid for sid in self.runners if sid not in self.live)
         if not parked:
             raise _NoTaskInProgress("no task in progress")
         if len(parked) > 1:
@@ -244,10 +242,10 @@ class _ControlChannel:
                 "resume one by sending hello with its session_id"
             )
         sid = parked[0]
-        return sid, self._runners.pop(sid)
+        return sid, self.runners.pop(sid)
 
     async def _cancel_runner(self, session_id: str) -> None:
-        runner = self._runners.pop(session_id, None)
+        runner = self.runners.pop(session_id, None)
         if runner is None:
             return
         # Bind the session id so teardown hooks release that session's state.
@@ -259,16 +257,16 @@ class _ControlChannel:
 
     async def cancel(self, session_id: str) -> None:
         await self._cancel_runner(session_id)
-        self._release_if_idle(session_id)
+        self.release_if_idle(session_id)
 
-    def _release_if_idle(self, session_id: str) -> None:
+    def release_if_idle(self, session_id: str) -> None:
         """Release the session's connections and routes unless it is live or has a parked task."""
-        if session_id not in self._live and session_id not in self._runners:
+        if session_id not in self.live and session_id not in self.runners:
             self.env.release_session(session_id)
 
     async def cancel_all(self) -> None:
         """Tear down every suspended/live task (server shutdown)."""
-        for session_id in list(self._runners):
+        for session_id in list(self.runners):
             await self.cancel(session_id)
 
     async def session(
@@ -295,7 +293,7 @@ class _Session:
         self.env = channel.env
         self.writer = writer
         self.id = "sess-" + secrets.token_hex(4)
-        channel._live.add(self.id)
+        channel.live.add(self.id)
         self._token = current_session_id.set(self.id)
         self._work: asyncio.Task[None] | None = None
         self._work_id: int | str | None = None
@@ -329,11 +327,11 @@ class _Session:
         finally:
             next_frame.cancel()
             await self._stop_work()
-            self.channel._live.discard(self.id)
+            self.channel.live.discard(self.id)
             # A started task stays parked for resume or a blind grade; its session's
             # bindings are released only once nothing is parked or live, so callers
             # that abort must cancel first.
-            self.channel._release_if_idle(self.id)
+            self.channel.release_if_idle(self.id)
             current_session_id.reset(self._token)
 
     async def _receive(self, msg: dict[str, Any]) -> bool:
@@ -409,16 +407,16 @@ class _Session:
             if not isinstance(requested, str):
                 await self._error(msg_id, -32602, "hello: 'session_id' must be a string")
                 return
-            if requested in self.channel._live:
+            if requested in self.channel.live:
                 await self._error(msg_id, -32600, f"session {requested!r} has a live connection")
                 return
-            if requested not in self.channel._runners:
+            if requested not in self.channel.runners:
                 await self._error(msg_id, -32600, f"unknown session: {requested!r}")
                 return
             # Resume: this connection becomes the parked session.
-            self.channel._live.discard(self.id)
+            self.channel.live.discard(self.id)
             self.id = requested
-            self.channel._live.add(self.id)
+            self.channel.live.add(self.id)
             current_session_id.reset(self._token)
             self._token = current_session_id.set(self.id)
         raw_routes = params.get("workspace_routes", [])
@@ -569,7 +567,8 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
     return server
 
 
-async def _shutdown(server: asyncio.Server) -> None:
+async def unbind(server: asyncio.Server) -> None:
+    """Close a server from ``bind``: cancel its handlers and task sessions, then wait."""
     server.close()
     state = _SERVER_STATES.pop(server)
     handlers = list(state.handlers)
@@ -589,11 +588,11 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
         port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
         print(port_line, flush=True)  # noqa: T201 - the spawn provider reads this from stdout
         # The bound server is already accepting. Not serve_forever(): cancelling it
-        # waits for open connections to close, and only _shutdown() closes them.
+        # waits for open connections to close, and only unbind() closes them.
         await asyncio.Event().wait()
     finally:
         if server is not None:
-            await _shutdown(server)
+            await unbind(server)
         await env.stop()
 
 

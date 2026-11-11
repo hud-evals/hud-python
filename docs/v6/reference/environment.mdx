@@ -34,8 +34,9 @@ becomes part of what the environment advertises when it serves.
 
 | Method | Description |
 |--------|-------------|
-| `env.template(*, id=None, description="", input=None, returns=None)` | Register a **task template** (an async generator that yields a prompt, then a reward). Returns a factory that mints a [`Task`](/v6/reference/tasks) when called. |
+| `env.template(*, id=None, description="", input=None, returns=None)` | Register a **task template** (an async generator that yields a prompt, then a reward). Returns a `TaskTemplate`; calling it mints a [`Task`](/v6/reference/tasks). |
 | `env.initialize` / `env.shutdown` | Decorators registering hooks run once before serving / on teardown (shutdown runs in reverse order). |
+| `env.task_teardown` | Decorator registering a hook run each time a task session ends: cancelled, closed or graded. A hook that fails is logged and the rest still run. |
 | `env.add_capability(cap)` | Publish concrete wire data, replacing any same-named entry. Call it from an `@env.initialize` hook once a daemon the env runs is up. |
 | `env.capability(name)` | Look up a published [capability](/v6/reference/capabilities) by name. |
 | `env.workspace(root, *, name="shell", track_files=None, **kwargs)` | Attach a [`Workspace`](/v6/reference/capabilities#workspace) serving `name` over `ssh/2`, wiring its start, publish, and stop lifecycle. File tracking runs by default (`track_files` defaults to `HUD_FILE_TRACKING_ENABLED`). |

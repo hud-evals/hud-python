@@ -14,7 +14,7 @@ from weakref import WeakValueDictionary
 
 from hud.environment import load_environment
 from hud.environment.env import Environment
-from hud.environment.server import PORT_ANNOUNCEMENT
+from hud.environment.server import PORT_ANNOUNCEMENT, bind, unbind
 from hud.utils.process import (
     OUTPUT_DRAIN_TIMEOUT,
     create_process_group_exec,
@@ -99,8 +99,6 @@ class LocalRuntime:
                 ) from e
             if not isinstance(env, Environment):
                 raise TypeError(f"LocalRuntime: constructor returned {env!r}, not an Environment")
-            from hud.environment.server import _shutdown, bind
-
             async with _ENVIRONMENT_LOCKS.setdefault(env, asyncio.Lock()):
                 try:
                     await asyncio.wait_for(env.start(), self.ready_timeout)
@@ -111,7 +109,7 @@ class LocalRuntime:
                         yield Runtime(f"tcp://{host}:{port}")
                     finally:
                         serve_task.cancel()
-                        await _shutdown(server)
+                        await unbind(server)
                         with contextlib.suppress(asyncio.CancelledError):
                             await serve_task
                 finally:

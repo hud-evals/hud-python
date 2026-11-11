@@ -21,7 +21,7 @@ from hud.environment.server import PORT_ANNOUNCEMENT
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
-from .compose import ComposeConfig, DockerBindMount
+from .compose import SECCOMP_PROFILE, ComposeConfig, DockerBindMount
 from .core import Runtime, RuntimeConfig, validate_session_id
 
 if TYPE_CHECKING:
@@ -34,12 +34,9 @@ logger = logging.getLogger("hud.runtime")
 _SESSION_ROOT = "/runtime/sessions"
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
 
-# Applied to every HUD environment, and default-allow on purpose: Workspace's bwrap
-# sessions need the namespace and mount syscalls; unrelated kernel interfaces stay denied.
-_DOCKER_SECCOMP_PROFILE = Path(__file__).parent / "docker-seccomp.json"
 _DOCKER_SECURITY_ARGS = (
     "--security-opt",
-    f"seccomp={_DOCKER_SECCOMP_PROFILE}",
+    f"seccomp={SECCOMP_PROFILE}",
     # Docker exposes system-path masking only as an all-or-nothing option;
     # bwrap replaces the container's proc and dev mounts while building a wall.
     "--security-opt",
@@ -181,7 +178,7 @@ class DockerRuntime:
         params = {"ready_timeout": startup_timeout} if startup_timeout is not None else {}
         resources = config.resources
         if resources is not None:
-            resources._require_support("DockerRuntime", {"cpu", "memory_mb", "storage_mb", "gpu"})
+            resources.require_support("DockerRuntime", {"cpu", "memory_mb", "storage_mb", "gpu"})
         compose_project = config.compose
         if compose_project is not None:
             compose = compose_project.document
@@ -223,7 +220,7 @@ class DockerRuntime:
             with compose_project.stage(
                 f"127.0.0.1::{self.port}",
                 port_service=port_service,
-                seccomp=_DOCKER_SECCOMP_PROFILE,
+                seccomp=SECCOMP_PROFILE,
                 service_socket=service_socket,
                 bind_mounts=self.bind_mounts,
                 env_vars=self.env_vars,

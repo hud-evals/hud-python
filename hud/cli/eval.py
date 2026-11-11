@@ -433,7 +433,7 @@ def eval_command(
                 config = task.runtime_config
                 if config and (config.image or config.compose):
                     return docker(task)
-                if task._env is not None:
+                if task.environment is not None:
                     return SubprocessRuntime(source_path)(task)
                 return beside(task)
 

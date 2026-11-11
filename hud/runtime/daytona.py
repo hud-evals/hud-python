@@ -31,8 +31,9 @@ async def _snapshot_is_current(
 ) -> bool:
     """Whether ``snapshot`` was built from ``image`` as it exists right now.
 
-    Context hashes are recomputed with the Daytona SDK's own hasher, over the same
-    private ``_context_list`` that ``snapshot.create`` reads, so they compare equal.
+    The Daytona SDK has no public way to compare an ``Image`` with a snapshot, so the
+    context hashes are recomputed the way ``snapshot.create`` computes them: its own
+    hasher over its own context entries, each with the ``.dockerignore`` it applies.
     """
     if isinstance(image, str):
         return bool(snapshot.image_name == image)
@@ -44,8 +45,10 @@ async def _snapshot_is_current(
     # Hashing needs no credentials, so skip the credentialed __init__.
     storage = AsyncObjectStorage.__new__(AsyncObjectStorage)
     hashes = [
-        await storage._compute_hash_for_path_md5(entry.source_path, entry.archive_path)
-        for entry in image._context_list
+        await storage._compute_hash_for_path_md5(  # noqa: SLF001 - no public SDK hasher
+            entry.source_path, entry.archive_path, entry.dockerignore_path
+        )
+        for entry in image._context_list  # noqa: SLF001 - no public SDK context list
     ]
     return bool(
         build.dockerfile_content == image.dockerfile()
@@ -118,7 +121,7 @@ class DaytonaRuntime:
             daytona_resources = None
             resources = config.resources
             if resources is not None:
-                resources._require_support(
+                resources.require_support(
                     "DaytonaRuntime", {"cpu", "memory_mb", "storage_mb", "gpu"}
                 )
                 resource_kwargs: dict[str, Any] = {}

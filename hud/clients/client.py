@@ -328,7 +328,7 @@ class HudClient:
     async def cancel(self) -> None:
         await self._call("tasks.cancel", {})
 
-    async def _abandon_task(self) -> None:
+    async def abandon_task(self) -> None:
         """Cancel the task, even mid-call, wait briefly for its teardown, then abort."""
         frame = encode_frame(
             {"jsonrpc": "2.0", "id": next(self._ids), "method": "tasks.cancel", "params": {}},
