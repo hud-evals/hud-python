@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import difflib
 from datetime import UTC, datetime
-from functools import lru_cache
+from functools import cache
 from typing import TYPE_CHECKING
 
 import httpx2
@@ -179,12 +179,14 @@ def build_gateway_client(provider: str) -> GatewayClient:
     )
 
 
-@lru_cache(maxsize=1)
 def list_gateway_models(platform: PlatformClient | None = None) -> list[GatewayModelInfo]:
     """Models available through the HUD gateway (the whole platform model catalog),
     as seen by ``platform`` (the settings' client when omitted)."""
-    if platform is None:
-        platform = PlatformClient.from_settings()
+    return _model_catalog(platform or PlatformClient.from_settings())
+
+
+@cache
+def _model_catalog(platform: PlatformClient) -> list[GatewayModelInfo]:
     models: list[GatewayModelInfo] = []
     while True:
         page = platform.get(

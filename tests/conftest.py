@@ -35,7 +35,6 @@ from dotenv import dotenv_values
 
 from hud.settings import Settings, settings
 from hud.telemetry import flush
-from hud.utils.gateway import list_gateway_models
 from tests.fixtures.models import Models
 from tests.fixtures.services import SERVICE_ENV, FakeServices
 
@@ -123,9 +122,6 @@ class HudEnv:
         fresh = Settings(_env_file=None)
         for name in Settings.model_fields:
             self._monkeypatch.setattr(settings, name, getattr(fresh, name))
-        # The gateway model catalog is cached per process; a new configuration
-        # may point at a different catalog.
-        list_gateway_models.cache_clear()
 
 
 @dataclass(frozen=True)
