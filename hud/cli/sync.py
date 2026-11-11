@@ -276,7 +276,7 @@ def sync_tasks_command(
     CLI.confirm_or_abort("Proceed?", yes=yes, default=False)
     placement.require_writable()
 
-    # Upload tasks; the platform validates referenced environments.
+    # The platform validates the environments the tasks reference.
     hud_console.progress_message("Uploading tasks...")
     try:
         result = upload_taskset(

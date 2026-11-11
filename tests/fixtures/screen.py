@@ -53,10 +53,10 @@ class FakeScreen:
     events: list[KeyEvent | PointerEvent] = field(default_factory=list)
     connections: int = 0
     port: int = 0
-    #: Close the connection instead of answering this framebuffer update request
-    #: (counted across connections, from 1); 0 never drops.
+    # Close the connection instead of answering this framebuffer update request
+    # (counted across connections, from 1); 0 never drops.
     drop_on_update: int = 0
-    #: Require this VNC password (security type 2); None offers no authentication.
+    # Require this VNC password (security type 2); None offers no authentication.
     password: str | None = None
     updates: int = 0
     sessions: set[asyncio.Task[None]] = field(default_factory=set)

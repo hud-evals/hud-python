@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 if TYPE_CHECKING:
     import builtins
 
-# A policy-emitted action / chunk array (the robot stack's shared alias).
+# A policy-emitted action or ``[T, A]`` chunk.
 ActionArray = NDArray[np.floating[Any]]
 
 # Image types the bundled adapters treat as cameras (vs the state vector).

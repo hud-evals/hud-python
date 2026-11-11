@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from hud.agents.types import ToolAgentConfig
 
 
-# RFB pointer button index.
 Button = Literal["left", "middle", "right"]
 _BUTTON_INDEX: dict[Button, int] = {"left": 0, "middle": 1, "right": 2}
 _DEFAULT_SCREENSHOT_ENCODING = PngScreenshotEncoding()

@@ -34,10 +34,8 @@ def load_taskset_and_runtime() -> tuple[Taskset, Provider | HUDRuntime]:
     if TASKSET:
         return Taskset.from_api(TASKSET), HUDRuntime()
 
-    # Three-digit x two-digit multiplication *with* reasoning: hard enough that a
-    # 4B reasoner is right only sometimes (a sub-1.0 baseline with within-group
-    # variance — the GRPO signal). 2x2-with-CoT was ~100% and no-CoT was ~0%;
-    # neither left a gradient, so we land in between.
+    # Three-digit x two-digit multiplication with reasoning: a small reasoner gets it
+    # right only sometimes, which gives the within-group reward variance GRPO learns from.
     rng = random.Random(0)
     local = Taskset(
         "mult",

@@ -32,7 +32,6 @@ from env import play_self
 
 
 def make_tasks(model: str) -> Taskset:
-    # 8 seeds: even → outer=X, odd → outer=O (symmetric first-move coverage)
     return Taskset("c4-self-play", [play_self(model=model, seed=i) for i in range(8)])
 
 

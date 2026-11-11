@@ -35,12 +35,5 @@ remote_tasks.json
 /build/
 /dist/
 
-# The SDK repo ignores uv.lock at its root; this template pins its own so the
-# example resolves reproducibly.
-!uv.lock
-
 # Database
 *.sqlite
-
-# Node (if applicable)
-node_modules/

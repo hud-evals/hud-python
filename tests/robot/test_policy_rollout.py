@@ -69,8 +69,8 @@ class EchoAgent(RobotAgent):
         self.adapter = adapter
 
 
-#: ``hud-evals/robot-template``'s ``contract_lerobot.json``: two cameras, an 8-D
-#: LIBERO state, a 7-D action. The agent wires the policy from this alone.
+# ``hud-evals/robot-template``'s ``contract_lerobot.json``: two cameras, an 8-D
+# LIBERO state, a 7-D action. The agent wires the policy from this alone.
 TEMPLATE_CONTRACT = {
     "control_rate": 80,
     "features": {
@@ -81,7 +81,7 @@ TEMPLATE_CONTRACT = {
     },
 }
 
-#: Stands in for the template's ``lerobot_sim.py``: LIBERO's shape without LIBERO.
+# Stands in for the template's ``lerobot_sim.py``: LIBERO's shape without LIBERO.
 TEMPLATE_SIM = '''\
 """Module-level ``make_env`` for ``env.gym``; suite/id are build args."""
 
@@ -121,7 +121,7 @@ def make_env(task_suite="libero_spatial", task_id=0):
     return _Libero()
 '''
 
-#: The template's ``environment/env.py``, unchanged but for the sim it imports.
+# The template's ``environment/env.py``, unchanged but for the sim it imports.
 TEMPLATE_ENV = '''\
 """LIBERO as one declarative HUD env; the task is a template arg."""
 

@@ -100,8 +100,8 @@ class Taskset:
                 f"unsupported taskset export format: {target.suffix}; use .json or .jsonl"
             )
         target.parent.mkdir(parents=True, exist_ok=True)
-        # Unset fields are omitted; defaults restore them on load.
         context = {"base_path": target.parent.resolve()}
+        # None fields are omitted; defaults restore them on load.
         data = [task.model_dump(mode="json", exclude_none=True, context=context) for task in self]
 
         if target.suffix == ".json":

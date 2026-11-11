@@ -342,7 +342,6 @@ class ClaudeComputerTool(RFBTool):
             case _:
                 return tool_err(f"unsupported computer action: {action!r}")
 
-        # Most actions return the post-action screenshot so the model can verify.
         return await self.screenshot()
 
     async def _zoom(self, arguments: dict[str, Any]) -> ToolResult:

@@ -66,7 +66,7 @@ class SegmentEncoder:
             self._put_blocking(frame)
             return
         with contextlib.suppress(queue.Full):
-            self._queue.put_nowait(frame)  # NOTE drops under backpressure
+            self._queue.put_nowait(frame)
 
     def finalize(self, timeout: float = 15.0) -> None:
         """Flush the tail fragment and stop the encoder thread (best-effort)."""
@@ -74,9 +74,7 @@ class SegmentEncoder:
             self._put_blocking(None)
         else:
             try:
-                self._queue.put_nowait(
-                    None
-                )  # tries to drop item in mailbox; if queue is full, raises queue.Full
+                self._queue.put_nowait(None)
             except queue.Full:  # make room for the stop sentinel rather than hang
                 with contextlib.suppress(queue.Empty):
                     self._queue.get_nowait()
@@ -90,8 +88,6 @@ class SegmentEncoder:
                 return
             except queue.Full:
                 continue
-
-    # ── file-like sink (encoder thread) ────────────────────────────────────────
 
     def write(self, b: bytes) -> int:
         """Called by PyAV to write bytes to the buffer."""
@@ -151,7 +147,7 @@ class SegmentEncoder:
                 frame = _to_rgb24(arr)
                 if frame is None:
                     continue
-                if container is None:  # first frame -> open the container
+                if container is None:
                     h, w = frame.shape[:2]
                     container = av.open(
                         self,

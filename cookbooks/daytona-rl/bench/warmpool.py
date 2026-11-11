@@ -99,7 +99,7 @@ async def drop_pool(snapshot: str) -> None:
 
 async def main(n: int) -> None:
     snapshot = snapshot_name()
-    print(f"snapshot base: {snapshot}  (digest suffix added by DaytonaRuntime)")
+    print(f"snapshot: {snapshot}")
 
     cold = await wave(n, "no pool")
 

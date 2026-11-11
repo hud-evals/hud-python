@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from hud import Trace
     from tests.conftest import HudEnv
 
-#: Clear of the 32 px floor lerobot's episode video encoder needs.
+# Clear of the 32 px floor lerobot's episode video encoder needs.
 RECORD_SIDE = 64
 
 

@@ -64,7 +64,6 @@ class RobotClient(CapabilityClient):
         """
         # Bounded dial: an undialed claim stalls the bridge's barrier for every peer.
         ws = await websockets.connect(cap.url, max_size=None, ping_interval=None, open_timeout=30.0)
-        # Consume initial metadata; string means env error.
         raw = await ws.recv()
         if isinstance(raw, str):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
@@ -102,7 +101,7 @@ class RobotClient(CapabilityClient):
         reward = msg.pop("reward", None)
         out: dict[str, Any] = {"data": msg, "terminated": terminated}
         if reward is not None:
-            out["reward"] = reward  # per-step reward sibling (RL collection)
+            out["reward"] = reward
         if meta is not None:
             out["meta"] = meta
         return out

@@ -50,9 +50,6 @@ def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: None
         assert shown in result.stdout
 
 
-# ─── local spans ────────────────────────────────────────────────────────
-
-
 async def write_a_report(
     models: Models, hud_env: HudEnv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> str:

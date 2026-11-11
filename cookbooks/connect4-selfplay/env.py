@@ -35,19 +35,14 @@ _OUTER_MARK: str = "X"  # set per game; "X" drops first, "O" drops second
 # Per-game inner model samples (reset at game start, read at game end).
 _inner_samples: list[dict[str, Any]] = []
 
-# Shared rules text — the SAME framing for both sides, so the matchup is fair
-# self-play between equal copies (the inner model used to get a terse, rule-free
-# prompt and only 8 output tokens, which handed the outer agent a systematic edge).
+# Both sides get the same rules text, so self-play is between equal copies.
 _RULES = (
     "Connect Four on a 6-row by 7-column board. Drop a disc into a column (0-6); "
     "it falls to the lowest empty cell. Win by connecting four of your discs in a "
     "row — horizontally, vertically, or diagonally."
 )
-# Output budget for a move. Used for the inner model; the outer agent reasons under
-# the harness with no tighter cap, so this keeps the two sides comparable.
+# Output budget for one inner-model move.
 _MOVE_MAX_TOKENS = 64
-
-# ── game logic ─────────────────────────────────────────────────────────────────
 
 ROWS, COLS = 6, 7
 _DIRS = ((0, 1), (1, 0), (1, 1), (1, -1))  # right, down, down-right, down-left
@@ -132,9 +127,6 @@ def _resolve_inner_model(model: str) -> tuple[str, str]:
     except Exception:
         pass
     return model, "openai"
-
-
-# ── MCP server ─────────────────────────────────────────────────────────────────
 
 
 def _free_port() -> int:
@@ -248,8 +240,6 @@ def get_state() -> str:
     return game.render()
 
 
-# ── environment ────────────────────────────────────────────────────────────────
-
 env = Environment(name="connect-four-selfplay")
 _server_task: asyncio.Task[None] | None = None
 
@@ -294,9 +284,8 @@ async def play_self(model: str = _INNER_MODEL, seed: int = 0) -> None:
     inner_mark = "O" if _OUTER_MARK == "X" else "X"
 
     game.reset()
-    _inner_samples = []  # fresh per game
+    _inner_samples = []
 
-    # If the inner model goes first (outer is O), let it make the opening move now.
     if _OUTER_MARK == "O":
         opening = await _inner_move("X")
         game.drop(opening, "X")

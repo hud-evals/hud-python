@@ -70,7 +70,6 @@ def get_command(
 
     events: list[dict[str, Any]] = []
     if local is not None and local.exists():
-        # Local spans: one JSON span per line; step spans carry the conversation payload.
         source = f"local ({local})"
         spans: list[dict[str, Any]] = []
         incomplete = 0

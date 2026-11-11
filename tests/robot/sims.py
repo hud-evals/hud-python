@@ -71,9 +71,6 @@ async def sim_env(
         await sim.stop()
 
 
-# ─── direct control ────────────────────────────────────────────────────
-
-
 def contract(
     action_type: str,
     low: list[float],
@@ -265,12 +262,10 @@ async def arm_env(sim: RobotBridge, control: DirectControl) -> AsyncGenerator[En
         yield env
 
 
-# ─── policies ──────────────────────────────────────────────────────────
-
-#: Ticks a stub sim runs before terminating.
+# Ticks a stub sim runs before terminating.
 EPISODE_TICKS = 3
 
-#: A minimal contract, exactly as documented: one camera, a state vector, an action.
+# A minimal contract, exactly as documented: one camera, a state vector, an action.
 STUB_CONTRACT = {
     "control_rate": 5,
     "features": {
@@ -344,9 +339,6 @@ async def stub_episode(sim: StubSim, name: str) -> AsyncGenerator[Provider]:
             yield await endpoint.result()
 
         yield LocalRuntime(env)
-
-
-# ─── spawned sims and gym envs ─────────────────────────────────────────
 
 
 class Reach(RobotBridge):

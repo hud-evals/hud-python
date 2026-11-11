@@ -71,7 +71,7 @@ class Chat:
         task = self._task.model_copy(
             update={"args": {**self._task.args, "messages": list(self.messages)}},
         )
-        if self.job is None:  # one job spans the whole conversation
+        if self.job is None:
             self.job = await Job.start(self._task.id)
         result = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)
         self.job.traces.append(result)

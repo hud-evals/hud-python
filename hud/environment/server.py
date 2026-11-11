@@ -41,8 +41,8 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.environment.server")
 
-# Line a serving process prints once its control channel is bound;
-# ``SubprocessRuntime`` reads it from the child's stdout.
+# Line a serving process prints once its control channel is bound; runtimes that
+# spawn the server read it from stdout.
 PORT_ANNOUNCEMENT = "HUD_SERVE_PORT="
 
 
@@ -222,7 +222,8 @@ class _ControlChannel:
         runner = self._runners.pop(session_id, None)
         claim_sid = session_id
         if runner is None:
-            # Blind adopt: free the parked session's robot claim, not this connection's.
+            # Grade under the parked session's id, so its session-keyed state is
+            # released, not this connection's.
             claim_sid, runner = self._adopt_parked()
         token = current_session_id.set(claim_sid)
         try:
@@ -248,7 +249,7 @@ class _ControlChannel:
         runner = self._runners.pop(session_id, None)
         if runner is None:
             return
-        # Bind session id so teardown hooks (robot slot release) free the right claim.
+        # Bind the session id so teardown hooks release that session's state.
         token = current_session_id.set(session_id)
         try:
             await runner.cancel()
@@ -328,8 +329,9 @@ class _Session:
             next_frame.cancel()
             await self._stop_work()
             self.channel._live.discard(self.id)
-            # Task stays parked for resume/grade; robot slots free on cancel/bye/grade
-            # teardown (callers that abort must cancel first — see rollout timeout).
+            # A started task stays parked for resume or a blind grade; its session's
+            # bindings are released only once nothing is parked or live, so callers
+            # that abort must cancel first.
             self.channel._release_if_idle(self.id)
             current_session_id.reset(self._token)
 

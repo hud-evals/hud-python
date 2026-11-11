@@ -74,10 +74,8 @@ class CheckpointScorer:
         if screen is None or self.idx >= self.total:
             return
         h = hash_image(screen)
-        # Advance ONLY when this frame matches the next expected checkpoint, one at
-        # a time. (A forward scan would let a single frame that happens to be close
-        # to a *later* checkpoint skip the ones in between and award unearned
-        # credit — e.g. shipped Zelda checkpoints 4 and 9 are only a few bits apart.)
+        # Advance only when this frame matches the next expected checkpoint, so a frame
+        # close to a later checkpoint cannot skip the ones in between.
         if (h - self.hashes[self.idx]) <= self.threshold:
             self.idx += 1
 
@@ -195,7 +193,7 @@ class ScoreBoard:
             reward += w * v
             info[s.name] = s.info()
 
-        # Clamp tiny float drift so it never trips ScenarioResult validation.
+        # Round off float drift so it never trips EvaluationResult's subscore check.
         reward = max(0.0, min(1.0, round(reward, 6)))
         return EvaluationResult(
             reward=reward,

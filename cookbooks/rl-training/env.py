@@ -34,7 +34,6 @@ async def multiply(a: int, b: int):
     text = answer if isinstance(answer, str) else str(answer)
     expected = a * b
 
-    # The model reasons, then states the product last; grade the final integer.
     integers = re.findall(r"-?\d+", text)
     got = int(integers[-1]) if integers else None
 

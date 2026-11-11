@@ -104,9 +104,6 @@ _session: dict[str, Any] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 def _teardown() -> None:
     emu = _session.get("emulator")
     if emu is not None:
@@ -173,9 +170,6 @@ def _record_frame() -> None:
         pass
 
 
-# ---------------------------------------------------------------------------
-# Agent-facing tools (registered on the in-process MCP server in @env.initialize)
-# ---------------------------------------------------------------------------
 async def press_buttons(buttons: list[str], frames: int | None = None) -> list[ContentBlock]:
     """Press one or more Game Boy buttons, then return the new screen.
 
@@ -226,9 +220,6 @@ async def screenshot() -> list[ContentBlock]:
     return _observe(_status("Screenshot"))
 
 
-# ---------------------------------------------------------------------------
-# In-process MCP capability: serve the game tools to the agent
-# ---------------------------------------------------------------------------
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -278,9 +269,6 @@ async def _down() -> None:
     _teardown()
 
 
-# ---------------------------------------------------------------------------
-# Task: setup (boot game) -> agent plays via the mcp tools -> evaluate
-# ---------------------------------------------------------------------------
 @env.template(id="play-game", description="Explore Libbet through MCP tools, scored by visually distinct screens.")
 async def play_game(
     game: str = "test", max_steps: int = 200, threshold: int | None = None
@@ -310,7 +298,7 @@ async def play_game(
             os.remove(old)
         _session["record_dir"] = rd
         _session["frame_idx"] = 0
-        _record_frame()  # capture the starting frame
+        _record_frame()
 
     prompt = (
         f"{GB_CONTROLS.format(action_frames=_clamp_frames(spec.action_frames))}\n"

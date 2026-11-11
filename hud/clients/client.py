@@ -45,7 +45,6 @@ _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
 # How long a client waits for a freshly provisioned env to serve when nothing sets a limit.
 DEFAULT_READY_TIMEOUT = 240.0
 
-# protocol -> CapabilityClient subclass, for ``HudClient.open``.
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
     cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
 }

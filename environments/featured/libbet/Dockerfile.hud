@@ -22,5 +22,5 @@ RUN /app/.venv/bin/python -c "import importlib.metadata; import os; version = im
 COPY games/ ./games/
 COPY roms/ ./roms/
 
-# Serve the v6 control channel; @env.initialize brings up the in-process game mcp capability.
+# @env.initialize brings up the in-process game MCP capability.
 CMD ["/app/.venv/bin/hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]

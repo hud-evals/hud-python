@@ -19,8 +19,7 @@ from hud.utils.requests import make_request_sync
 
 logger = logging.getLogger(__name__)
 
-# 8 parallel uploads with 4 MiB / 100-span batches drains a rollout's image
-# frames fastest without oversized POSTs.
+# Upload parallelism and batch caps sized for image-heavy rollouts without oversized POSTs.
 _UPLOAD_WORKERS = 8
 _MAX_BATCH_SPANS = 100
 _MAX_BATCH_BYTES = 4 * 1024 * 1024

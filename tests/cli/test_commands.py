@@ -53,7 +53,7 @@ MODEL = {
     "provider": {"name": "anthropic"},
 }
 
-#: name -> (an invocation that fails when signed out, the files it needs)
+# name -> (an invocation that fails when signed out, the files it needs)
 FAILING: dict[str, tuple[list[str], dict[str, str]]] = {
     "version": (["version", "--no-such-option"], {}),  # rejected while parsing
     "set": (["set", "NOT_A_PAIR"], {}),  # the command raises a usage error
@@ -62,7 +62,7 @@ FAILING: dict[str, tuple[list[str], dict[str, str]]] = {
     "jobs list": (["jobs", "list"], {}),  # a platform read
     "deploy": (["deploy", "--no-env", "--yes"], ENVIRONMENT),  # an async command
 }
-#: name -> (invocation, files, platform replies read before any change)
+# name -> (invocation, files, platform replies read before any change)
 MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
     "deploy": (["deploy", "--no-env"], ENVIRONMENT, {}),
     "eval": (
@@ -105,7 +105,7 @@ MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
         {"GET /v2/models": {"items": [MODEL], "total": 1}},
     ),
 }
-#: name -> (invocation, files, platform replies, the ids it prints under ``--quiet``)
+# name -> (invocation, files, platform replies, the ids it prints under ``--quiet``)
 LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = {
     "task list": (
         ["task", "list", "--source", "tasks.py"],
@@ -152,9 +152,6 @@ def state(hud: Hud, hud_env: HudEnv) -> dict[Path, bytes]:
         for path in root.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     }
-
-
-# ─── analytics ──────────────────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -265,9 +262,6 @@ def test_an_interrupted_command_exits_130(
     assert events(analytics) == [event("jobs list", 130, "KeyboardInterrupt")]
 
 
-# ─── changes ────────────────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize("name", sorted(MUTATING))
 @pytest.mark.parametrize("flag", ["", "--dry-run"], ids=["unconfirmed", "dry-run"])
 def test_a_mutating_command_changes_nothing_unless_confirmed(
@@ -287,9 +281,6 @@ def test_a_mutating_command_changes_nothing_unless_confirmed(
         assert "--yes" in result.json["suggestion"]
     assert [f"{r.method} {r.path}" for r in signed_in.requests("api") if r.method != "GET"] == []
     assert state(hud, hud_env) == before
-
-
-# ─── output ─────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("name", sorted(FAILING))

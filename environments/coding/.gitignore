@@ -21,9 +21,5 @@ hud.lock.yaml
 .hud
 .hud_local/
 
-# The SDK repo ignores uv.lock at its root; this template pins its own so the
-# example resolves reproducibly.
-!uv.lock
-
 # Logs
 *.log

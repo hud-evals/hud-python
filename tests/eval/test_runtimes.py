@@ -151,7 +151,7 @@ async def placed(
             yield recorded, terminated
 
 
-#: Over a WebSocket's default 1 MiB message limit, and under the 16 MiB frame limit.
+# Over a WebSocket's default 1 MiB message limit, and under the 16 MiB frame limit.
 LARGE = "x" * (4 * 1024 * 1024)
 
 

@@ -86,8 +86,8 @@ class ControlKind(NamedTuple):
     quantity: str | None  # tolerance quantity of its plain scalars; None: nothing to reach
 
 
-# Control kind -> tool. A new kind is a row. ``BASE_ABS_TWIST`` (``walk``) needs a
-# duration and a stop-after law, so it is not served yet.
+# Served control kinds. ``BASE_ABS_TWIST`` has none: a twist needs a duration and a
+# stop rule.
 CONTROL_KINDS: dict[str, ControlKind] = {
     "EE_ABS_POSE": ControlKind("move_to", True, "position"),
     "EE_ABS_POS": ControlKind("move_to", True, "position"),
@@ -141,7 +141,7 @@ IMAGE_TYPES = frozenset({"rgb", "bgr", "gray", "depth"})
 # settles for at most 3 s.
 DEFAULT_TIMEOUT_S = 30.0
 
-# Fraction of a full turn an absolute orientation travels per second, times ``speed``.
+# One full turn in radians; an absolute orientation travels ``speed`` of it per second.
 _FULL_TURN = 2.0 * math.pi
 
 Content = list[TextContent | ImageContent]
@@ -429,8 +429,6 @@ class DirectControl:
                 await asyncio.to_thread(recorder.close)  # flushes the video tails
                 await asyncio.to_thread(flush)
 
-    # ── tools ──────────────────────────────────────────────────────────────
-
     def _bind_tools(self, server: FastMCP) -> None:
         """Register the contract motion tool. Override to serve an env-specific tool."""
         server.add_tool(
@@ -574,8 +572,6 @@ class DirectControl:
             raise ValueError(f"dims {unknown} are not dimensions of this tool ({', '.join(axes)})")
         chosen = [tool for name in self.dims for tool in aliases[name]]
         return axes, list(dict.fromkeys(chosen))
-
-    # ── the wire ───────────────────────────────────────────────────────────
 
     async def _play(self, plan: Callable[[dict[str, Any]], Plan], note: str) -> Content:
         """Plan against the live observation, play until done, and render the result."""
@@ -772,7 +768,6 @@ class DirectControl:
         play = min(ticks, self._max_ticks)
         clipped = play < ticks
         fractions = np.linspace(1 / ticks, play / ticks, play)  # progress 0→1 per tick
-        # Build one action row per tick.
         if not self._absolute:
             rows = np.repeat((span / ticks)[None], play, axis=0)
         elif not self._orientations:

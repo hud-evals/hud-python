@@ -78,8 +78,8 @@ async def main(
     taskset = Taskset("calc", [fix_calc(variant=v) for v in TRAIN_VARIANTS])
     runtime = DaytonaRuntime(SNAPSHOT, image=Image.from_dockerfile("Dockerfile.hud"))
 
-    # A killed process skips the finally and strands the whole pool (128 vCPU),
-    # so cancel the loop on a signal and let the finally run.
+    # A killed process skips the finally and strands the warm pool, so cancel the
+    # loop on a signal and let the finally run.
     loop = asyncio.get_running_loop()
     stopping = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):

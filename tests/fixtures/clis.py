@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-#: Variables the CLI agents set for the process they launch.
+# Variables the CLI agents set for the process they launch.
 AGENT_VARIABLES = (
     "ANTHROPIC_",
     "CLAUDE_",
@@ -190,9 +190,6 @@ def jsonl(*events: dict[str, Any]) -> str:
     return "".join(json.dumps(event) + "\n" for event in events)
 
 
-# ─── what the real CLIs print ──────────────────────────────────────────
-
-
 def claude_assistant(*content: dict[str, Any], stop: str = "end_turn") -> dict[str, Any]:
     return {
         "type": "assistant",
@@ -231,9 +228,6 @@ CODEX_COMPLETED = {
     "type": "turn.completed",
     "usage": {"input_tokens": 20, "cached_input_tokens": 5, "output_tokens": 8},
 }
-
-
-# ─── either CLI, by executable name ────────────────────────────────────
 
 
 def answer(cli: str, text: str) -> str:

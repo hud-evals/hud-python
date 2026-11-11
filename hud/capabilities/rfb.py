@@ -165,8 +165,6 @@ class RFBClient(CapabilityClient):
         """Where the pointer was last moved, in screen pixels."""
         return self._x, self._y
 
-    # ─── framebuffer ─────────────────────────────────────────────────
-
     async def _capture(self) -> Image.Image:
         """Request the whole framebuffer and read updates until every pixel has arrived."""
         session = self._session
@@ -232,8 +230,6 @@ class RFBClient(CapabilityClient):
                 await self._reconnect()
         raise RuntimeError("unreachable")
 
-    # ─── pointer ─────────────────────────────────────────────────────
-
     def _pointer(self) -> None:
         self._session.writer.write(struct.pack(">BBHH", 5, self._buttons, self._x, self._y))
 
@@ -270,8 +266,6 @@ class RFBClient(CapabilityClient):
         """Turn the wheel (buttons 3 up, 4 down) ``clicks`` notches; positive scrolls down."""
         for _ in range(abs(clicks)):
             self.click(4 if clicks > 0 else 3)
-
-    # ─── keyboard ────────────────────────────────────────────────────
 
     def _key(self, code: int, *, down: bool) -> None:
         self._session.writer.write(struct.pack(">BBxxI", 4, down, code))

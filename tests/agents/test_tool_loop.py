@@ -150,9 +150,6 @@ async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
         assert trace.error == "SSH tool failure limit reached after 3 consecutive errors"
 
 
-# ─── the tool timeout ──────────────────────────────────────────────────
-
-
 async def test_a_shell_call_past_the_tool_timeout_is_cut_off_and_the_run_goes_on(
     models: Models, tmp_path: Path
 ) -> None:
@@ -206,9 +203,6 @@ async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeo
     *_, (failed, text) = tool_results(trace)
     assert (trace.status, failed) == ("completed", True)
     assert "str_replace_based_edit_tool timed out after 1s" in text
-
-
-# ─── MCP tool names ────────────────────────────────────────────────────
 
 
 def named(name: str, *tools: str) -> FastMCP:

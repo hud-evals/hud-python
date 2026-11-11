@@ -114,9 +114,6 @@ def test_a_wrapped_vectorized_sim_reports_each_episode_as_its_own_trace(
     assert observations == {"trace-0": 1, "trace-1": 2, "trace-2": 1}
 
 
-# ─── direct control streams every played tick ──────────────────────────
-
-
 def frames_in(segments: list[dict[str, Any]]) -> int:
     """How many frames the recorded MP4 segments decode to."""
     mp4 = b"".join(base64.b64decode(segment["segment"]["data"]) for segment in segments)

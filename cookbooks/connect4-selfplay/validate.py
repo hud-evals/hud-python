@@ -58,7 +58,6 @@ async def run_validation(trained: str, opponent: str, games: int) -> None:
     verdict = "above baseline" if rate > 0.5 else "at or below baseline"
     print(f"  Win rate: {rate:.1%}  ({verdict})")
 
-    # Per-game breakdown so you can spot which seeds the model struggles on.
     print("\nPer-game:")
     for i, trace in enumerate(job.traces):
         side = "X" if i % 2 == 0 else "O"

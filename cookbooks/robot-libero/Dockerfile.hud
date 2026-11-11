@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git libgl1 libosmesa6-dev libglew-dev libegl1 libglib2.0-0 patchelf \
     && rm -rf /var/lib/apt/lists/*
 
-# LIBERO imports torch at module level only to load its saved initial states. The CPU wheels
-# avoid ~5 GB of CUDA libraries, and torchvision must come from the same index.
+# LIBERO imports torch at module level only to load its saved initial states, so CPU wheels
+# suffice; torchvision must come from the same index.
 RUN pip install --no-cache-dir torch==2.11.0 torchvision==0.26.0 \
     --index-url https://download.pytorch.org/whl/cpu
 

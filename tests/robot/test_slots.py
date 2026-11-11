@@ -213,9 +213,6 @@ async def test_concurrent_sessions_with_different_args_cannot_share_a_batch() ->
     assert started == {"prompt": "prompt [('task', 'A')]"}
 
 
-# ─── stepping a batch ──────────────────────────────────────────────────
-
-
 async def test_a_silent_slot_times_out_while_its_peer_keeps_stepping() -> None:
     sim = Sim(num_envs=2, step_timeout=0.05)
 

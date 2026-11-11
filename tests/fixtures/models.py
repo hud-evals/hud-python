@@ -210,8 +210,6 @@ class Models:
         """Every model request so far, decoded, in arrival order."""
         return [self._decode(request) for request in self._services.requests("gateway", "POST")]
 
-    # ─── protocol endpoints ───────────────────────────────────────────
-
     def _next(self, request: ModelRequest) -> Turn:
         if self._policy is not None:
             turn = self._policy(request)

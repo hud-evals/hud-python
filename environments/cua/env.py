@@ -1,8 +1,5 @@
 """A virtual Linux desktop exposed through an RFB capability."""
 
-# NOTE: do NOT add `from __future__ import annotations` here - under it a typed @env.template
-# param crashes the sync/deploy manifest path (TypeAdapter on a string forward-ref). Keep
-# annotations as real objects.
 import asyncio
 import os
 from collections.abc import Awaitable

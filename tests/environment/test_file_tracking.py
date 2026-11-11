@@ -17,7 +17,7 @@ from tests.environment.conftest import wire
 if TYPE_CHECKING:
     from pathlib import Path
 
-#: Larger than the per-file capture limit (5 MiB).
+# Larger than the per-file capture limit (5 MiB).
 BIG_PDF = 5 * 1024 * 1024 + 1
 
 

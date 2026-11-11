@@ -80,7 +80,7 @@ def _field(name: str, value: str) -> tuple[str, str]:
     return name, value
 
 
-# The proxy port on the workspace's loopback (3128, the conventional proxy port).
+# The proxy port on the workspace's loopback.
 BRIDGE_PORT = 3128
 
 # The proxy for a visitor, which joins the workspace network without being a session and

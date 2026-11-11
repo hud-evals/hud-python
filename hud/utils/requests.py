@@ -28,7 +28,6 @@ logger = logging.getLogger("hud.http")
 logger.setLevel(logging.INFO)
 
 
-# Long running requests can take up to 10 minutes.
 _DEFAULT_TIMEOUT = 600.0
 _DEFAULT_LIMITS = httpx2.Limits(
     max_connections=1000,

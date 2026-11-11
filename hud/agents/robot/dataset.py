@@ -187,7 +187,6 @@ class DatasetWriter:
 
     def _ensure_dataset(self) -> Any:
         """Get or create the dataset shared by this schema and FPS; caller holds ``_lock``."""
-        # Share only when fps + robot_type + feature schema match.
         key = (
             self._fps,
             self._contract.get("robot_type") or "robot",

@@ -75,7 +75,6 @@ class DaytonaRuntime:
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
     ) -> None:
         self.snapshot_name = snapshot_name
-        # The default command serves on port, the SSH forward's target.
         self.command = (
             command or f'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port {port}'
         )
@@ -201,8 +200,8 @@ class DaytonaRuntime:
                                     "Daytona snapshot %s is stale; rebuilding", snapshot_name
                                 )
                                 await daytona.snapshot.delete(existing)
-                                # Deletion frees the name asynchronously (~10s
-                                # observed); creating before it lands conflicts.
+                                # Deletion frees the name asynchronously; creating
+                                # before it lands conflicts.
                                 async with asyncio.timeout(120):
                                     while True:
                                         try:

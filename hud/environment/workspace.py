@@ -252,7 +252,8 @@ class Bubblewrap:
     tmpfs_modes: bool = False
 
 
-# Set once the first Workspace probes the substrate (avoid per-instance work).
+# Cached probe of this substrate: a ``Bubblewrap`` launch mode, or the failure reason
+# when none works.
 _bwrap_usable: Bubblewrap | str | None = None
 
 
@@ -357,9 +358,6 @@ def _is_root() -> bool:
     return sys.platform != "win32" and hasattr(os, "geteuid") and os.geteuid() == 0
 
 
-# ─────────────────────────── mount declarations ───────────────────────────
-
-
 MountKind = Literal["ro", "rw", "tmpfs", "symlink", "proc", "dev"]
 
 # kind -> (normal flag, optional modifier, takes source)
@@ -394,8 +392,7 @@ class Mount:
         return [flag, self.src, self.dst] if takes_src else [flag, self.dst]
 
 
-# Most slim Linux distros merge ``/lib`` into ``/usr/lib`` via symlinks;
-# we mirror that inside the namespace.
+# Slim distros merge ``/lib`` into ``/usr/lib`` with symlinks; the sandbox mirrors them.
 DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
     Mount("ro", src="/usr", dst="/usr"),
     Mount("ro", src="/etc", dst="/etc"),
@@ -408,9 +405,6 @@ DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
     # World-writable like a host /tmp, so unprivileged sessions get scratch space.
     Mount("tmpfs", dst="/tmp", mode=0o1777),  # noqa: S108 — namespace-local tmpfs, not a host tempdir
 )
-
-
-# ─────────────────────────── the workspace ───────────────────────────
 
 
 _DEFAULT_USER = "agent"
@@ -531,7 +525,6 @@ class Workspace:
         self,
         root: Path | str,
         *,
-        # bwrap configuration
         mounts: Sequence[Mount] = (),
         network: bool = False,
         allowed_hosts: Collection[str] | None = None,
@@ -541,7 +534,6 @@ class Workspace:
         env: Mapping[str, str] | None = None,
         system_mounts: Sequence[Mount] | None = None,
         guest_path: str = "/workspace",
-        # ssh server configuration
         host: str = "127.0.0.1",
         port: int = 0,
         user: str = _DEFAULT_USER,
@@ -556,7 +548,6 @@ class Workspace:
         hand_over_root: bool = True,
     ) -> None:
         self.root: Path = Path(root).resolve()
-        # Per-instance credential dir, materialized lazily (see _credentials_dir).
         self._cred_dir: Path | None = None
         self._configured_cred_dir = Path(credentials_dir) if credentials_dir else None
         self._configured_hosts_path = Path(hosts_path) if hosts_path else None
@@ -566,7 +557,6 @@ class Workspace:
         # need in-/out-of-sandbox paths to match (e.g. Harbor challenge dirs).
         self._guest_path = guest_path
 
-        # bwrap state
         self.mounts: tuple[Mount, ...] = tuple(mounts)
         self.network = network
         # Which hosts a session may reach. ``None`` leaves the network as the
@@ -602,7 +592,6 @@ class Workspace:
         # Only override the default; respect an explicit guest_path.
         if self._bwrap is None and guest_path == "/workspace":
             self._guest_path = self.root.as_posix()
-        # ssh config
         self._ssh_host = host
         self._ssh_port = port
         self._ssh_user = user
@@ -788,15 +777,10 @@ class Workspace:
                 )
         self.root.mkdir(parents=True, exist_ok=True)
         if (identity := self._shell_identity()) is not None and self._hand_over_root:
-            # Make the workspace dir itself writable by the dropped uid so a
-            # fresh workspace is usable out of the box. This is O(1) and must
-            # stay that way: it runs on the serving path, before the control
-            # port binds. We deliberately do NOT recurse — a baked tree
-            # (node_modules, a venv, a dataset) can hold hundreds of thousands
-            # of files, and walking it here delays the bind past the deploy
-            # readiness probe. Ownership of pre-staged content is the env
-            # author's job, done where it's cheap and scoped: at build time
-            # (`COPY --chown`) or in task setup over just what was staged.
+            # The root only, never recursively: this runs before the control port
+            # binds, and walking a baked tree (node_modules, a venv, a dataset) can
+            # push the bind past the readiness probe. Pre-staged content is chowned
+            # at build time (``COPY --chown``) or in task setup.
             os.lchown(self.root, *identity)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
@@ -813,8 +797,6 @@ class Workspace:
             self._ssh_user,
             self._client_key_path,
         )
-
-    # ─── lifecycle ────────────────────────────────────────────────────
 
     async def start(self) -> None:
         """Ensure the SSH accept loop is running. Idempotent.
@@ -894,8 +876,6 @@ class Workspace:
         if self._cred_dir is not None:
             shutil.rmtree(self._cred_dir, ignore_errors=True)
             self._cred_dir = None
-
-    # ─── ssh accessors / capability ───────────────────────────────────
 
     @property
     def ssh_url(self) -> str:
@@ -1107,8 +1087,6 @@ class Workspace:
             privileges=self._privileges(identity, no_new_privs=no_new_privs),
         )
 
-    # ─── sandbox ──────────────────────────────────────────────────────
-
     @property
     def bwrap_available(self) -> bool:
         return self._bwrap is not None
@@ -1230,8 +1208,6 @@ class Workspace:
         if requested != (os.geteuid(), os.getegid()):
             raise RuntimeError("running a workspace command as another user requires a root server")
         return Privileges(no_new_privs=no_new_privs)
-
-    # ─── the sandbox sessions share ───────────────────────────────────────
 
     async def sandbox_pid(self) -> int | None:
         """The live sandbox's init pid, starting one if none is running.
@@ -1411,8 +1387,6 @@ class Workspace:
         if self._namespace is not None:
             await self._namespace.terminate_sessions()
 
-    # ─── ssh server internals ─────────────────────────────────────────
-
     def _credentials_dir(self) -> Path:
         """Key material lives outside the served root: the root is the agent's
         shell cwd and diff-tracking surface, so secrets don't belong in it.
@@ -1430,7 +1404,8 @@ class Workspace:
                 self._configured_cred_dir.chmod(0o700)
                 self._cred_dir = self._configured_cred_dir
             else:
-                # Named for what it holds, not for what put it there.
+                # No ``hud`` in the name: a session that can list the temp directory
+                # should not learn what runs it.
                 self._cred_dir = Path(tempfile.mkdtemp(prefix="ssh-"))
         return self._cred_dir
 
@@ -1619,9 +1594,6 @@ class Workspace:
                     win_argv: list[str] = shlex.split(process.command, posix=False)
                 except ValueError:
                     win_argv = ["cmd.exe", "/c", process.command]
-                # cmd.exe launched via CreateProcess/subprocess does NOT search
-                # the CWD for batch files — only directories on PATH. Resolve
-                # relative .bat paths to absolute so cmd.exe finds them.
                 if win_argv and win_argv[0].lower() in ("cmd", "cmd.exe"):
                     win_argv = [
                         str(self.root / arg)

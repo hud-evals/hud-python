@@ -54,7 +54,7 @@ def load_environment(
     #                    name with nothing on disk (factories, adapted images)
     path = Path(target)
     if not path.exists() and path.suffix != ".py" and Path(f"{target}.py").exists():
-        path = Path(f"{target}.py")  # bare dev references: 'env' means env.py
+        path = Path(f"{target}.py")
 
     package_attribute = (
         (name is not None or bool(args))

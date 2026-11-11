@@ -125,7 +125,6 @@ GATEWAY_MAX_RETRIES = 6
 
 def build_gateway_client(provider: str) -> GatewayClient:
     """A ``provider`` SDK client pointed at the HUD gateway, with trace headers attached."""
-    # Provider SDK clients bypass hud.utils.requests, so guard here.
     if not settings.api_key:
         raise HudAuthenticationError("HUD_API_KEY is required for HUD gateway clients")
 

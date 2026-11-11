@@ -359,7 +359,6 @@ def eval_command(
 
     agent_type, source = cfg.agent_type, cfg.source
     assert agent_type is not None and source is not None
-    # A file on disk spawns locally; a platform taskset runs on the platform.
     if cfg.runtime is None:
         is_file = Path(source).exists()
         cfg = cfg.merge({"runtime": Placement.LOCAL if is_file else Placement.HOSTED})
@@ -453,7 +452,6 @@ def eval_command(
         case _:
             assert_never(cfg.runtime)
 
-    # The agent's config kwargs: its TOML section, then --model on top.
     agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
     if cfg.model:
         agent_kwargs["model"] = cfg.model

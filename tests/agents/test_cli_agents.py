@@ -34,8 +34,8 @@ if TYPE_CHECKING:
 UNSANDBOXED = pytest.mark.skipif(
     usable_bwrap() is not None, reason="this host sandboxes the workspace"
 )
-#: (agent type, the executable it launches). A sandboxed workspace connects Codex to
-#: its model only as its native binary, and the stub is a script.
+# (agent type, the executable it launches). A sandboxed workspace connects Codex to
+# its model only as its native binary, and the stub is a script.
 EVERY_CLI = pytest.mark.parametrize(
     ("agent_type", "cli"),
     [
@@ -235,7 +235,8 @@ async def test_in_a_sandbox_the_cli_reaches_its_model_without_its_key(
 
     @env.template()
     async def task():
-        await workspace.run(["true"])  # the sandbox starts before the agent does
+        # Start the sandbox first, so the agent's connection is bound into a running one.
+        await workspace.run(["true"])
         yield "Do the task."
         yield 1.0
 

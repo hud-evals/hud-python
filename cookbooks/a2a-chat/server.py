@@ -202,7 +202,7 @@ def main() -> None:
             max_steps=int(os.getenv("HUD_MAX_STEPS", "50")),
         ),
         runtime=placement,
-        host=os.getenv("HUD_A2A_HOST", "0.0.0.0"),  # noqa: S104
+        host=os.getenv("HUD_A2A_HOST", "0.0.0.0"),
         port=int(os.getenv("HUD_A2A_PORT", "9999")),
     )
 

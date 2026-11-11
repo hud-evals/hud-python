@@ -34,7 +34,7 @@ else:
 REPO_SOURCE = os.environ.get("REPO_URL") or str(Path(__file__).with_name("flask.bundle"))
 TEST_TIMEOUT = float(os.environ.get("GRADING_TIMEOUT", "3600"))
 AGENT_UID = 1000
-AGENT_HOME = Path("/tmp/agent-home")  # noqa: S108 - inside the sandbox's own writable /tmp
+AGENT_HOME = Path("/tmp/agent-home")  # the sandbox's own writable /tmp
 AGENT_ENV = {"HOME": str(AGENT_HOME)}
 VENV_ACTIVATE = Path(sys.executable).with_name("activate")
 if VENV_ACTIVATE.is_file():

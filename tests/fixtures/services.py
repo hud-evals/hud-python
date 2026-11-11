@@ -139,8 +139,6 @@ class FakeServices:
             self._sockets.clear()
             self._requests.clear()
 
-    # ─── configuration ────────────────────────────────────────────────
-
     def url(self, service: str) -> str:
         if service not in SERVICE_ENV:
             raise KeyError(f"unknown service {service!r}; one of {sorted(SERVICE_ENV)}")
@@ -178,8 +176,6 @@ class FakeServices:
         with self._lock:
             self._sockets.insert(0, _Route(service, "WS", _compile(path), handler))
 
-    # ─── observation ──────────────────────────────────────────────────
-
     def requests(
         self, service: str | None = None, method: str | None = None, path: str | None = None
     ) -> list[Request]:
@@ -197,8 +193,6 @@ class FakeServices:
 
     def bodies(self, service: str, method: str, path: str) -> list[Any]:
         return [request.json for request in self.requests(service, method, path)]
-
-    # ─── serving ──────────────────────────────────────────────────────
 
     def _match(
         self, routes: list[_Route], service: str, method: str, path: str

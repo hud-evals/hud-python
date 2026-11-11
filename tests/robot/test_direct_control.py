@@ -38,7 +38,7 @@ from .sims import (
 if TYPE_CHECKING:
     from hud import Trace
 
-#: The default contract: an absolute ``[x, grip]`` action, x in [0, 1].
+# The default contract: an absolute ``[x, grip]`` action, x in [0, 1].
 REACH = contract("ee_abs", [0.0, -1.0], [1.0, 1.0])
 
 
@@ -135,9 +135,6 @@ async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(
     assert sim.actions == []
 
 
-# ─── the tool surface ──────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     ("action_type", "names", "call", "column"),
     [
@@ -183,8 +180,6 @@ async def test_tools_use_standard_dimension_names_when_every_native_name_has_one
     commanded[column] = 0.3
     np.testing.assert_allclose(sim.actions[-1], commanded, atol=1e-4)
 
-
-# ─── settle verdicts: how each kind of arm ends an absolute move ───────
 
 STOPPED_SHORT = "Stopped short of the target; the arm is at rest. Remaining offsets: "
 
@@ -251,9 +246,6 @@ async def test_a_gripper_offset_never_decides_the_verdict() -> None:
     assert "At the target." in agent.replies()[0]
     assert len(sim.actions) == 80
     assert sim.state.tolist() == pytest.approx([0.5, 1.0])
-
-
-# ─── rotations: roll / pitch / yaw onto whatever the contract stores ───
 
 
 @pytest.mark.parametrize(
@@ -328,9 +320,6 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
     np.testing.assert_allclose(roll[1:7], wrapped, atol=1e-6)
     np.testing.assert_allclose(roll[7:], -math.pi, atol=1e-6)
     assert sim.state[1] == pytest.approx(-math.pi)
-
-
-# ─── the episode's time budget ─────────────────────────────────────────
 
 
 @pytest.mark.parametrize(

@@ -23,6 +23,8 @@ T = TypeVar("T")
 _TRANSFER_TIMEOUT = httpx2.Timeout(30.0, read=600.0, write=600.0)
 _CHUNK_BYTES = 1024 * 1024
 
+# ``stopped``: the importer refused the bundle or stopped partway, and its report
+# says why. ``failed``: the import did not run to an outcome.
 ImportStatus = Literal[
     "queued",
     "starting",
@@ -33,8 +35,6 @@ ImportStatus = Literal[
     "failed",
     "cancelled",
 ]
-# ``stopped``: the importer refused the bundle or stopped partway, and its report
-# says why. ``failed``: the import did not run to an outcome.
 LIVE_STATUSES: frozenset[ImportStatus] = frozenset({"queued", "starting", "running", "cancelling"})
 
 

@@ -230,7 +230,8 @@ async def test_only_the_bound_session_process_reaches_a_controller_connection(
             url=f"http://127.0.0.1:{protected}",
             headers={"Authorization": "Bearer scoped-runtime-token"},
         )
-        # Two relays on one port listen on different loopback addresses.
+        # A second connection's relay shares the port on another loopback address;
+        # the bound process must not reach it.
         neighbour = Connection(
             name="neighbour",
             capability="ssh",

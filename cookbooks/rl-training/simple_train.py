@@ -44,20 +44,19 @@ def _output_tokens(traces: list) -> int:
 
 
 async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: int) -> None:
-    model = MODEL  # the trainable gateway model (set at the top of this file)
+    model = MODEL
 
     # return_token_ids tells the gateway/agent this is a training rollout: the
     # response carries token ids + per-token logprobs, which the agent records on
     # each turn's trace Sample — the token-level data TrainingClient trains on.
-    # Allow room for chain-of-thought: this is a reasoning model, and the task
-    # (3-digit x 2-digit) needs scratch work — it just has to be hard enough to be
-    # right only sometimes (the GRPO signal).
+    # Leave room for scratch work: the 3-digit x 2-digit task is meant to be right
+    # only sometimes, which is the GRPO signal.
     agent = create_agent(
         model,
         completion_kwargs={"max_tokens": 1024, "extra_body": {"return_token_ids": True}},
     )
     trainer = TrainingClient(model)
-    # A deployed taskset on remote HUD boxes (HUD_TASKSET), or the local env.
+    # The deployed TASKSET (see common.py) on HUD boxes, or the bundled local env.
     taskset, runtime = load_taskset_and_runtime()
 
     # One job spans the whole session; each iteration appends its batch of runs.
@@ -65,14 +64,13 @@ async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: 
     for step in range(steps):
         batch_start = len(session.traces)
 
-        # --- rollout phase (sampling throughput) ---
         t0 = time.perf_counter()
         await taskset.run(agent, runtime=runtime, job=session, max_concurrent=max_concurrent)
         rollout_s = time.perf_counter() - t0
         batch = session.traces[batch_start:]
         tokens = _output_tokens(batch)
 
-        # --- train phase (forward_backward + optim_step, split out for metrics) ---
+        # trainer.step would run both; they are split here to time each.
         t1 = time.perf_counter()
         fb = await trainer.forward_backward(
             batch,

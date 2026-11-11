@@ -52,10 +52,8 @@ def glm_double_sided_is(
     reward) is a constant carried on the matching ``DatumTensors``.
     """
     # Per-group (GRPO) baseline: advantage = reward − group mean. GLM-5.2 uses a
-    # learned critic here (README, Option A); the group baseline is the
-    # critic-free stand-in so the focus stays on the IS ratio / mask / norm.
-    # ``group_idx`` is None when training ungrouped — then all datums share one
-    # baseline (a single-rollout / batch-mean formulation).
+    # learned critic here; the group baseline is the critic-free stand-in.
+    # ``group_idx`` is None when training ungrouped, so all datums share one baseline.
     group_rewards: dict[int | None, list[float]] = {}
     for datum in data:
         group_rewards.setdefault(datum.group_idx, []).append(datum.reward)
@@ -94,7 +92,7 @@ def glm_double_sided_is(
 
 
 async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: int) -> None:
-    model = MODEL  # the trainable gateway model (set at the top of this file)
+    model = MODEL
 
     # Training rollout: capture token ids + logprobs onto each turn's Sample;
     # room for chain-of-thought (the task needs scratch work).
@@ -103,7 +101,7 @@ async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: 
         completion_kwargs={"max_tokens": 1024, "extra_body": {"return_token_ids": True}},
     )
     trainer = TrainingClient(model)
-    # A deployed taskset on remote HUD boxes (HUD_TASKSET), or the local env.
+    # The deployed TASKSET (see common.py) on HUD boxes, or the bundled local env.
     taskset, runtime = load_taskset_and_runtime()
 
     session = await Job.start("arith-rl-ppo", group=group)

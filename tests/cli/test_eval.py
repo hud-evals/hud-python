@@ -63,9 +63,6 @@ def run(hud: Hud, *argv: str) -> Any:
     return result.json
 
 
-# ─── results ────────────────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     ("grade", "selection", "exit_code", "rewards", "errors"),
     [
@@ -135,9 +132,6 @@ def test_eval_runs_the_tasks_it_selects(
     run(hud, "tasks.py", *SCRIPTED, *argv)
 
     assert sorted(request.prompt for request in gateway.requests()) == prompts
-
-
-# ─── how the agent reaches its model ────────────────────────────────────
 
 
 GLM = {
@@ -218,8 +212,6 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     }
     assert {name: observed[name] for name in expected} == expected
 
-
-# ─── project layouts ────────────────────────────────────────────────────
 
 ENV = 'from hud import Environment\nenv = Environment("local-test")\n'
 SOLVE = (
@@ -307,9 +299,6 @@ def test_eval_runs_a_projects_rows_in_the_environments_they_name(
     assert (document["run_count"], document["mean_reward"], document["error_count"]) == outcome
 
 
-# ─── planning and refusals ──────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     ("config", "argv", "hosted"),
     [
@@ -351,9 +340,6 @@ def test_eval_runs_each_row_where_its_placement_says(
     assert document["mean_reward"] == (0.5 if hosted else 1.0)
     assert len(signed_in.requests("api", "POST", "/v2/rollouts/submit")) == hosted
     assert [request.prompt for request in gateway.requests()] == ([] if hosted else ["solve 0"])
-
-
-# ─── interruption ───────────────────────────────────────────────────────
 
 
 def test_interrupting_a_hosted_eval_cancels_every_rollout_on_the_platform(

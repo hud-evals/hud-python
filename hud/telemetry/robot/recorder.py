@@ -74,8 +74,7 @@ class TraceRecorder:
     ) -> None:
         assert trace_id or run, "TraceRecorder needs a trace_id or a run"
         self._run = run
-        # Video encodes on a background thread, so it always needs an explicit id;
-        # a live run's id is the ambient rollout context.
+        # Video encodes on a background thread without the trace context, so resolve the id now.
         self.trace_id = trace_id or (run.trace.trace_id if run else None) or get_current_trace_id()
         self._fps = fps
         self._obs_space = obs_space
@@ -109,7 +108,7 @@ class TraceRecorder:
         ``data`` maps feature names to per-env arrays; camera frames (``HxWxC``)
         go to the video path, flat numeric vectors become labelled state.
         """
-        if self._obs_space is not None:  # contract-aware labeling/slicing
+        if self._obs_space is not None:
             step = ObservationStep.from_obs({"data": data}, tick=tick, obs_space=self._obs_space)
         else:
             state: dict[str, StateFeature] = {}
@@ -278,7 +277,7 @@ class JobRecorder:
             if reward_np is not None:
                 rec.add_reward(float(reward_np[i]))
             done_i = done_np is not None and bool(done_np[i])
-            if not done_i:  # a done step's returned obs is the next episode's
+            if not done_i:
                 data: dict[str, Any] = {}
                 if obs is not None:
                     sliced = obs if isinstance(obs, dict) else {"obs": obs}

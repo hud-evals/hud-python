@@ -77,8 +77,6 @@ async def test_spans_are_written_where_the_configuration_says(
     assert bool(reporting.requests("telemetry", "POST", UPLOAD)) is uploaded
 
 
-# ─── the HUD telemetry service ─────────────────────────────────────────
-
 ROOT = Path(__file__).parents[2]
 
 

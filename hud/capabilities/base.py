@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Self
 from urllib.parse import urlsplit, urlunsplit
 
-# Matches the scheme prefix of a URL (RFC 3986).
 SCHEME_RE: re.Pattern[str] = re.compile(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):")
 
 

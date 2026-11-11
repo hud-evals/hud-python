@@ -1,3 +1,3 @@
-# The controller refuses to serve.
+# The controller refuses to serve when a templated variable has no value and no default.
 base = "agent-answer"
 startup_error = "HARBOR_MISSING_KEY"

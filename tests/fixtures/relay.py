@@ -25,7 +25,7 @@ class FlakyRelay:
     def __init__(self, upstream: tuple[str, int]) -> None:
         self.upstream = upstream
         self.port = 0
-        #: Connections accepted so far, refused and stalled ones included.
+        # Connections accepted so far, refused and stalled ones included.
         self.accepted = 0
         self._refusals = 0
         self._released = asyncio.Event()

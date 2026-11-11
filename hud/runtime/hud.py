@@ -84,9 +84,9 @@ class HUDRuntime:
         from hud.settings import settings as sdk_settings
 
         if task.runtime_config is not None:
-            # The lease resolves the env by name, so a stamped image is only provenance.
-            # Loaders stamp cpu/memory on every row, so those only warn; a GPU, OS, TPU
-            # or limits change what is graded, so those fail.
+            # The lease resolves the env by name, so an image or Compose recipe is only
+            # provenance and cpu/memory only warn; a GPU, OS, TPU or limits change what is
+            # graded, so those fail.
             resources = task.runtime_config.resources
             if (
                 resources is not None

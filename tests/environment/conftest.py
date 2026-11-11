@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
 
-#: The control channel's frame limit, in bytes, excluding the newline.
+# The control channel's frame limit, in bytes, excluding the newline.
 FRAME_LIMIT = 16 * 1024 * 1024
 
 

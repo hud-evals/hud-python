@@ -232,7 +232,6 @@ async def _review_files(
     declared.extend(uploaded)
 
     listing = "\n".join(f"- {entry['path']}" for entry in declared) or "- (none)"
-    # A template that declares no `returns` is sent the agent's final text.
     yield {
         "prompt": (
             f"You have a shell in {WORKSPACE_ROOT}. These files are staged for you:\n"

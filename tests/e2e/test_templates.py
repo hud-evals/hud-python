@@ -48,7 +48,7 @@ HOSTED_MODEL = "claude-sonnet-5-5"
 REAL_MODEL = ("--gateway", "--config", "max_tokens=2048")
 
 
-#: Every template; one serving an isolated workspace joins the sandbox lane.
+# Every template; one serving an isolated workspace joins the sandbox lane.
 ROWS_BY_TEMPLATE = [
     pytest.param(
         name, marks=[pytest.mark.e2e, pytest.mark.sandbox] if name in SANDBOXED else [], id=name

@@ -31,7 +31,8 @@ if TYPE_CHECKING:
 P = ParamSpec("P")
 T = TypeVar("T")
 
-# Control-session id for the running accept/cancel task (robot slot claims key on it).
+# The control session whose task call is running; session-keyed state (robot slot
+# claims, per-session state dirs) keys on it.
 current_session_id: ContextVar[str | None] = ContextVar("hud_current_session_id", default=None)
 
 
@@ -163,13 +164,10 @@ class Environment:
     ) -> None:
         self.name = name
         self.version = version
-        # Published capabilities — always concrete wire data. Daemons the env
-        # runs itself publish theirs at serve time (``add_capability``
-        # from an ``@env.initialize`` hook; ``workspace`` wires the
-        # common ssh case).
+        # Published capabilities; hooks publish the ones the env runs itself at serve time.
         self.capabilities: list[Capability] = []
         self._started = False
-        self._hooks_done = False  # True only after all @env.initialize hooks have completed
+        self._hooks_done = False
         for entry in capabilities or []:
             self.add_capability(entry)
         # Registered task templates by id (the ``@env.template`` registry).
@@ -187,8 +185,6 @@ class Environment:
         self._workspace_routes: dict[WorkspaceRoute, tuple[Workspace, Peer | None, set[str]]] = {}
         self._connections: dict[str, _BoundConnection] = {}
         self._binding = asyncio.Lock()
-
-    # ─── task registration ───────────────────────────────────────────
 
     @property
     def templates(self) -> dict[str, _TaskFactory[Any]]:
@@ -252,8 +248,6 @@ class Environment:
         """Register a teardown hook (run in reverse order on stop)."""
         self._on_stop.append(fn)
         return fn
-
-    # ─── capabilities ─────────────────────────────────────────────────────
 
     def add_capability(self, cap: Capability) -> None:
         """Publish concrete wire data, replacing any same-named entry.
@@ -355,8 +349,6 @@ class Environment:
             await sim.stop()
 
         return sim
-
-    # ─── substrate-run daemon lifecycle ──────────────────────────────────
 
     async def start(self) -> None:
         """Run ``@env.initialize`` hooks. Idempotent until ``stop``.

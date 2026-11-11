@@ -46,7 +46,7 @@ async def chat_full(messages: list[PromptMessage]):
     messages with their original roles.
     """
     system = PromptMessage(
-        role="user",  # type: ignore[arg-type]
+        role="user",
         content=TextContent(
             type="text",
             text=(

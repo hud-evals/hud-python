@@ -52,7 +52,7 @@ class ControlPeer:
     scripts: Sequence[Sequence[Action]]
     upstreams: dict[str, tuple[str, int]]
     port: int = 0
-    #: Control connections accepted, tunnel streams excluded.
+    # Control connections accepted, tunnel streams excluded.
     accepted: int = 0
     tunnels: int = 0
     frames: list[Frame] = field(default_factory=list)

@@ -75,7 +75,7 @@ SECRET_DENY_PATTERNS: tuple[str, ...] = (
     ".aws/",
 )
 
-# Skip files larger than this during scanning (default 10 MB).
+# Files larger than this are left out of snapshots.
 DEFAULT_MAX_FILE_SIZE: int = 10 * 1024 * 1024
 
 # Artifacts worth preserving as downloads. Common source edits are already
@@ -545,7 +545,6 @@ class FileTracker:
             )
 
         if self._matches(rel, False, self._secret_deny_patterns):
-            # Credential-shaped: detect change via fingerprint, never read content.
             return FileEntry(
                 rel_path=rel,
                 size=stat.st_size,
@@ -600,7 +599,7 @@ class FileTracker:
             with root_gitignore.open("r", encoding="utf-8", errors="replace") as f:
                 for raw in f:
                     line = raw.strip()
-                    # Skip comments, blanks, and negations (unsupported).
+                    # Negation patterns are not supported.
                     if not line or line.startswith(("#", "!")):
                         continue
                     patterns.append(line.lstrip("/"))

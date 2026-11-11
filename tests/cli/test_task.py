@@ -62,9 +62,6 @@ def test_a_task_spawned_from_its_source_starts_and_grades(
     assert (result.exit_code, result.stdout) == (0, stdout), result
 
 
-# ─── attached to a served environment ───────────────────────────────────
-
-
 def counting_env(starts: list[str], *, failing: bool = False) -> Environment:
     env = Environment("example")
 

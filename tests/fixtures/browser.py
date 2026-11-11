@@ -43,7 +43,7 @@ class FakeBrowser:
 
     pages: list[str] = field(default_factory=lambda: ["page-1"])
     replies: dict[str, dict[str, Any]] = field(default_factory=dict)
-    #: Whether ``PUT /json/new`` creates a page; otherwise it answers ``{}``.
+    # Whether ``PUT /json/new`` creates a page; otherwise it answers ``{}``.
     can_create: bool = True
     http: list[str] = field(default_factory=list)
     commands: list[Command] = field(default_factory=list)

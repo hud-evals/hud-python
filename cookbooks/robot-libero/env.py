@@ -65,7 +65,6 @@ def hold_pose(data: dict) -> np.ndarray:
     return np.concatenate([state[:3], rotation, [-1.0]])
 
 
-# Absolute mode also serves the `move_to` tool, so an LLM can drive the arm directly.
 if CONTROL == "absolute":
     DirectControl(
         reference=hold_pose,  # what an unset target dimension keeps
