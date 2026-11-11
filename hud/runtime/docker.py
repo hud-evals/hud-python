@@ -378,6 +378,8 @@ class DockerRuntime:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DockerEndpoint(Runtime):
+    """The ``Runtime`` a ``DockerRuntime`` yields: its control channel and ``container`` id."""
+
     transports_sessions: ClassVar[bool] = True
 
     container: str

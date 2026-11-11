@@ -12,20 +12,22 @@ from .core import (
     Shared,
 )
 from .daytona import DaytonaRuntime
-from .docker import DockerRuntime
+from .docker import DockerEndpoint, DockerRuntime
 from .hosted import HostedRuntime
 from .hud import HUDRuntime
 from .local import LocalRuntime, SubprocessRuntime
-from .modal import ModalRuntime
+from .modal import ModalEndpoint, ModalRuntime
 
 __all__ = [
     "ComposeProject",
     "DaytonaRuntime",
     "DockerBindMount",
+    "DockerEndpoint",
     "DockerRuntime",
     "HUDRuntime",
     "HostedRuntime",
     "LocalRuntime",
+    "ModalEndpoint",
     "ModalRuntime",
     "Provider",
     "Runtime",

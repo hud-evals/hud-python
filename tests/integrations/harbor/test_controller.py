@@ -21,7 +21,6 @@ at the top level or per ``[[case]]`` (a case adds to the top level):
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -182,34 +181,15 @@ async def test_a_harbor_task_grades_as_its_fixture_expects(
 
 
 @pytest.mark.parametrize("case", REFUSED, ids=[case.id for case in REFUSED])
-def test_a_controller_with_an_unusable_configuration_refuses_to_serve(
+async def test_a_controller_with_an_unusable_configuration_refuses_to_serve(
     case: Case, sdk_wheel: Path, tmp_path: Path
 ) -> None:
-    # Providers yield once the control port is published, before the serve
-    # process proves itself, so the refusal is observed by running the main
-    # service of the adapted project in the foreground.
     (row,) = adapted(case, sdk_wheel, tmp_path).taskset
-    assert row.runtime_config is not None and row.runtime_config.compose is not None
-    compose = row.runtime_config.compose.document
-    assert isinstance(compose, Path)
+    docker = DockerRuntime(env_vars=case.env_vars, bind_mounts=case.bind_mounts)
 
-    def compose_command(*args: str, timeout: float) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["docker", "compose", "--file", str(compose), *args],
-            cwd=compose.parent,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+    with pytest.raises(RuntimeError) as refused:
+        async with docker(row):
+            pass
 
-    try:
-        built = compose_command("build", timeout=1200)
-        assert built.returncode == 0, built.stderr[-4000:]
-        served = compose_command("run", "--rm", "main", timeout=120)
-    finally:
-        compose_command("down", "--volumes", "--remove-orphans", timeout=120)
-
-    assert served.returncode != 0
     assert case.startup_error is not None
-    assert case.startup_error in served.stdout + served.stderr
+    assert case.startup_error in str(refused.value)

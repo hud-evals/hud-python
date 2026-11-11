@@ -9,7 +9,6 @@ up, with the tools and verdicts the model saw.
 
 from __future__ import annotations
 
-import copy
 import math
 from typing import TYPE_CHECKING, Any
 
@@ -17,7 +16,6 @@ import numpy as np
 import pytest
 
 from hud import Task
-from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment.robot import DirectControl
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime
@@ -55,6 +53,20 @@ async def drive(
     return agent, trace
 
 
+def strict(schema: dict[str, Any]) -> bool:
+    """Whether ``schema`` meets OpenAI's strict mode: objects closed, all properties required."""
+    if schema.get("type") == "object":
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is not False or set(
+            schema.get("required", [])
+        ) != set(properties):
+            return False
+        if not all(strict(sub) for sub in properties.values()):
+            return False
+    nested = [schema["items"]] if isinstance(schema.get("items"), dict) else []
+    return all(strict(sub) for sub in [*nested, *schema.get("anyOf", [])])
+
+
 async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() -> None:
     sim = Arm(REACH, done=reached)
 
@@ -67,7 +79,7 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
 
     assert agent.tools == {"move_to", "wait"}  # the ee_abs contract picked the motion tool
     schema = agent.schemas["move_to"]
-    assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
+    assert strict(schema)  # OpenAI's strict mode accepts it unchanged
     assert trace.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
     # The sim matches the command; the call holds until two 3-tick windows show it settled.

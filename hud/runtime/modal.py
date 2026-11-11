@@ -37,6 +37,8 @@ _SESSION_ARCHIVE = "/runtime/session.tar.gz"
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ModalEndpoint(Runtime):
+    """The ``Runtime`` a ``ModalRuntime`` yields: its control channel and Modal ``sandbox``."""
+
     transports_sessions: ClassVar[bool] = True
 
     sandbox: modal.Sandbox

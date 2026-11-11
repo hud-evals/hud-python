@@ -13,6 +13,7 @@ import struct
 import zlib
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from enum import IntEnum
 from typing import TYPE_CHECKING
 
 from cryptography.hazmat.decrepit.ciphers.algorithms import TripleDES
@@ -20,6 +21,17 @@ from cryptography.hazmat.primitives.ciphers import Cipher, modes
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
+
+class ClientMessage(IntEnum):
+    """RFB client-to-server message types (RFC 6143, section 7.5)."""
+
+    SET_PIXEL_FORMAT = 0
+    SET_ENCODINGS = 2
+    FRAMEBUFFER_UPDATE_REQUEST = 3
+    KEY_EVENT = 4
+    POINTER_EVENT = 5
+    CLIENT_CUT_TEXT = 6
 
 
 @dataclass(frozen=True)
@@ -90,7 +102,7 @@ class FakeScreen:
                     await writer.drain()
                     return
             writer.write(struct.pack(">I", 0))
-            await reader.readexactly(1)  # ClientInit
+            await reader.readexactly(1)  # ClientInit's shared-session flag, unused
             name = b"hud-fake-screen"
             pixel_format = struct.pack(">BBBBHHHBBB3x", 32, 24, 0, 1, 255, 255, 255, 0, 8, 16)
             writer.write(struct.pack(">HH", self.width, self.height) + pixel_format)
@@ -100,13 +112,13 @@ class FakeScreen:
             zlib_encoding = False
             while True:
                 (kind,) = await reader.readexactly(1)
-                if kind == 0:  # SetPixelFormat
+                if kind == ClientMessage.SET_PIXEL_FORMAT:
                     await reader.readexactly(19)
-                elif kind == 2:  # SetEncodings
+                elif kind == ClientMessage.SET_ENCODINGS:
                     _, count = struct.unpack(">BH", await reader.readexactly(3))
                     encodings = struct.unpack(f">{count}i", await reader.readexactly(4 * count))
                     zlib_encoding = 6 in encodings
-                elif kind == 3:  # FramebufferUpdateRequest
+                elif kind == ClientMessage.FRAMEBUFFER_UPDATE_REQUEST:
                     await reader.readexactly(9)
                     self.updates += 1
                     if self.updates == self.drop_on_update:
@@ -124,13 +136,13 @@ class FakeScreen:
                         )
                         writer.write(data)
                     await writer.drain()
-                elif kind == 4:  # KeyEvent
+                elif kind == ClientMessage.KEY_EVENT:
                     down, _, key = struct.unpack(">B2sI", await reader.readexactly(7))
                     self.events.append(KeyEvent(key, bool(down)))
-                elif kind == 5:  # PointerEvent
+                elif kind == ClientMessage.POINTER_EVENT:
                     buttons, x, y = struct.unpack(">BHH", await reader.readexactly(5))
                     self.events.append(PointerEvent(x, y, buttons))
-                elif kind == 6:  # ClientCutText
+                elif kind == ClientMessage.CLIENT_CUT_TEXT:
                     _, length = struct.unpack(">3sI", await reader.readexactly(7))
                     await reader.readexactly(length)
                 else:

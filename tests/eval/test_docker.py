@@ -25,12 +25,12 @@ from hud.eval.run import rollout
 from hud.runtime import (
     ComposeProject,
     DockerBindMount,
+    DockerEndpoint,
     DockerRuntime,
     RuntimeConfig,
     RuntimeLimits,
     RuntimeResources,
 )
-from hud.runtime.docker import DockerEndpoint
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 

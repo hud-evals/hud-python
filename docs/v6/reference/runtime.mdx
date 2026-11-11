@@ -29,7 +29,9 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `HostedRuntime()` | The whole rollout managed by HUD | Agent and env execute remotely together |
 
 Every runtime imports from `hud.runtime` (`from hud.runtime import LocalRuntime, DockerRuntime,
-HUDRuntime, HostedRuntime, ModalRuntime, DaytonaRuntime, Runtime`).
+HUDRuntime, HostedRuntime, ModalRuntime, DaytonaRuntime, Runtime`). Placing a task yourself with
+`DockerRuntime` or `ModalRuntime` yields a `DockerEndpoint` (with its `container` id) or a
+`ModalEndpoint` (with its `sandbox`), both also in `hud.runtime`.
 
 <Note>
 **You can usually omit `runtime=`.** A run without one uses its known placement:
