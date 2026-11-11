@@ -19,8 +19,8 @@ from hud.capabilities.base import Capability
 from hud.environment.egress import ANY_HOST
 from hud.environment.env import Environment, current_session_id
 from hud.environment.workspace import Mount, Workspace
-from hud.graders.results import EvaluationResult
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
+from hud.types import EvaluationResult
 from hud.utils.process import ProcessResult, bound_shell_output, create_process_group_exec
 
 if TYPE_CHECKING:

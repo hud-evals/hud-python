@@ -6,7 +6,7 @@ import asyncio
 import warnings
 from collections.abc import Awaitable
 
-from .results import EvaluationResult, SubScore
+from hud.types import EvaluationResult, SubScore
 
 
 def _dedupe_subscore_names(subscores: list[SubScore]) -> list[str]:

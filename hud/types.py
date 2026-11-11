@@ -5,23 +5,27 @@ from __future__ import annotations
 import contextlib
 import json
 import uuid
+import warnings
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeAlias, cast
 
 from pydantic import (
+    AliasChoices,
     AnyUrl,
     BaseModel,
     ConfigDict,
     Field,
     JsonValue,
     PrivateAttr,
+    SerializationInfo,
     SerializeAsAny,
+    SerializerFunctionWrapHandler,
+    model_serializer,
     model_validator,
 )
 from rich.markup import escape
 from typing_extensions import TypeVar
 
-from hud.graders.results import SubScore
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
 from hud.telemetry.span import (
@@ -350,6 +354,99 @@ StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malfo
 # The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
 # conditions the loop may either stop on or answer with an error result.
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
+
+
+_SUMMARY_SERIALIZATION_CONTEXT = "hud_summary"
+
+
+class SubScore(BaseModel):
+    """One node in the grade breakdown tree.
+
+    A leaf subscore is a single measurement. A parent preserves the subscores
+    used to derive its value in ``children``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., description="Name of this subscore component")
+    weight: float = Field(
+        default=1.0,
+        description="Weight of this subscore (for weighted average). "
+        "Negative weights represent penalties.",
+    )
+    value: float = Field(..., ge=0.0, le=1.0, description="Value of this subscore, 0.0 to 1.0")
+    children: list[SubScore] | None = Field(
+        default=None,
+        description="Input subscores this node was combined from",
+    )
+    # Environments built before ``info`` was named send it as ``metadata``.
+    info: dict[str, Any] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("info", "metadata"),
+        description="Grader-specific details recorded on the evaluation span",
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: SerializerFunctionWrapHandler,
+        serialization_info: SerializationInfo,
+    ) -> dict[str, Any]:
+        data = cast("dict[str, Any]", handler(self))
+        if (serialization_info.context or {}).get(_SUMMARY_SERIALIZATION_CONTEXT):
+            data.pop("info", None)
+        return data
+
+    def to_summary(self) -> dict[str, Any]:
+        """Serialize the score breakdown without span-only info."""
+        return self.model_dump(
+            mode="json",
+            context={_SUMMARY_SERIALIZATION_CONTEXT: True},
+        )
+
+
+class EvaluationResult(BaseModel):
+    """The grade a task yields: a reward and an optional ``subscores`` breakdown."""
+
+    reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
+    done: bool = Field(default=True, description="Whether the task/episode is complete")
+    content: str | None = Field(default=None, description="Human-readable explanation")
+    info: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    isError: bool = Field(default=False, description="Whether the evaluation itself failed")
+    subscores: list[SubScore] | None = Field(
+        default=None,
+        description="Optional breakdown of score components for debugging",
+    )
+
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def _check_subscores(self) -> EvaluationResult:
+        if not self.subscores:
+            return self
+        names = [s.name for s in self.subscores]
+        dupes = [n for n in names if names.count(n) > 1]
+        if dupes:
+            warnings.warn(f"Duplicate subscore names: {set(dupes)}", stacklevel=2)
+        pos_weight_sum = sum(s.weight for s in self.subscores if s.weight > 0)
+        if abs(pos_weight_sum - 1.0) > 0.01:
+            warnings.warn(
+                f"Positive subscore weights should sum to ~1.0 (got {pos_weight_sum:.4f}). "
+                f"Weights represent proportional contributions to the reward.",
+                stacklevel=2,
+            )
+        weighted_sum = sum(s.value * s.weight for s in self.subscores)
+        if abs(weighted_sum - self.reward) > 0.01:
+            warnings.warn(
+                f"Subscores don't match reward: "
+                f"sum(value*weight)={weighted_sum:.4f} but reward={self.reward:.4f}",
+                stacklevel=2,
+            )
+        return self
+
+    @classmethod
+    def from_float(cls, value: float) -> EvaluationResult:
+        return cls(reward=value, done=True)
 
 
 class Grade(BaseModel):
