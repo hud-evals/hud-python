@@ -1507,6 +1507,114 @@ class Workspace:
             for peer in (self._process_connections[name],)
         )
 
+    async def _run_windows_session(
+        self, process: asyncssh.SSHServerProcess[bytes], env: dict[str, str]
+    ) -> None:
+        """Run a session command on Windows in a worker thread, inside a job object."""
+        # On Windows, asyncio.create_subprocess_exec uses the ProactorEventLoop's
+        # IOCP machinery for process-exit notification.  When the IOCP event fires
+        # after the subprocess coroutine has already returned (a race that can
+        # happen even when communicate() calls wait() internally), it corrupts
+        # asyncssh's IOCP state and permanently breaks the SSH session.
+        # Running a blocking subprocess in a worker thread sidesteps IOCP
+        # entirely: the blocking WaitForSingleObject in the worker thread drains
+        # the process exit before the Future resolves, leaving no pending events.
+        #
+        # The command is split into an argv with shlex.split. cmd.exe launched
+        # via CreateProcess does NOT search the CWD for batch files (only PATH),
+        # so relative .bat paths are resolved to absolute below.
+        if process.command:
+            try:
+                win_argv: list[str] = shlex.split(process.command, posix=False)
+            except ValueError:
+                win_argv = ["cmd.exe", "/c", process.command]
+            if win_argv and win_argv[0].lower() in ("cmd", "cmd.exe"):
+                win_argv = [
+                    str(self.root / arg)
+                    if (arg.lower().endswith(".bat") and not os.path.isabs(arg))
+                    else arg
+                    for arg in win_argv
+                ]
+        else:
+            win_argv = ["cmd.exe"]
+
+        def spawn() -> tuple[subprocess.Popen[bytes], _WindowsJob]:
+            job = _WindowsJob()
+            try:
+                child = subprocess.Popen(
+                    win_argv,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=str(self.root),
+                    env=env,
+                    creationflags=_CREATE_SUSPENDED,
+                )
+                try:
+                    job.assign(child)
+                    job.resume(child)
+                except BaseException:
+                    child.kill()
+                    child.wait()
+                    raise
+            except BaseException:
+                job.close()
+                raise
+            return child, job
+
+        try:
+            loop = asyncio.get_running_loop()
+            child, job = await loop.run_in_executor(None, spawn)
+        except FileNotFoundError as exc:
+            process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
+            process.exit(127)
+            return
+        except OSError as exc:
+            process.stderr.write(f"workspace: cannot own shell process tree: {exc}\n".encode())
+            process.exit(1)
+            return
+
+        communicate_task = asyncio.create_task(asyncio.to_thread(child.communicate))
+        channel_closed_task = asyncio.create_task(process.channel.wait_closed())
+        try:
+            done, _ = await asyncio.wait(
+                (communicate_task, channel_closed_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if channel_closed_task in done and not communicate_task.done():
+                return
+            stdout, stderr = await communicate_task
+        finally:
+            if not communicate_task.done():
+                job.close()
+                try:
+                    async with asyncio.timeout(_PROCESS_CLOSE_TIMEOUT_S):
+                        await asyncio.shield(communicate_task)
+                except TimeoutError:
+                    for pipe in (child.stdout, child.stderr):
+                        if pipe is not None:
+                            with contextlib.suppress(OSError):
+                                pipe.close()
+                    communicate_task.cancel()
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(
+                            asyncio.gather(communicate_task, return_exceptions=True),
+                            _PROCESS_CLOSE_TIMEOUT_S,
+                        )
+            else:
+                job.close()
+            channel_closed_task.cancel()
+            await asyncio.gather(channel_closed_task, return_exceptions=True)
+
+        if process.channel.is_closing():
+            return
+        if stdout:
+            process.stdout.write(stdout)
+        if stderr:
+            process.stderr.write(stderr)
+        assert child.returncode is not None
+        process.exit(child.returncode)
+
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
         guard: ProcessConnectionGuard | None = None
         mount_view: Literal["workspace"] | list[str] = "workspace"
@@ -1585,109 +1693,7 @@ class Workspace:
             return
 
         if sys.platform == "win32":
-            # On Windows, asyncio.create_subprocess_exec uses the ProactorEventLoop's
-            # IOCP machinery for process-exit notification.  When the IOCP event fires
-            # after the subprocess coroutine has already returned (a race that can
-            # happen even when communicate() calls wait() internally), it corrupts
-            # asyncssh's IOCP state and permanently breaks the SSH session.
-            # Running a blocking subprocess in a worker thread sidesteps IOCP
-            # entirely: the blocking WaitForSingleObject in the worker thread drains
-            # the process exit before the Future resolves, leaving no pending events.
-            #
-            # The command is split into an argv with shlex.split. cmd.exe launched
-            # via CreateProcess does NOT search the CWD for batch files (only PATH),
-            # so relative .bat paths are resolved to absolute below.
-            if process.command:
-                try:
-                    win_argv: list[str] = shlex.split(process.command, posix=False)
-                except ValueError:
-                    win_argv = ["cmd.exe", "/c", process.command]
-                if win_argv and win_argv[0].lower() in ("cmd", "cmd.exe"):
-                    win_argv = [
-                        str(self.root / arg)
-                        if (arg.lower().endswith(".bat") and not os.path.isabs(arg))
-                        else arg
-                        for arg in win_argv
-                    ]
-            else:
-                win_argv = ["cmd.exe"]
-
-            def spawn() -> tuple[subprocess.Popen[bytes], _WindowsJob]:
-                job = _WindowsJob()
-                try:
-                    child = subprocess.Popen(
-                        win_argv,
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        cwd=str(self.root),
-                        env=proc_env,
-                        creationflags=_CREATE_SUSPENDED,
-                    )
-                    try:
-                        job.assign(child)
-                        job.resume(child)
-                    except BaseException:
-                        child.kill()
-                        child.wait()
-                        raise
-                except BaseException:
-                    job.close()
-                    raise
-                return child, job
-
-            try:
-                loop = asyncio.get_running_loop()
-                child, job = await loop.run_in_executor(None, spawn)
-            except FileNotFoundError as exc:
-                process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
-                process.exit(127)
-                return
-            except OSError as exc:
-                process.stderr.write(f"workspace: cannot own shell process tree: {exc}\n".encode())
-                process.exit(1)
-                return
-
-            communicate_task = asyncio.create_task(asyncio.to_thread(child.communicate))
-            channel_closed_task = asyncio.create_task(process.channel.wait_closed())
-            try:
-                done, _ = await asyncio.wait(
-                    (communicate_task, channel_closed_task),
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if channel_closed_task in done and not communicate_task.done():
-                    return
-                stdout, stderr = await communicate_task
-            finally:
-                if not communicate_task.done():
-                    job.close()
-                    try:
-                        async with asyncio.timeout(_PROCESS_CLOSE_TIMEOUT_S):
-                            await asyncio.shield(communicate_task)
-                    except TimeoutError:
-                        for pipe in (child.stdout, child.stderr):
-                            if pipe is not None:
-                                with contextlib.suppress(OSError):
-                                    pipe.close()
-                        communicate_task.cancel()
-                        with contextlib.suppress(TimeoutError):
-                            await asyncio.wait_for(
-                                asyncio.gather(communicate_task, return_exceptions=True),
-                                _PROCESS_CLOSE_TIMEOUT_S,
-                            )
-                else:
-                    job.close()
-                channel_closed_task.cancel()
-                await asyncio.gather(channel_closed_task, return_exceptions=True)
-
-            if process.channel.is_closing():
-                return
-            if stdout:
-                process.stdout.write(stdout)
-            if stderr:
-                process.stderr.write(stderr)
-            assert child.returncode is not None
-            process.exit(child.returncode)
+            await self._run_windows_session(process, proc_env)
             return
 
         pty_pair = _open_pty(process) if wants_tty and pid is None else None
