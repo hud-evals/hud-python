@@ -18,8 +18,7 @@ if TYPE_CHECKING:
 
     from hud.agents.tools.base import AgentToolSpec
     from hud.agents.types import ToolAgentConfig
-    from hud.capabilities import RFBClient
-    from hud.capabilities.rfb import ScreenshotEncoding
+    from hud.capabilities.rfb import RFBClient, ScreenshotEncoding
     from hud.types import ToolResult
 
 logger = logging.getLogger(__name__)

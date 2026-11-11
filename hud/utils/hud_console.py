@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import traceback
 from typing import Any
 
+import typer
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
@@ -234,15 +236,11 @@ class HUDConsole:
         try:
             number = prompt() if default is None else prompt(default=default + 1)
         except (KeyboardInterrupt, EOFError):
-            import typer
-
             raise typer.Exit(1) from None
         return options[number - 1][1]
 
     def format_tool_call(self, name: str, arguments: dict[str, Any] | str | None = None) -> str:
         """Format a tool call as compact Rich markup."""
-        import json
-
         args_str = ""
         if arguments:
             try:

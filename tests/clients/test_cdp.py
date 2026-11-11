@@ -6,10 +6,9 @@ import asyncio
 
 import pytest
 
-from hud import Task
+from hud import Environment, Task
 from hud.capabilities import Capability, CDPClient
 from hud.clients import connect
-from hud.environment import Environment
 from hud.runtime import LocalRuntime
 from tests.conftest import eventually
 from tests.fixtures.browser import fake_browser

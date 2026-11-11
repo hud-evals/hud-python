@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import json
 import queue
 import secrets
 import signal
@@ -21,9 +22,10 @@ import websockets
 import websockets.exceptions
 
 # The agent-side openpi codec, shared so both ends of the wire stay in lockstep.
-from hud.capabilities import Capability
+from hud.capabilities.base import Capability
 from hud.capabilities.robot import _packb, _unpackb
 from hud.environment.utils import error, read_frame, reply, send_frame
+from hud.utils.modules import load_module
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -547,10 +549,6 @@ def _apply_declaration_state(bridge: RobotBridge, state: dict[str, Any]) -> None
 
 def main() -> None:
     """Child entry: ``python -m hud.environment.robot.bridge path.py:Class [--init JSON]``."""
-    import json
-
-    from hud.utils.modules import load_module
-
     path, _, name = sys.argv[1].rpartition(":")
     kwargs: dict[str, Any] = {}
     if len(sys.argv) >= 4 and sys.argv[2] == "--init":

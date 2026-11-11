@@ -7,9 +7,8 @@ import base64
 import hashlib
 from typing import TYPE_CHECKING
 
-from hud import Task
+from hud import Environment, Task
 from hud.clients import connect
-from hud.environment import Environment
 from hud.runtime import LocalRuntime
 from tests.conftest import write_files
 from tests.environment.conftest import wire

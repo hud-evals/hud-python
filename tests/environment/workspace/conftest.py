@@ -17,9 +17,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from hud import Task
+from hud import Environment, Task
 from hud.clients import connect
-from hud.environment import Environment
 from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:

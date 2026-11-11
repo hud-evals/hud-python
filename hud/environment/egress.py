@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence
 
-    from hud.capabilities import Connection
+    from hud.capabilities.connection import Connection
 
 LOGGER = logging.getLogger("hud.environment.egress")
 

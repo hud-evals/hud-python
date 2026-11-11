@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import warnings
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable
 
 from .results import EvaluationResult, SubScore
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable
 
 
 def _dedupe_subscore_names(subscores: list[SubScore]) -> list[str]:
@@ -85,15 +82,13 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
     Positive weights are normalized to sum to ``1.0``; negative weights are penalties.
     Duplicate names get numeric suffixes.
     """
-    from collections.abc import Awaitable as _Awaitable
-
     resolved: list[SubScore] = []
-    pending: list[tuple[int, _Awaitable[SubScore]]] = []
+    pending: list[tuple[int, Awaitable[SubScore]]] = []
 
     for item in items:
         if isinstance(item, SubScore):
             resolved.append(item)
-        elif isinstance(item, _Awaitable):
+        elif isinstance(item, Awaitable):
             pending.append((len(resolved), item))
             resolved.append(SubScore(name="__placeholder__", value=0.0, weight=0.0))
         else:

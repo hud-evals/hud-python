@@ -17,9 +17,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud import Task
+from hud import Environment, Task
 from hud.clients import connect
-from hud.environment import Environment
 from hud.runtime import LocalRuntime
 from tests.environment.conftest import wire
 
@@ -43,7 +42,7 @@ TREE = {
     "env.py": declare("from-env-py"),
     "pkg/__init__.py": (
         "from pathlib import Path\n"
-        "from hud.environment import Environment\n"
+        "from hud import Environment\n"
         "def make_env(name='from-factory'):\n"
         "    env = Environment(name)\n"
         "    @env.shutdown\n"

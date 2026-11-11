@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal, Self, TypeAlias
 from urllib.parse import urlsplit
 
+from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
 from hud.telemetry.span import (
@@ -25,7 +26,7 @@ from hud.utils.time import now_iso
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from hud.capabilities import Capability
+    from hud.capabilities.base import Capability
     from hud.clients.client import HudClient
 
 logger = logging.getLogger("hud.eval.file_tracking")
@@ -103,8 +104,6 @@ async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
     alone opts in, whatever ``HUD_FILE_TRACKING_ENABLED`` says. A failed tracking
     setup logs a warning and the block runs untracked.
     """
-    from hud.settings import settings
-
     if not settings.telemetry_enabled:
         yield
         return

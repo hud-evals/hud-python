@@ -19,17 +19,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+from hud import Taskset
+from hud.agents import create_agent
+
+from env import play_self
+
 TRAINED_MODEL = "c4-selfplay"
 DEFAULT_OPPONENT = "Qwen/Qwen3.5-4B"
 DEFAULT_GAMES = 10  # even number keeps X/O starts balanced
 
 
 async def run_validation(trained: str, opponent: str, games: int) -> None:
-    from hud.agents import create_agent
-    from hud import Taskset
-
-    from env import play_self
-
     # Alternate who goes first: even seeds → trained is X (first), odd → trained is O.
     tasks = [play_self(model=opponent, seed=s) for s in range(games)]
     taskset = Taskset("c4-validate", tasks)

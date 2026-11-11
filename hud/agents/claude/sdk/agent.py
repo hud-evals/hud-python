@@ -26,7 +26,7 @@ from . import computer_mcp
 from .events import ClaudeEvents
 
 if TYPE_CHECKING:
-    from hud.capabilities import SSHClient
+    from hud.capabilities.ssh import SSHClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)

@@ -9,6 +9,7 @@ import json
 import sys
 from typing import TYPE_CHECKING, Any
 
+from hud.capabilities.base import Capability
 from hud.environment.env import current_session_id
 from hud.environment.utils import read_frame, send_frame
 from hud.utils.process import create_process_group_exec
@@ -18,7 +19,6 @@ from .bridge import _HUD_STATE, PORT_ANNOUNCEMENT, RobotBridge
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from hud.capabilities import Capability
     from hud.environment.robot.control import DirectControl
     from hud.utils.process import ProcessGroup
 
@@ -211,8 +211,6 @@ class RobotEndpoint:
 
     async def capabilities(self, name: str = "robot") -> list[Capability]:
         """The bridge's capabilities: the ``robot`` wire named ``name`` plus any it adds."""
-        from hud.capabilities import Capability
-
         published = await self._call("capabilities", {"name": name})
         capabilities = [Capability.from_manifest(c) for c in published["capabilities"]]
         for control in self._direct_controls:

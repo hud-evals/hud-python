@@ -76,7 +76,7 @@ _IDS_FIELD = {Level.trace: "trace_ids", Level.task: "task_ids"}
 
 
 @dataclass(frozen=True)
-class QaFinding:
+class _Finding:
     title: str
     description: str
     fault: str | None = None
@@ -86,7 +86,7 @@ class QaFinding:
 
 
 @dataclass(frozen=True)
-class QaPresentation:
+class _Presentation:
     """How one QA result reads: ``kind`` is the schema it matched, ``tag`` the verdict."""
 
     kind: str
@@ -95,7 +95,7 @@ class QaPresentation:
     answer: str | None = None
     summary: str | None = None
     confidence: str | None = None
-    findings: tuple[QaFinding, ...] = ()
+    findings: tuple[_Finding, ...] = ()
 
 
 def _loads(raw: str) -> dict[str, Any] | None:
@@ -106,8 +106,8 @@ def _loads(raw: str) -> dict[str, Any] | None:
     return loaded if isinstance(loaded, dict) else None
 
 
-def _findings(items: list[Any], *title_keys: str) -> tuple[QaFinding, ...]:
-    findings: list[QaFinding] = []
+def _findings(items: list[Any], *title_keys: str) -> tuple[_Finding, ...]:
+    findings: list[_Finding] = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -127,7 +127,7 @@ def _findings(items: list[Any], *title_keys: str) -> tuple[QaFinding, ...]:
         action = item.get("recommended_action")
         evidence = item.get("evidence_refs")
         findings.append(
-            QaFinding(
+            _Finding(
                 title=title,
                 description=description.strip() if isinstance(description, str) else "",
                 fault=fault if isinstance(fault, str) else None,
@@ -141,7 +141,7 @@ def _findings(items: list[Any], *title_keys: str) -> tuple[QaFinding, ...]:
     return tuple(findings)
 
 
-def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
+def _from_blob(parsed: dict[str, Any]) -> _Presentation:
     """Read a QA result blob in any of the shapes agents emit."""
     parts = [
         value.strip()
@@ -172,7 +172,7 @@ def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
     if verdict in ("passed", "failed", "unknown") and (
         parsed.get("schema_version") == "qa_agent_result.v1" or isinstance(findings_raw, list)
     ):
-        return QaPresentation(
+        return _Presentation(
             "qa_result",
             verdict,
             summary=summary,
@@ -186,10 +186,10 @@ def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
             continue
         value = parsed[key]
         if not isinstance(value, bool):
-            return QaPresentation(
+            return _Presentation(
                 "unknown", "unknown", label=label, summary=summary, confidence=confidence
             )
-        return QaPresentation(
+        return _Presentation(
             "boolean",
             "failed" if value else "passed",
             label=label,
@@ -215,7 +215,7 @@ def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
             cause, tag = "Unclear", "failed"
         else:
             cause, tag = _CAUSE[next(iter(owners))], "failed"
-        return QaPresentation(
+        return _Presentation(
             "problems",
             tag,
             label="Failure Analysis",
@@ -225,7 +225,7 @@ def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
             findings=findings,
         )
 
-    return QaPresentation("unknown", "unknown", summary=summary, confidence=confidence)
+    return _Presentation("unknown", "unknown", summary=summary, confidence=confidence)
 
 
 def _legacy_output(raw: dict[str, Any]) -> dict[str, Any]:
@@ -239,16 +239,16 @@ def _legacy_output(raw: dict[str, Any]) -> dict[str, Any]:
     return parsed
 
 
-def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
+def _presentation(row: dict[str, Any]) -> _Presentation:
     """How a ``/v2/qa/results`` row reads; the row's own verdict wins over its output's."""
     status = str(row["status"])
     if status == "error":
         error = row.get("error")
-        return QaPresentation(
+        return _Presentation(
             "unknown", "error", summary=str(error) if error else "QA did not judge this subject."
         )
     if status != "completed":
-        return QaPresentation("pending", "unknown", label=status)
+        return _Presentation("pending", "unknown", label=status)
     result = row.get("result")
     legacy = row.get("legacy_result")
     if isinstance(result, dict):
@@ -256,12 +256,12 @@ def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
     elif isinstance(legacy, dict):
         view = _from_blob(_legacy_output(cast("dict[str, Any]", legacy)))
     else:
-        view = QaPresentation("unknown", "unknown")
+        view = _Presentation("unknown", "unknown")
     verdict = row.get("verdict")
     return replace(view, tag=str(verdict)) if verdict else view
 
 
-def _verdict(result: dict[str, Any], view: QaPresentation) -> Text:
+def _verdict(result: dict[str, Any], view: _Presentation) -> Text:
     if view.kind == "pending":
         return Text(str(result["status"]), style="dim")
     return Text(view.tag, style=_VERDICT_STYLES.get(view.tag, "yellow"))
@@ -296,7 +296,7 @@ def _print_results(results: list[dict[str, Any]], level: Level) -> None:
     table.add_column("Verdict", no_wrap=True)
     table.add_column("Summary")
     for result in results:
-        view = presentation_for_result(result)
+        view = _presentation(result)
         table.add_row(
             _subject_id(result),
             str(result["check_key"]),
@@ -312,7 +312,7 @@ def _print_results(results: list[dict[str, Any]], level: Level) -> None:
     hud_console.stdout.print(f"\n[dim]Tip: {results_command} for summaries and findings[/dim]")
 
 
-def _finding_panel(index: int, finding: QaFinding) -> Panel:
+def _finding_panel(index: int, finding: _Finding) -> Panel:
     body: list[RenderableType] = []
     if finding.description:
         body.append(Markdown(finding.description))
@@ -340,7 +340,7 @@ def _print_result(result: dict[str, Any], web_url: str) -> None:
     """One result in full: verdict, details, markdown summary, findings, and links."""
     level = _level(result)
     subject_id = _subject_id(result)
-    view = presentation_for_result(result)
+    view = _presentation(result)
     hud_console.stdout.print(
         Panel.fit(
             Text.assemble((str(result["check_key"]), "bold cyan"), " ", (subject_id, "dim")),
@@ -613,7 +613,7 @@ def run_checks(
         ]
 
     _print_results(results, level)
-    failed = any(presentation_for_result(result).tag != "passed" for result in results)
+    failed = any(_presentation(result).tag != "passed" for result in results)
     return Result(results) if failed else results
 
 

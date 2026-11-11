@@ -16,7 +16,8 @@ from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from hud.capabilities import Connection
+from hud.capabilities.connection import Connection
+from hud.environment import load_environment
 from hud.graders.results import EvaluationResult
 from hud.utils.process import run_until_terminated
 
@@ -597,8 +598,6 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
 
 
 def main() -> None:
-    from hud.environment import load_environment
-
     parser = argparse.ArgumentParser(description="Serve a HUD environment from source.")
     parser.add_argument("path", help="A .py file or a directory defining an Environment.")
     parser.add_argument("--env", default=None, help="Environment name when several are defined.")

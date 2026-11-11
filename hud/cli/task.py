@@ -13,9 +13,10 @@ from hud.cli import (
     CLI,
     CliError,
 )
-from hud.clients import HudProtocolError, connect
+from hud.clients.client import HudProtocolError, connect
 from hud.eval.taskset import Taskset
-from hud.runtime import Runtime, SubprocessRuntime
+from hud.runtime.core import Runtime
+from hud.runtime.local import SubprocessRuntime
 from hud.utils.process import run_until_terminated
 
 if TYPE_CHECKING:

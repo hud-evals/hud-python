@@ -11,12 +11,9 @@ from urllib.parse import urlsplit
 import pytest
 from pydantic import BaseModel
 
-from hud import Task
+from hud import Environment, Task
 from hud.capabilities import Capability
 from hud.clients import connect
-from hud.environment import (
-    Environment,
-)
 from hud.runtime import LocalRuntime
 from tests.environment.conftest import FRAME_LIMIT, encode, wire
 

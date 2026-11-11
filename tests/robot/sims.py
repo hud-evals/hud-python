@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 from gymnasium.spaces import Box
 
+from hud import Environment
 from hud.agents.base import Agent
-from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.runtime import LocalRuntime
 
@@ -28,8 +28,8 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
+    from hud import Run
     from hud.capabilities import MCPClient
-    from hud.eval.run import Run
     from hud.runtime import Provider
     from hud.types import ToolResult
 

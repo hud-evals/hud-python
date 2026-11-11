@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
-from hud.agents.tools.base import provider_tool_name as openai_compatible_tool_name
+from hud.agents.tools.base import provider_tool_name
 from hud.types import ImageContent, TextContent, Tool
 
 if TYPE_CHECKING:
@@ -137,7 +137,7 @@ def openai_compatible_tool_param(
     return {
         "type": "function",
         "function": {
-            "name": name or openai_compatible_tool_name(tool.name),
+            "name": name or provider_tool_name(tool.name),
             "description": tool.description or f"Call {tool.name}",
             "parameters": sanitized,
         },

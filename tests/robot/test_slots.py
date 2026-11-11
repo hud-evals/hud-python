@@ -17,11 +17,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
-from hud import Task
+from hud import Environment, Task
 from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
 from hud.clients import HudProtocolError, connect
-from hud.environment import Environment
 from hud.environment.robot import RobotBridge, RobotEndpoint
 from hud.runtime import LocalRuntime
 

@@ -12,10 +12,12 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
+import websockets
 from websockets.exceptions import ConnectionClosedOK
 
 from hud.eval.job import reporting_enabled
 from hud.eval.run import rollout
+from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
 
 from .core import Runtime
@@ -81,8 +83,6 @@ class HUDRuntime:
 
     @asynccontextmanager
     async def _runtime_session(self, task: Task) -> AsyncGenerator[Runtime]:
-        from hud.settings import settings as sdk_settings
-
         if task.runtime_config is not None:
             # The lease resolves the env by name, so an image or Compose recipe is only
             # provenance and cpu/memory only warn; a GPU, OS, TPU or limits change what is
@@ -115,10 +115,10 @@ class HUDRuntime:
                     "defaults",
                     sorted(softly_ignored),
                 )
-        api_key = sdk_settings.api_key
+        api_key = settings.api_key
         if not api_key:
             raise RuntimeError("HUD runtime tunnel requires HUD_API_KEY")
-        runtime_url = (self.runtime_url or sdk_settings.hud_runtime_url).rstrip("/")
+        runtime_url = (self.runtime_url or settings.hud_runtime_url).rstrip("/")
         session_id = await self._create_runtime_session(runtime_url, api_key, task)
         server: asyncio.Server | None = None
         try:
@@ -197,8 +197,6 @@ class HUDRuntime:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        import websockets
-
         ws_url = _runtime_tunnel_ws_url(runtime_url, session_id)
         try:
             async with websockets.connect(

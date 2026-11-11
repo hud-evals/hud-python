@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from daytona import Image
+from hud.agents import ClaudeAgent
 from hud.clients import connect
 from hud.runtime import DaytonaRuntime
 
@@ -54,8 +55,6 @@ async def one_infra(provider, idx: int) -> dict:
 
 
 async def one_rollout(provider, idx: int) -> dict:
-    from hud.agents import ClaudeAgent
-
     timed = TimedProvider(provider)
     t0 = time.perf_counter()
     row = {"idx": idx, "spin_up_s": None, "connect_s": None, "ok": False, "error": ""}

@@ -15,7 +15,7 @@ from typing import Any
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
-from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, Workspace
+from .workspace import Mount, Workspace
 
 
 def load_environment(
@@ -89,7 +89,6 @@ def load_environment(
 
 
 __all__ = [
-    "DEFAULT_SYSTEM_MOUNTS",
     "Answer",
     "Mount",
     "Workspace",

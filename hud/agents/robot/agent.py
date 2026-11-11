@@ -11,6 +11,8 @@ from hud.agents.base import Agent
 from hud.capabilities.robot import RobotClient
 from hud.telemetry.robot.recorder import TraceRecorder
 
+from .dataset import DatasetWriter
+
 if TYPE_CHECKING:
     from hud.eval.run import Run
 
@@ -73,8 +75,6 @@ class RobotAgent(Agent):
             )
             writer = None
             if self.save:
-                from .dataset import DatasetWriter
-
                 writer = DatasetWriter(robot.contract, fps=fps)
 
             print(f"[agent] episode started: {prompt!r}", flush=True)

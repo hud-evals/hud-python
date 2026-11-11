@@ -7,6 +7,8 @@ import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, cast
 
+from PIL import Image
+
 from hud.agents.tools.base import tool_err, tool_ok
 from hud.agents.tools.rfb import RFBTool, keysym
 from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
@@ -432,8 +434,6 @@ def _crop_png(
     region: tuple[int, int, int, int],
     encoding: ScreenshotEncoding,
 ) -> tuple[bytes, str]:
-    from PIL import Image
-
     image = Image.open(BytesIO(png))
     cropped = image.crop(region)
     buf = BytesIO()

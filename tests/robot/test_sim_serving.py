@@ -18,11 +18,10 @@ import pytest
 import websockets
 from openpi_client import msgpack_numpy
 
-from hud import Task
+from hud import Environment, Task
 from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
 from hud.clients import connect
-from hud.environment import Environment
 from hud.environment.robot import GymBridge, RobotEndpoint
 from hud.runtime import LocalRuntime
 

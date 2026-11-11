@@ -18,8 +18,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from dirty_equals import IsInt, IsStr, IsUUID
 
-from hud import Task
-from hud.version import __version__
+from hud import Task, __version__
 from tests.conftest import write_files
 from tests.fixtures.services import Reply
 

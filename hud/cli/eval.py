@@ -18,15 +18,13 @@ from rich.table import Table
 
 from hud.cli import CLI, CliError, Result, parse_key_value
 from hud.eval.taskset import Taskset
-from hud.runtime import (
-    DaytonaRuntime,
-    DockerRuntime,
-    HostedRuntime,
-    HUDRuntime,
-    ModalRuntime,
-    Runtime,
-    SubprocessRuntime,
-)
+from hud.runtime.core import Runtime
+from hud.runtime.daytona import DaytonaRuntime
+from hud.runtime.docker import DockerRuntime
+from hud.runtime.hosted import HostedRuntime
+from hud.runtime.hud import HUDRuntime
+from hud.runtime.local import SubprocessRuntime
+from hud.runtime.modal import ModalRuntime
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
@@ -38,7 +36,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from hud.eval.task import Task
-    from hud.runtime import Provider
+    from hud.runtime.core import Provider
     from hud.utils.gateway import GatewayModelInfo
 
 hud_console = HUDConsole()

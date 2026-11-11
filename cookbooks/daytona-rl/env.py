@@ -16,6 +16,8 @@ import tempfile
 from pathlib import Path
 
 from hud import Environment
+from hud.agents import ClaudeAgent
+from hud.runtime import LocalRuntime
 
 import bugs
 
@@ -75,9 +77,6 @@ async def fix_calc(variant: int = 0):
 
 
 async def test() -> None:
-    from hud.runtime import LocalRuntime
-    from hud.agents import ClaudeAgent
-
     job = await fix_calc(variant=0).run(ClaudeAgent(), runtime=LocalRuntime(__file__))
     print("reward:", job.reward)
 

@@ -15,18 +15,24 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from hud.capabilities import Capability
-from hud.environment import Mount
+from hud.capabilities.base import Capability
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT, VISITOR_PORT, Peer
+from hud.environment.workspace import Mount
 from hud.eval.task import Task
 from hud.eval.taskset import Taskset
-from hud.runtime import RuntimeConfig, RuntimeGPU, RuntimeLimits, RuntimeResources, RuntimeTPU
 from hud.runtime.compose import (
     ComposeConfig,
     ComposeProject,
     ComposeService,
     ComposeUnboundVariableError,
     ComposeUnsupportedError,
+)
+from hud.runtime.core import (
+    RuntimeConfig,
+    RuntimeGPU,
+    RuntimeLimits,
+    RuntimeResources,
+    RuntimeTPU,
 )
 from hud.utils.naming import normalize_environment_name
 from hud.version import __version__

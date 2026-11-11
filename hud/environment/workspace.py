@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import secrets
+import shlex
 import shutil
 import socket
 import struct
@@ -21,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
+from hud.capabilities.base import Capability
 from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST
 from hud.environment.egress import (
     VISITOR_PORT,
@@ -30,6 +32,7 @@ from hud.environment.egress import (
     hosts_text,
     proxy_environment,
 )
+from hud.environment.file_tracker import FileTracker, serve_file_tracking
 from hud.environment.namespace import (
     NamespaceHost,
     NamespaceProcess,
@@ -49,10 +52,6 @@ if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
-
-    from hud.capabilities import Capability
-
-    from .file_tracker import FileTracker
 
 LOGGER = logging.getLogger("hud.environment.workspace")
 
@@ -841,8 +840,6 @@ class Workspace:
 
     async def _start_file_tracking(self) -> None:
         """Take the baseline snapshot and bind the filetracking/1 server."""
-        from .file_tracker import FileTracker, serve_file_tracking
-
         tracker = FileTracker(self.root)
         # The baseline walk is CPU-bound; keep it off the event loop.
         await asyncio.get_running_loop().run_in_executor(None, tracker.take_baseline)
@@ -916,8 +913,6 @@ class Workspace:
         authenticates from anywhere the daemon is reachable — including a
         client on the other side of a container boundary.
         """
-        from hud.capabilities import Capability
-
         key_path = self.ssh_client_key_path
         return Capability.ssh(
             name=name,
@@ -938,8 +933,6 @@ class Workspace:
 
     def file_tracking_capability(self, name: str = "filetracking") -> Capability:
         """The concrete ``filetracking/1`` capability (requires ``track_files=True``)."""
-        from hud.capabilities import Capability
-
         if self._ft_host is None or self._ft_port is None:
             raise RuntimeError("file tracking not started; call start() with track_files=True")
         return Capability(
@@ -1595,9 +1588,6 @@ class Workspace:
             # The command is split into an argv with shlex.split. cmd.exe launched
             # via CreateProcess does NOT search the CWD for batch files (only PATH),
             # so relative .bat paths are resolved to absolute below.
-            import shlex
-            import subprocess as _subprocess
-
             if process.command:
                 try:
                     win_argv: list[str] = shlex.split(process.command, posix=False)
@@ -1613,14 +1603,14 @@ class Workspace:
             else:
                 win_argv = ["cmd.exe"]
 
-            def spawn() -> tuple[_subprocess.Popen[bytes], _WindowsJob]:
+            def spawn() -> tuple[subprocess.Popen[bytes], _WindowsJob]:
                 job = _WindowsJob()
                 try:
-                    child = _subprocess.Popen(
+                    child = subprocess.Popen(
                         win_argv,
-                        stdin=_subprocess.DEVNULL,
-                        stdout=_subprocess.PIPE,
-                        stderr=_subprocess.PIPE,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                         cwd=str(self.root),
                         env=proc_env,
                         creationflags=_CREATE_SUSPENDED,

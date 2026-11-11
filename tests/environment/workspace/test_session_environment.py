@@ -14,10 +14,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from hud import Task
+from hud import Environment, Task
 from hud.capabilities import Connection, SSHClient
 from hud.clients import connect
-from hud.environment import Environment
 from hud.environment.process_guard import process_connections_supported
 from hud.runtime import LocalRuntime
 

@@ -10,29 +10,26 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from hud.runtime import (
-    DockerRuntime,
-    HostedRuntime,
-    HUDRuntime,
-    LocalRuntime,
-)
 from hud.runtime.core import resolve_runtime_config
-from hud.telemetry import flush
+from hud.runtime.docker import DockerRuntime
+from hud.runtime.hosted import HostedRuntime
+from hud.runtime.hud import HUDRuntime
+from hud.runtime.local import LocalRuntime
+from hud.telemetry.exporter import flush
 from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
 from .run import rollout, validate_rollout_timeouts
 from .sync import fetch_taskset_tasks, resolve_taskset_id
+from .task import Task
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from contextlib import AbstractAsyncContextManager
 
     from hud.agents.base import Agent
-    from hud.runtime import Provider, Runtime
+    from hud.runtime.core import Provider, Runtime
     from hud.types import Trace
-
-    from .task import Task
 
 logger = logging.getLogger("hud.eval.taskset")
 
@@ -113,8 +110,6 @@ class Taskset:
 
     @staticmethod
     def _scan_tasks(module: Any) -> list[Task]:
-        from .task import Task
-
         tasks: list[Task] = []
         for name in dir(module):
             if name.startswith("_"):
@@ -130,8 +125,6 @@ class Taskset:
 
     @staticmethod
     def _load_tasks_json(path: Path) -> list[Task]:
-        from .task import Task
-
         text = path.read_text(encoding="utf-8")
         if path.suffix == ".jsonl":
             entries = [json.loads(line) for line in text.splitlines() if line.strip()]

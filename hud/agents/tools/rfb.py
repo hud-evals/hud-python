@@ -8,8 +8,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, Self
 
 from hud.agents.tools.base import AgentTool, AgentToolSpec
-from hud.capabilities import RFBClient
-from hud.capabilities.rfb import PngScreenshotEncoding, ScreenshotEncoding
+from hud.capabilities.rfb import PngScreenshotEncoding, RFBClient, ScreenshotEncoding
 from hud.types import ImageContent, ToolResult
 
 if TYPE_CHECKING:

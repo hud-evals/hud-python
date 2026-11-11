@@ -19,9 +19,10 @@ from hud.utils.gateway import provider_api_key, routes_to_gateway
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from hud.capabilities import Connection, SSHClient
+    from hud.capabilities.connection import Connection
+    from hud.capabilities.ssh import SSHClient
     from hud.eval.run import Run
-    from hud.runtime import RuntimeConfig
+    from hud.runtime.core import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
 PROCESS_CLOSE_TIMEOUT_S = 5.0

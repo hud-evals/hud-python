@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from hud.settings import settings
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
@@ -57,8 +58,6 @@ class Job:
 
 def reporting_enabled() -> bool:
     """Whether runs are reported to the platform: telemetry is on and an API key is set."""
-    from hud.settings import settings
-
     return bool(settings.telemetry_enabled and settings.api_key)
 
 
@@ -69,8 +68,6 @@ async def job_enter(job_id: str, *, name: str, group: int, taskset_id: str | Non
         f"/trace/job/{job_id}/enter",
         {"name": name, "group": group, "taskset_id": taskset_id},
     )
-    from hud.settings import settings
-
     logger.info("job: %s/jobs/%s", settings.hud_web_url, str(uuid.UUID(job_id)))
 
 

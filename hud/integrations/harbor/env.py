@@ -16,11 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from hud.capabilities import Capability
-from hud.environment import Mount, Workspace
+from hud.capabilities.base import Capability
 from hud.environment.egress import ANY_HOST
 from hud.environment.env import Environment, current_session_id
-from hud.graders import EvaluationResult
+from hud.environment.workspace import Mount, Workspace
+from hud.graders.results import EvaluationResult
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
 from hud.utils.process import ProcessResult, bound_shell_output, create_process_group_exec
 

@@ -17,11 +17,12 @@ from pydantic import (
 )
 
 from hud.environment.env import Environment
-from hud.runtime import RuntimeConfig
+from hud.runtime.core import RuntimeConfig
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
-    from hud.runtime import HostedRuntime, Provider
+    from hud.runtime.core import Provider
+    from hud.runtime.hosted import HostedRuntime
 
     from .job import Job
 

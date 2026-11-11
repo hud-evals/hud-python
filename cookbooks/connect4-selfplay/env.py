@@ -23,9 +23,10 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from hud.capabilities import Capability
 from hud import Environment
+from hud.capabilities import Capability
 from hud.graders import EvaluationResult
+from hud.utils.gateway import build_gateway_client, list_gateway_models
 
 _INNER_MODEL: str = "c4-selfplay"
 _INNER_MODEL_NAME: str = "c4-selfplay"  # resolved model_name (gateway routing key)
@@ -118,8 +119,6 @@ def _resolve_inner_model(model: str) -> tuple[str, str]:
     extensions (return_token_ids) are gated on the model routing as a known
     trainable model; passing a raw id or slug can miss that path silently.
     """
-    from hud.utils.gateway import list_gateway_models
-
     try:
         for gm in list_gateway_models():
             if model in (gm.id, gm.name, gm.model_name):
@@ -146,8 +145,6 @@ async def _inner_move(inner_mark: str) -> int:
     logprobs) into _inner_samples so the training loop can train on both sides
     of each game with a flipped reward.
     """
-    from hud.utils.gateway import build_gateway_client
-
     client = build_gateway_client(_INNER_PROVIDER)
     available = game.available()
 

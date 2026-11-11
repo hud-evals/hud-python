@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collections.abc import AsyncGenerator  # noqa: E402
 from typing import Any  # noqa: E402
 
+from fastmcp import FastMCP  # noqa: E402
 from hud import Environment  # noqa: E402
 from hud.capabilities import Capability  # noqa: E402
 from mcp.types import ContentBlock, ImageContent, TextContent  # noqa: E402
@@ -231,10 +232,6 @@ async def _listening(host: str, port: int, timeout: float = 15.0) -> None:
 
 @env.initialize
 async def _up() -> None:
-    # Lazy import so `import tasks` (the task-collection path) stays free of
-    # fastmcp/authlib import-time noise.
-    from fastmcp import FastMCP
-
     global _MCP_PORT, _MCP_SERVER_TASK
     if _MCP_SERVER_TASK is None:
         server = FastMCP(name="gameboy")

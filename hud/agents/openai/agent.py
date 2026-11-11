@@ -33,6 +33,7 @@ from hud.utils import gateway
 from .tools.base import format_openai_result
 from .tools.coding import OpenAIShellTool, shell_output
 from .tools.computer import OpenAIComputerTool, last_image_content
+from .tools.hosted import OpenAIToolSearchTool
 from .tools.mcp_proxy import OpenAIMCPProxyTool
 
 if TYPE_CHECKING:
@@ -194,8 +195,6 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         effective_tools: list[ToolParam] = list(state.params)
 
         # Past a configured tool-search threshold, function tools are deferred (defer_loading).
-        from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
-
         tool_search_threshold: int | None = None
         for hosted in self.config.hosted_tools:
             if isinstance(hosted, OpenAIToolSearchTool):

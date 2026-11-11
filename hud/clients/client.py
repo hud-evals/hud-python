@@ -13,15 +13,11 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
-from hud.capabilities import (
-    Capability,
-    CapabilityClient,
-    CDPClient,
-    Connection,
-    MCPClient,
-    RFBClient,
-    SSHClient,
-)
+from hud.capabilities.base import Capability, CapabilityClient
+from hud.capabilities.cdp import CDPClient
+from hud.capabilities.mcp import MCPClient
+from hud.capabilities.rfb import RFBClient
+from hud.capabilities.ssh import SSHClient
 from hud.environment.utils import (
     CONTROL_FRAME_LIMIT_BYTES,
     encode_frame,
@@ -33,8 +29,9 @@ from hud.environment.utils import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
 
+    from hud.capabilities.connection import Connection
     from hud.environment.egress import WorkspaceRoute
-    from hud.runtime import Runtime
+    from hud.runtime.core import Runtime
 
 LOGGER = logging.getLogger("hud.clients")
 _CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0

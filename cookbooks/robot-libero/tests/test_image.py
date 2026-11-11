@@ -7,15 +7,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from hud.agents.base import Agent
 from hud import Task
+from hud.agents.base import Agent
 from hud.eval.run import rollout
 from hud.runtime import DockerRuntime
 
 if TYPE_CHECKING:
+    from hud import Run
     from hud.capabilities import MCPClient
-    from hud.eval.run import Run
-    from hud.types import MCPToolResult
+    from hud.types import ToolResult
 
 TAG = "robot-libero:test"
 
@@ -25,7 +25,7 @@ class OneMove(Agent):
 
     def __init__(self) -> None:
         super().__init__()
-        self.result: MCPToolResult | None = None
+        self.result: ToolResult | None = None
 
     async def __call__(self, run: Run) -> None:
         client = cast("MCPClient", await run.client.open("control"))

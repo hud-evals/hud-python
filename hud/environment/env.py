@@ -12,13 +12,15 @@ import asyncio
 import contextlib
 import functools
 import inspect
+import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 
-from hud.capabilities import Capability, Connection
+from hud.capabilities.base import Capability
+from hud.settings import settings
 
 from .egress import ConnectionRelay, Peer, WorkspaceRoute
 from .workspace import Workspace
@@ -27,7 +29,10 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
     from pathlib import Path
 
+    from hud.capabilities.connection import Connection
     from hud.eval.task import Task as EvalTask
+
+LOGGER = logging.getLogger("hud.environment")
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -257,9 +262,7 @@ class Environment:
                 "@env.initialize hook and publish its concrete address",
             )
         if self._hooks_done:
-            import logging
-
-            logging.getLogger("hud.environment").warning(
+            LOGGER.warning(
                 "add_capability(%r) called after @env.initialize hooks have already run — "
                 "the capability will not appear in any already-negotiated agent manifest. "
                 "Move this call inside an @env.initialize hook.",
@@ -293,8 +296,6 @@ class Environment:
         capability the rollout streams setup and agent diffs from.
         """
         if track_files is None:
-            from hud.settings import settings
-
             track_files = settings.file_tracking_enabled
         if name in self._workspaces:
             raise ValueError(f"workspace capability {name!r} is already attached")
@@ -326,7 +327,7 @@ class Environment:
         a ``bridge=`` subclass serving its own tools from the sim process shows
         up in the manifest alongside ``name``.
         """
-        from hud.environment.robot import RobotEndpoint
+        from hud.environment.robot.endpoint import RobotEndpoint
         from hud.environment.robot.gym import gym_command
 
         sim = RobotEndpoint.spawn(gym_command(target, **kwargs)).attach(self)

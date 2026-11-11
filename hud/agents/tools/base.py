@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 
-from hud.capabilities import CapabilityClient
+from hud.capabilities.base import CapabilityClient
 from hud.types import TextContent, ToolResult
 
 if TYPE_CHECKING:

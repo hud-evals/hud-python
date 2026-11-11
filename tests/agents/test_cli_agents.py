@@ -11,11 +11,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import ValidationError
 
+from hud import Environment
 from hud.agents import ClaudeCLIAgent, CodexCLIAgent
 from hud.agents.base import Agent
 from hud.agents.types import ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability
-from hud.environment import Environment
 from hud.environment.egress import ANY_HOST
 from hud.environment.workspace import usable_bwrap
 from hud.eval.run import rollout
@@ -28,7 +28,7 @@ from tests.fixtures.screen import fake_screen
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from hud.eval.run import Run
+    from hud import Run
     from tests.conftest import HudEnv
 
 UNSANDBOXED = pytest.mark.skipif(

@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from weakref import WeakValueDictionary
 
+from hud.environment import load_environment
+from hud.environment.env import Environment
+from hud.environment.server import PORT_ANNOUNCEMENT
 from hud.utils.process import (
     OUTPUT_DRAIN_TIMEOUT,
     create_process_group_exec,
@@ -25,7 +28,6 @@ from .core import Runtime
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from hud.environment.env import Environment
     from hud.eval.task import Task
 
 
@@ -52,18 +54,15 @@ class LocalRuntime:
         env: str | None = None,
         ready_timeout: float = 120.0,
     ) -> None:
-        from hud.environment.env import Environment as _Environment
-
         self.ready_timeout = ready_timeout
         self._source_dir: Path | None = None
-        if isinstance(source, _Environment):
+        if isinstance(source, Environment):
             if env is not None:
                 raise TypeError("LocalRuntime: env= applies only to source paths")
             self._build: Callable[[Task], Environment] = lambda _task: source
         elif isinstance(source, (str, Path)):
             path, pinned = Path(source).resolve(), env
             self._source_dir = path if path.is_dir() else path.parent
-            from hud.environment import load_environment
 
             def _load(task: Task) -> Environment:
                 return load_environment(path, name=pinned or task.env)
@@ -81,8 +80,6 @@ class LocalRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
-        from hud.environment.env import Environment as _Environment
-
         if task.runtime_config is not None:
             raise ValueError("LocalRuntime does not support task runtime_config")
         # Importable for the whole acquisition so templates can lazily import siblings;
@@ -100,7 +97,7 @@ class LocalRuntime:
                     "the env source ran async code while being imported to place a "
                     'rollout — guard top-level run calls with `if __name__ == "__main__":`'
                 ) from e
-            if not isinstance(env, _Environment):
+            if not isinstance(env, Environment):
                 raise TypeError(f"LocalRuntime: constructor returned {env!r}, not an Environment")
             from hud.environment.server import _shutdown, bind
 
@@ -142,9 +139,7 @@ class SubprocessRuntime:
         env: str | None = None,
         ready_timeout: float = 120.0,
     ) -> None:
-        from hud.environment.env import Environment as _Environment
-
-        if isinstance(source, _Environment):
+        if isinstance(source, Environment):
             if env is not None:
                 raise TypeError("SubprocessRuntime: env= applies only to source paths")
             files = {Path(inspect.getfile(t.func)).resolve() for t in source.tasks.values()}
@@ -189,8 +184,6 @@ class SubprocessRuntime:
 
         stderr_drain = asyncio.create_task(stream_output(error, sys.stderr, capture=capture_error))
         try:
-            from hud.environment.server import PORT_ANNOUNCEMENT
-
             write_stdout, finish_stdout = output_writer(
                 sys.stdout,
                 capture=lambda text: output_tail.append(text.strip()[-1024:]),

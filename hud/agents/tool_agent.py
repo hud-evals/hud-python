@@ -14,14 +14,14 @@ from hud.agents.tools.base import AgentTool, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
-from hud.capabilities import MCPClient
+from hud.capabilities.mcp import MCPClient
 from hud.capabilities.ssh import SSHConnectionError
 from hud.types import PromptMessage, Step, StopCondition, TextContent, Tool, ToolCall, ToolResult
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.agents.types import ToolAgentConfig
-    from hud.capabilities import CapabilityClient
+    from hud.capabilities.base import CapabilityClient
     from hud.eval.run import Run
     from hud.utils.serialization import JsonObject
 

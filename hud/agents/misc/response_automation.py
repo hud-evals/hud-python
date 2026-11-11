@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, Literal, cast
 from openai.types.responses import ResponseOutputText
 
 from hud import types
-from hud.telemetry import instrument
+from hud.telemetry.instrument import instrument
+from hud.utils.gateway import build_gateway_client
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -66,8 +67,6 @@ async def _determine_response(
     model: str = "gpt-5",
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
 ) -> ResponseType:
-    from hud.utils.gateway import build_gateway_client
-
     # A client per call: its connection pool belongs to the event loop that opened it.
     async with cast("AsyncOpenAI", build_gateway_client("openai")) as client:
         response = await client.responses.create(

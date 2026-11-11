@@ -17,6 +17,7 @@ from pydantic import (
     SerializeAsAny,
     model_validator,
 )
+from rich.markup import escape
 from typing_extensions import TypeVar
 
 from hud.graders.results import SubScore
@@ -60,27 +61,27 @@ class AgentType(StrEnum):
     def cls(self) -> type[Agent]:
         match self:
             case AgentType.CLAUDE:
-                from hud.agents import ClaudeAgent
+                from hud.agents.claude.agent import ClaudeAgent
 
                 return ClaudeAgent
             case AgentType.CLAUDE_CLI:
-                from hud.agents import ClaudeCLIAgent
+                from hud.agents.claude.sdk.agent import ClaudeCLIAgent
 
                 return ClaudeCLIAgent
             case AgentType.CODEX_CLI:
-                from hud.agents import CodexCLIAgent
+                from hud.agents.codex.agent import CodexCLIAgent
 
                 return CodexCLIAgent
             case AgentType.OPENAI:
-                from hud.agents import OpenAIAgent
+                from hud.agents.openai.agent import OpenAIAgent
 
                 return OpenAIAgent
             case AgentType.GEMINI:
-                from hud.agents import GeminiAgent
+                from hud.agents.gemini.agent import GeminiAgent
 
                 return GeminiAgent
             case AgentType.OPENAI_COMPATIBLE:
-                from hud.agents import OpenAIChatAgent
+                from hud.agents.openai_compatible.agent import OpenAIChatAgent
 
                 return OpenAIChatAgent
 
@@ -233,8 +234,6 @@ class ToolCall(BaseModel):
         return s
 
     def __rich__(self) -> str:
-        from rich.markup import escape
-
         from hud.utils.hud_console import hud_console
 
         s = hud_console.format_tool_call(self.name, self.arguments)

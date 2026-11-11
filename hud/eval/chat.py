@@ -18,7 +18,7 @@ from .run import rollout
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
-    from hud.runtime import Provider
+    from hud.runtime.core import Provider
 
     from .task import Task
 

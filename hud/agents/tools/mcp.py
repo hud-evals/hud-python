@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from hud.agents.tools.base import AgentTool, AgentToolSpec
-from hud.capabilities import MCPClient
+from hud.capabilities.mcp import MCPClient
 
 if TYPE_CHECKING:
     from hud.types import Tool, ToolResult

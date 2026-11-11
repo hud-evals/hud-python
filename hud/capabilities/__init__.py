@@ -2,27 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from .base import Capability, CapabilityClient
 from .cdp import CDPClient
 from .connection import Connection
 from .mcp import MCPClient
 from .rfb import RFBClient
 from .ssh import SSHClient
-
-if TYPE_CHECKING:
-    from .robot import RobotClient
-
-
-def __getattr__(name: str) -> object:
-    # RobotClient needs the robot extra, so it is imported on first access.
-    if name == "RobotClient":
-        from .robot import RobotClient
-
-        return RobotClient
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
 
 __all__ = [
     "CDPClient",
@@ -31,6 +16,5 @@ __all__ = [
     "Connection",
     "MCPClient",
     "RFBClient",
-    "RobotClient",
     "SSHClient",
 ]

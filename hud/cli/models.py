@@ -16,7 +16,7 @@ from hud.cli import (
     CliError,
 )
 from hud.settings import settings
-from hud.train import TrainingClient
+from hud.train.client import TrainingClient
 from hud.utils.exceptions import HudRequestError
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole

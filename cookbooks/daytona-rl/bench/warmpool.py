@@ -17,7 +17,7 @@ import os
 import statistics
 import time
 
-from daytona import Image
+from daytona import AsyncDaytona, Image
 from daytona_api_client_async import ApiClient, Configuration, WarmPoolsApi
 from daytona_api_client_async.models.create_warm_pool import CreateWarmPool
 from hud.clients import connect
@@ -101,8 +101,6 @@ async def main(n: int) -> None:
     cold = await wave(n, "no pool")
 
     print("\ncreating warm pool...")
-    from daytona import AsyncDaytona
-
     async with AsyncDaytona() as d:
         page = await d.snapshot.list()
         built = next(s.name for s in page.items if s.name.startswith(snapshot))

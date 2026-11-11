@@ -21,7 +21,7 @@ from hud.types import Step, TextContent, ToolCall, ToolResult
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
-    from hud.capabilities import SSHClient
+    from hud.capabilities.ssh import SSHClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)

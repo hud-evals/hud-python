@@ -30,7 +30,7 @@ from jsonschema import ValidationError, validate
 from mcp.types import ImageContent, TextContent
 from PIL import Image
 
-from hud.capabilities import Capability
+from hud.capabilities.base import Capability
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.capabilities.robot import RobotClient
 from hud.environment.robot.orientation import (

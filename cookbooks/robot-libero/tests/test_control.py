@@ -8,18 +8,17 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pytest
+from hud import Environment, Task
 from hud.agents.base import Agent
-from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
-from hud import Task
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime
 from hud.settings import settings
 
 if TYPE_CHECKING:
+    from hud import Run
     from hud.capabilities import MCPClient
-    from hud.eval.run import Run
-    from hud.types import MCPToolResult
+    from hud.types import ToolResult
     from numpy.typing import NDArray
 
 ROOT = Path(__file__).parents[1]
@@ -57,7 +56,7 @@ class ToolAgent(Agent):
 
     def __init__(self) -> None:
         super().__init__()
-        self.results: list[MCPToolResult] = []
+        self.results: list[ToolResult] = []
 
     async def __call__(self, run: Run) -> None:
         client = cast("MCPClient", await run.client.open("control"))

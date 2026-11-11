@@ -9,6 +9,7 @@ import fastmcp
 import mcp.types as mcp_types
 from fastmcp.client.auth import BearerAuth
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from fastmcp.server.dependencies import get_context, get_http_headers
 
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Tool, ToolResult
@@ -23,8 +24,6 @@ def get_mcp_trace_id() -> str | None:
 
     The ``hud/trace-id`` request meta key wins over the ``trace-id`` HTTP header.
     """
-    from fastmcp.server.dependencies import get_context, get_http_headers
-
     try:
         context = get_context()
     except RuntimeError:

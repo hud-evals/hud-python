@@ -8,6 +8,8 @@ import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
+import asyncssh
+
 from hud.utils.process import finish_output, output_writer
 
 from .core import Runtime, RuntimeConfig
@@ -94,7 +96,6 @@ class DaytonaRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
-        import asyncssh
         from daytona import (
             AsyncDaytona,
             CreateSandboxFromImageParams,

@@ -9,6 +9,7 @@ import logging
 import queue
 import threading
 from collections.abc import Callable
+from fractions import Fraction
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -136,8 +137,6 @@ class SegmentEncoder:
         self._index += 1
 
     def _run(self) -> None:
-        from fractions import Fraction
-
         container = stream = None
         n = 0  # counts frames actually encoded
         try:

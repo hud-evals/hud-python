@@ -23,10 +23,10 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
 
-from hud import Task
+from hud import Environment, Task
 from hud.capabilities import Connection, SSHClient
 from hud.clients import HudClient, HudProtocolError, connect
-from hud.environment import Environment, process_guard
+from hud.environment import process_guard
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT, Peer, WorkspaceRoute
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.runtime import LocalRuntime

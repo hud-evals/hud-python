@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 from hud.agents.cli import CLIAgent
 from hud.agents.types import AgentConfig
-from hud.capabilities import Connection
+from hud.capabilities.connection import Connection
 from hud.capabilities.mcp import get_mcp_trace_id
-from hud.clients import HudProtocolError, connect
+from hud.clients.client import HudProtocolError, connect
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
@@ -32,8 +32,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
     from hud.environment.egress import WorkspaceRoute
-    from hud.runtime import Provider
-    from hud.runtime.core import RuntimeConfig
+    from hud.runtime.core import Provider, RuntimeConfig
 
     from .task import Task
 

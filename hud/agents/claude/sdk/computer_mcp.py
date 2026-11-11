@@ -22,13 +22,13 @@ from pydantic import TypeAdapter
 from hud.agents.claude.tools.computer import ClaudeComputerTool
 from hud.agents.cli import WINDOWS_SHELLS
 from hud.agents.tools.base import AgentToolSpec
-from hud.capabilities import Capability
+from hud.capabilities.base import Capability
 from hud.capabilities.rfb import RFBClient, ScreenshotEncoding
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping
 
-    from hud.capabilities import SSHClient
+    from hud.capabilities.ssh import SSHClient
 
 RFB_CAPABILITY_ENV = "HUD_RFB_CAPABILITY"
 SCREENSHOT_ENCODING_ENV = "HUD_SCREENSHOT_ENCODING"

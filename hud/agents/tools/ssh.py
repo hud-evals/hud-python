@@ -6,7 +6,7 @@ import asyncssh
 
 from hud.agents.tools.base import AgentTool, tool_err, tool_ok
 from hud.agents.tools.file_view import view_file
-from hud.capabilities import SSHClient
+from hud.capabilities.ssh import SSHClient
 from hud.types import TextContent, ToolResult
 from hud.utils.process import bound_shell_output
 

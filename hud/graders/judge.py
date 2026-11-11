@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from hud.utils.gateway import build_gateway_client
+
 from .base import Grader
 from .results import SubScore
 
@@ -72,8 +74,6 @@ class LLMJudgeGrader(Grader):
         parsed = _parse_criteria(criteria)
         if not parsed:
             return SubScore(name=cls.name, value=0.0, info={"error": "no criteria provided"})
-
-        from hud.utils.gateway import build_gateway_client
 
         client = cast("AsyncOpenAI", build_gateway_client("openai"))
         answer_text = str(answer)

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from hud.agents.tools.base import result_text
 from hud.agents.tools.ssh import SSHTool
-from hud.types import ToolResult
+from hud.types import TextContent, ToolResult
 
 from .base import GeminiToolSpec
 from .coding import required_str, tool_decl
@@ -48,9 +50,6 @@ class GeminiReadTool(SSHTool):
         start = arguments.get("start_line")
         end = arguments.get("end_line")
         if isinstance(start, int) and start > 0:
-            from hud.agents.tools.base import result_text
-            from hud.types import TextContent
-
             lines = result_text(result).splitlines(keepends=True)
             offset = start - 1
             limit = (end - start + 1) if isinstance(end, int) and end >= start else len(lines)
@@ -86,9 +85,9 @@ class GeminiSearchTool(SSHTool):
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
         include = arguments.get("include_pattern")
-        cmd = f"grep -rn {_shell_quote(pattern)} {_shell_quote(str(dir_path))}"
+        cmd = f"grep -rn {shlex.quote(pattern)} {shlex.quote(str(dir_path))}"
         if isinstance(include, str) and include:
-            cmd += f" --include={_shell_quote(include)}"
+            cmd += f" --include={shlex.quote(include)}"
         return await self.bash(cmd)
 
 
@@ -115,7 +114,7 @@ class GeminiGlobTool(SSHTool):
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
-        cmd = f"find {_shell_quote(str(dir_path))} -name {_shell_quote(pattern)}"
+        cmd = f"find {shlex.quote(str(dir_path))} -name {shlex.quote(pattern)}"
         return await self.bash(cmd)
 
 
@@ -140,9 +139,3 @@ class GeminiListTool(SSHTool):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         return await self.file_list(required_str(arguments, "dir_path"))
-
-
-def _shell_quote(s: str) -> str:
-    import shlex
-
-    return shlex.quote(s)

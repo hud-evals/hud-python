@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import atexit
 import importlib
 import inspect
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, cast
 import numpy as np
 
 from hud.telemetry.robot.recorder import JobRecorder, to_numpy
+from hud.utils.modules import load_module
 
 from .bridge import RobotBridge, serve_bridge
 
@@ -603,10 +605,6 @@ def gym_command(
 
 
 def main() -> None:
-    import argparse
-
-    from hud.utils.modules import load_module
-
     parser = argparse.ArgumentParser(description="Serve a gym-style env as a robot sim.")
     parser.add_argument("target", help="'path/to/module.py:factory', a registry id, or spec JSON.")
     parser.add_argument("--fps", type=int, default=None, help="Control-rate override.")
