@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from hud.agents.types import Sample
 
 # A built-in, server-side loss name: an open string, since the valid set is
 # provider-defined (see TrainingClient.available_losses).
@@ -22,22 +23,6 @@ class BuiltinLoss(StrEnum):
     DRO = "dro"  # direct reward optimization
 
 
-class TrajectorySample(BaseModel):
-    """One turn's token-level training data (mirrors ``hud.agents`` ``Sample``).
-
-    ``output_logprobs`` are per-output-token logprobs under the sampling policy.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    # Text-only prompts; multimodal prompts carry prompt_chunks instead.
-    prompt_token_ids: list[int] | None = None
-    # Serialized ModelInput chunks (text and images); authoritative when present.
-    prompt_chunks: list[dict[str, Any]] | None = None
-    output_token_ids: list[int]
-    output_logprobs: list[float] = Field(default_factory=list[float])
-
-
 class TrajectoryPayload(BaseModel):
     """An inline trajectory submitted for training (alternative to a ``trace_id``).
 
@@ -46,7 +31,7 @@ class TrajectoryPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    samples: list[TrajectorySample] = Field(min_length=1)
+    samples: list[Sample] = Field(min_length=1)
     reward: float
     trace_id: str | None = None
 
@@ -143,11 +128,13 @@ class ForwardRequest(BaseModel):
     reward_scale: float = 1.0
 
 
-class TrainingDatum(BaseModel):
-    """Per-datum fields a custom loss reads.
+class DatumTensors(BaseModel):
+    """One datum a custom loss reads: its reward and per-token tensors of equal length.
 
     Datums from one trajectory share ``traj_idx``; ``group_idx`` is set only when
-    ``group_size`` was given.
+    ``group_size`` was given. ``logprobs`` are under the current policy,
+    ``sampling_logprobs`` under the rollout policy, and ``mask`` is 1.0 on action tokens
+    and 0.0 on observation tokens.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -155,15 +142,6 @@ class TrainingDatum(BaseModel):
     reward: float
     traj_idx: int
     group_idx: int | None = None
-
-
-class DatumTensors(TrainingDatum):
-    """Per-datum token tensors of equal length.
-
-    ``logprobs`` are under the current policy, ``sampling_logprobs`` under the rollout
-    policy, and ``mask`` is 1.0 on action tokens and 0.0 on observation tokens.
-    """
-
     logprobs: list[float]
     sampling_logprobs: list[float]
     mask: list[float]

@@ -13,25 +13,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import statistics
 import time
 
 from daytona import AsyncDaytona, Image
-from daytona_api_client_async import ApiClient, Configuration, WarmPoolsApi
-from daytona_api_client_async.models.create_warm_pool import CreateWarmPool
 from hud.clients import connect
 from hud.runtime import DaytonaRuntime
 
 import pool
 from env import fix_calc
 from snapshot import snapshot_name
-
-HOST = "https://app.daytona.io/api"
-
-
-def _api() -> ApiClient:
-    return ApiClient(Configuration(host=HOST, access_token=os.environ["DAYTONA_API_KEY"]))
 
 
 async def one(provider) -> tuple[float | None, str]:
@@ -70,30 +61,6 @@ async def wave(n: int, label: str) -> dict:
     return row
 
 
-async def fill_pool(snapshot: str, n: int, target: str, timeout_s: int = 600) -> int:
-    """Create the pool, then wait for sandboxes that actually exist.
-
-    The pool's own ``current_size`` reports the target roughly 12s before the
-    sandboxes are there, so gating on it starts the warm wave against a
-    half-empty pool and understates the benefit. ``pool.wait_full`` counts real
-    unclaimed sandboxes instead.
-    """
-    async with _api() as api:
-        await WarmPoolsApi(api).create_warm_pool(
-            CreateWarmPool(snapshot=snapshot, pool=n, target=target)
-        )
-    return await pool.wait_full(snapshot, n, timeout_s=timeout_s)
-
-
-async def drop_pool(snapshot: str) -> None:
-    async with _api() as api:
-        pools = WarmPoolsApi(api)
-        for p in await pools.list_warm_pools():
-            if p.snapshot == snapshot:
-                await pools.delete_warm_pool(p.id)
-                print(f"deleted warm pool {p.id}")
-
-
 async def main(n: int) -> None:
     snapshot = snapshot_name()
     print(f"snapshot: {snapshot}")
@@ -113,11 +80,12 @@ async def main(n: int) -> None:
     print(f"region: {target}")
 
     try:
-        filled = await fill_pool(built, n, target)
+        await pool.create(built, n, target)
+        filled = await pool.wait_full(built, n, timeout_s=600)
         print(f"pool reported {filled}/{n}\n")
         warm = await wave(n, "warm pool")
     finally:
-        await drop_pool(built)
+        await pool.drop(built)
 
     if cold["p50"] and warm["p50"]:
         delta = (cold["p50"] - warm["p50"]) / cold["p50"] * 100

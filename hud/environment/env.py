@@ -200,11 +200,6 @@ class Environment:
         self._connections: dict[str, _BoundConnection] = {}
         self._binding = asyncio.Lock()
 
-    @property
-    def templates(self) -> dict[str, TaskTemplate[Any]]:
-        """The registered ``@env.template`` factories by id (alias of ``tasks``)."""
-        return self.tasks
-
     def template(
         self,
         *,

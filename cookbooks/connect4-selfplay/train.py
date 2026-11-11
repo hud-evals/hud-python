@@ -26,7 +26,8 @@ import time
 
 from hud import Job, Taskset, Trace
 from hud.agents import create_agent
-from hud.train import TrainingClient, TrajectoryPayload, TrajectorySample
+from hud.agents.types import Sample
+from hud.train import TrainingClient, TrajectoryPayload
 
 from env import play_self
 
@@ -92,7 +93,7 @@ async def main(
             combined.append(trace)
             inner_dicts = trace.grade.info.get("inner_samples", [])
             inner_turns = [
-                TrajectorySample(
+                Sample(
                     prompt_token_ids=s["prompt_token_ids"],
                     output_token_ids=s["output_token_ids"],
                     output_logprobs=s.get("output_logprobs", []),

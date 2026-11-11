@@ -437,7 +437,7 @@ def _first_leaf(obs: Any) -> Any:
     return obs
 
 
-class TracedEnv:
+class _TracedEnv:
     """The observing wrapper: same ``reset``/``step``/``close`` surface, plus telemetry.
 
     Plain envs record as a batch of one; batched envs get one trace per episode per slot.
@@ -559,8 +559,7 @@ class TracedEnv:
         self.close()
 
 
-# The public verb: constructing a ``TracedEnv`` is the wrapping.
-wrap = TracedEnv
+wrap = _TracedEnv
 
 
 def gym_command(

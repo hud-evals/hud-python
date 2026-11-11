@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from hud.environment.server import DEFAULT_PORT, default_serve_command
 from hud.utils.process import finish_output, stream_output
 
 from .compose import SECCOMP_PROFILE, ComposeConfig
@@ -131,7 +132,7 @@ class ModalRuntime:
         app: modal.App | None = None,
         app_name: str | None = None,
         workdir: str | None = None,
-        port: int = 8765,
+        port: int = DEFAULT_PORT,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
         env_vars: Mapping[str, str] | None = None,
         sandbox_secrets: Sequence[modal.Secret] | None = None,
@@ -145,20 +146,9 @@ class ModalRuntime:
         self.sandbox_secrets = tuple(sandbox_secrets or ())
         self.registry_secret = registry_secret
         self.workdir = workdir
-        # The default command mirrors the scaffolded Dockerfile.hud entrypoint; an unset
-        # workdir keeps the image WORKDIR.
+        # An unset workdir keeps the image WORKDIR.
         self.command = (
-            tuple(command)
-            if command is not None
-            else (
-                "hud",
-                "serve",
-                "env.py",
-                "--host",
-                "0.0.0.0",  # noqa: S104 - serving inside the sandbox; the tunnel is the only ingress
-                "--port",
-                str(port),
-            )
+            tuple(command) if command is not None else ("sh", "-c", default_serve_command(port))
         )
         self.app = app
         self.app_name = "hud-envs" if app_name is None else app_name

@@ -26,7 +26,7 @@ from fastmcp import FastMCP
 from hud import Environment
 from hud.capabilities import Capability
 from hud.graders import EvaluationResult
-from hud.utils.gateway import build_gateway_client, list_gateway_models
+from hud.utils.gateway import build_gateway_client, resolve_gateway_model
 
 _INNER_MODEL: str = "c4-selfplay"
 _INNER_MODEL_NAME: str = "c4-selfplay"  # resolved model_name (gateway routing key)
@@ -109,23 +109,6 @@ class ConnectFour:
 
 
 game = ConnectFour()
-
-
-def _resolve_inner_model(model: str) -> tuple[str, str]:
-    """Return (model_name, provider) by looking up the model in the gateway registry.
-
-    create_agent() does this same lookup (agents/__init__.py:36-65) so that the
-    gateway receives the resolved model_name, not a raw slug/UUID. The token-id
-    extensions (return_token_ids) are gated on the model routing as a known
-    trainable model; passing a raw id or slug can miss that path silently.
-    """
-    try:
-        for gm in list_gateway_models():
-            if model in (gm.id, gm.name, gm.model_name):
-                return gm.model_name or model, gm.provider.name or "openai"
-    except Exception:
-        pass
-    return model, "openai"
 
 
 def _free_port() -> int:
@@ -276,7 +259,9 @@ async def play_self(model: str = _INNER_MODEL, seed: int = 0) -> None:
     """Self-play game. seed % 2 decides who drops first: even → outer is X, odd → outer is O."""
     global _INNER_MODEL, _INNER_MODEL_NAME, _INNER_PROVIDER, _OUTER_MARK, _inner_samples
     _INNER_MODEL = model
-    _INNER_MODEL_NAME, _INNER_PROVIDER = _resolve_inner_model(model)
+    # The gateway's token-id extensions need the resolved model name, not a slug or id.
+    inner = resolve_gateway_model(model)
+    _INNER_MODEL_NAME, _INNER_PROVIDER = inner.model_name, inner.provider.name
     _OUTER_MARK = "X" if seed % 2 == 0 else "O"
     inner_mark = "O" if _OUTER_MARK == "X" else "X"
 

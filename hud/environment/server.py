@@ -47,6 +47,19 @@ LOGGER = logging.getLogger("hud.environment.server")
 # spawn the server read it from stdout.
 PORT_ANNOUNCEMENT = "HUD_SERVE_PORT="
 
+# The port a served environment's control channel listens on unless told otherwise.
+DEFAULT_PORT = 8765
+
+
+def default_serve_command(port: int = DEFAULT_PORT) -> str:
+    """The shell command a runtime starts an image's ``env.py`` with when given none.
+
+    A project venv in the working directory comes first on ``PATH``, so it serves both
+    an image that installs into ``.venv`` (as ``hud init`` scaffolds) and one that
+    installs onto ``PATH``.
+    """
+    return f'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port {port}'
+
 
 @dataclass
 class _ServerState:

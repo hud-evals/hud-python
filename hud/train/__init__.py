@@ -12,7 +12,6 @@ from hud.train.types import (
     OptimStepResult,
     TrainInput,
     TrajectoryPayload,
-    TrajectorySample,
 )
 
 __all__ = [
@@ -25,5 +24,4 @@ __all__ = [
     "TrainInput",
     "TrainingClient",
     "TrajectoryPayload",
-    "TrajectorySample",
 ]

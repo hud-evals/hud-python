@@ -2,25 +2,34 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import Counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar
+from uuid import UUID
+
+from pydantic import BaseModel
 
 from hud.agents.types import AgentStep
-from hud.train.base import BaseTrainingClient
+from hud.settings import settings
 from hud.train.types import (
     BackwardRequest,
+    CheckpointResponse,
     DatumTensors,
     ForwardBackwardRequest,
     ForwardBackwardResult,
     ForwardRequest,
     ForwardResult,
     LossFn,
+    OptimStepRequest,
     OptimStepResult,
     TrainInput,
     TrajectoryPayload,
-    TrajectorySample,
 )
+from hud.utils.exceptions import HudAuthenticationError
+from hud.utils.gateway import resolve_gateway_model
+from hud.utils.platform import PlatformClient
+from hud.utils.requests import make_request
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -36,6 +45,13 @@ if TYPE_CHECKING:
         tuple["torch.Tensor", dict[str, float]],
     ]
 
+T = TypeVar("T")
+
+
+class _Losses(BaseModel):
+    losses: list[str]
+
+
 logger = logging.getLogger("hud.train.client")
 
 
@@ -48,16 +64,7 @@ def _trace_to_input(trace: Trace) -> TrainInput:
             "leave out its GRPO group or pass a TrajectoryPayload with an explicit reward"
         )
     samples = trace.collect(lambda step: step.sample if isinstance(step, AgentStep) else None)
-    turns = [
-        TrajectorySample(
-            prompt_token_ids=sample.prompt_token_ids or None,
-            prompt_chunks=sample.prompt_chunks,
-            output_token_ids=sample.output_token_ids,
-            output_logprobs=sample.output_logprobs,
-        )
-        for sample in samples
-        if sample.output_token_ids
-    ]
+    turns = [sample for sample in samples if sample.output_token_ids]
     if turns:
         return TrajectoryPayload(samples=turns, reward=trace.reward, trace_id=trace.trace_id)
     if trace.trace_id is not None:
@@ -123,12 +130,105 @@ def _check_groups(
         )
 
 
-class TrainingClient(BaseTrainingClient):
+class TrainingClient:
     """Train a model through the HUD training service.
 
-    As in Tinker, ``forward_backward`` accumulates gradients and ``optim_step`` applies
-    them; ``step`` chains the two.
+    One handle on a model (a gateway slug or id) whose weights training advances in
+    place. As in Tinker, ``forward_backward`` accumulates gradients and ``optim_step``
+    applies them; ``step`` chains the two.
     """
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        api_url: str | None = None,
+    ) -> None:
+        self.model = model
+        self._api_key = api_key or settings.api_key
+        self._rl_url = (base_url or settings.hud_rl_url).rstrip("/")
+        self._api_url = (api_url or settings.hud_api_url).rstrip("/")
+        self._model_id: str | None = None
+
+    async def _resolve_model_id(self) -> str:
+        """The id the service keys on: a uuid as-is, else the catalog entry's, cached."""
+        if self._model_id is None:
+            try:
+                self._model_id = str(UUID(self.model))
+            except ValueError:
+                if not self._api_key:
+                    raise HudAuthenticationError(
+                        "HUD_API_KEY is required to resolve a model slug"
+                    ) from None
+                platform = PlatformClient(self._api_url, self._api_key)
+                entry = await asyncio.to_thread(resolve_gateway_model, self.model, platform)
+                self._model_id = entry.id
+        return self._model_id
+
+    async def _train_url(self, suffix: str) -> str:
+        model_id = await self._resolve_model_id()
+        return f"{self._rl_url}/v1/models/{model_id}/train/{suffix}"
+
+    async def _post(self, suffix: str, payload: dict[str, Any], reply: type[T]) -> T:
+        url = await self._train_url(suffix)
+        # Never auto-retry: gradients accumulate in place (a retry double-counts a batch)
+        # and optim_step checkpoints (a retry can save a step twice). The server owns
+        # recovery.
+        return await make_request(
+            "POST", url, json=payload, api_key=self._api_key, max_retries=0, reply=reply
+        )
+
+    async def _get(self, suffix: str, reply: type[T]) -> T:
+        url = await self._train_url(suffix)
+        return await make_request("GET", url, api_key=self._api_key, reply=reply)
+
+    async def available_losses(self) -> list[str]:
+        """The built-in ``loss_fn`` names this model's provider supports.
+
+        ``BuiltinLoss`` lists common ones; this list is authoritative.
+        """
+        return (await self._get("losses", _Losses)).losses
+
+    async def optim_step(
+        self,
+        *,
+        learning_rate: float,
+        beta1: float = 0.9,
+        beta2: float = 0.95,
+        eps: float = 1e-8,
+        weight_decay: float = 0.0,
+    ) -> OptimStepResult:
+        """Apply accumulated gradients and checkpoint; the gateway then serves the new weights.
+
+        Never retried automatically, since a duplicate submit would save a step twice.
+        """
+        request = OptimStepRequest(
+            learning_rate=learning_rate,
+            beta1=beta1,
+            beta2=beta2,
+            eps=eps,
+            weight_decay=weight_decay,
+        )
+        return await self._post("optim-step", request.model_dump(), OptimStepResult)
+
+    async def checkpoints(self) -> list[CheckpointResponse]:
+        """The model's checkpoint tree, oldest first, with each node's rewards and metrics."""
+        model_id = await self._resolve_model_id()
+        # The checkpoints endpoint lives on the catalog API.
+        url = f"{self._api_url}/v2/models/{model_id}/checkpoints"
+        return await make_request("GET", url, api_key=self._api_key, reply=list[CheckpointResponse])
+
+    async def head(self) -> CheckpointResponse | None:
+        """The checkpoint the gateway serves, or ``None`` while it serves the base weights."""
+        return next((c for c in await self.checkpoints() if c.is_active), None)
+
+    async def set_head(self, checkpoint_id: str) -> None:
+        """Promote a checkpoint to head; the next ``optim_step`` extends the tree from there."""
+        model_id = await self._resolve_model_id()
+        url = f"{self._api_url}/v2/models/{model_id}/head"
+        await make_request("PUT", url, json={"checkpoint_id": checkpoint_id}, api_key=self._api_key)
 
     async def forward_backward(
         self,

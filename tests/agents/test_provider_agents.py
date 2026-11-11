@@ -11,6 +11,8 @@ from anthropic import AsyncAnthropicBedrock
 from fastmcp import FastMCP
 
 from hud.agents import ClaudeAgent, GeminiAgent
+from hud.agents.claude.tools.hosted import ClaudeToolSearchTool
+from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
 from hud.agents.types import ClaudeConfig, ClaudeEffort, GeminiConfig
 from hud.capabilities import Capability
 from hud.types import AgentType
@@ -280,3 +282,33 @@ async def test_a_tuple_argument_is_offered_with_every_type_its_positions_take(
     items = (tool.get("function") or tool)["parameters"]["properties"]["pair"].get("items", {})
     offered = {option.get("type") for option in items.get("anyOf", [items])}
     assert offered == expected
+
+
+@pytest.mark.parametrize(
+    ("agent_type", "model", "search"),
+    [
+        ("claude", CLAUDE_MODEL, ClaudeToolSearchTool(threshold=1)),
+        ("openai", "gpt-5.6", OpenAIToolSearchTool(threshold=1)),
+    ],
+    ids=["claude", "openai"],
+)
+async def test_tools_past_the_search_threshold_are_deferred_to_tool_search(
+    agent_type: str, model: str, search: object, models: Models, tmp_path: Path
+) -> None:
+    notes = FastMCP("notes")
+    notes.tool(name="first", description="First.")(lambda: "1")
+    notes.tool(name="second", description="Second.")(lambda: "2")
+    models.script([Turn(text="done")])
+    kind = AgentType(agent_type).cls
+
+    async with mcp_server(notes, name="notes") as tools:
+        task = workspace_task(tmp_path / "ws", capabilities=(tools,))
+        await task().run(kind(kind.config_cls(model=model, hosted_tools=[search])))
+
+    (request,) = models.requests()
+    deferred = {
+        tool["name"]: tool.get("defer_loading")
+        for tool in request.body["tools"]
+        if tool.get("name") in {"first", "second"}
+    }
+    assert deferred == {"first": True, "second": True}

@@ -9,7 +9,7 @@ from rich.markup import escape
 
 from hud.cli import parse_key_value
 from hud.environment import load_environment
-from hud.environment.server import serve
+from hud.environment.server import DEFAULT_PORT, serve
 from hud.utils.hud_console import HUDConsole
 from hud.utils.process import run_until_terminated
 
@@ -23,7 +23,7 @@ def serve_command(
         "('pkg.mod:make_env' with --arg).",
     ),
     port: int = typer.Option(
-        8765, "--port", "-p", help="Port to serve the environment control channel on."
+        DEFAULT_PORT, "--port", "-p", help="Port to serve the environment control channel on."
     ),
     host: str = typer.Option(
         "127.0.0.1", "--host", help="Interface to bind (use 0.0.0.0 inside containers)."

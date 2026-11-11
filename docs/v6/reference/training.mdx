@@ -96,8 +96,8 @@ rollout, so the group baseline remains valid.
 
 | Type | Fields |
 |------|--------|
-| `TrajectorySample` | `prompt_token_ids`, `prompt_chunks`, `output_token_ids`, `output_logprobs` |
-| `TrajectoryPayload` | `samples: list[TrajectorySample]`, `reward`, `trace_id=None` |
+| `Sample` (`hud.agents.types`) | `prompt_token_ids`, `prompt_chunks`, `output_token_ids`, `output_logprobs` |
+| `TrajectoryPayload` | `samples: list[Sample]`, `reward`, `trace_id=None` |
 
 A sample's prompt is `prompt_token_ids` for a flat text prompt, or `prompt_chunks` (serialized text +
 image chunks) for a multimodal one, where `prompt_token_ids` is empty. `output_logprobs` are per output
@@ -109,8 +109,7 @@ The token ids and logprobs a sample needs come from the gateway. `completion_kwa
 and it lives only on `OpenAIChatConfig`, so token capture runs through `OpenAIChatAgent` (the agent
 [`create_agent`](/v6/reference/agents#create-agent) selects for gateway models routed over Chat
 Completions). Setting `extra_body={"return_token_ids": True}` is enough: that agent sets `logprobs=True`
-automatically and writes a `Sample` onto each turn, which a trace converts to a `TrajectoryPayload` for
-training.
+automatically and writes a `Sample` onto each turn; a trace's samples become its `TrajectoryPayload` for training.
 
 ```python
 agent = create_agent("arith-rl", completion_kwargs={"extra_body": {"return_token_ids": True}})
@@ -125,7 +124,7 @@ resp = await client.chat.completions.create(
     extra_body={"return_token_ids": True},
 )
 choice = resp.choices[0]
-sample = TrajectorySample(
+sample = Sample(
     prompt_token_ids=choice.prompt_token_ids,   # gateway-added fields
     output_token_ids=choice.token_ids,
     output_logprobs=[t.logprob for t in choice.logprobs.content],

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import asyncssh
 
+from hud.environment.server import DEFAULT_PORT, default_serve_command
 from hud.utils.process import finish_output, output_writer
 
 from .core import Runtime, RuntimeConfig
@@ -74,15 +75,13 @@ class DaytonaRuntime:
         image: str | DaytonaImage | None = None,
         command: str | None = None,
         workdir: str | None = "/app",
-        port: int = 8765,
+        port: int = DEFAULT_PORT,
         ssh_host: str = "ssh.app.daytona.io",
         ssh_expires_minutes: int = 24 * 60,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
     ) -> None:
         self.snapshot_name = snapshot_name
-        self.command = (
-            command or f'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port {port}'
-        )
+        self.command = command or default_serve_command(port)
         self.workdir = workdir
         self.port = port
         self.ssh_host = ssh_host

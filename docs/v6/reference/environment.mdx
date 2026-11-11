@@ -41,7 +41,7 @@ becomes part of what the environment advertises when it serves.
 | `env.capability(name)` | Look up a published [capability](/v6/reference/capabilities) by name. |
 | `env.workspace(root, *, name="shell", track_files=None, **kwargs)` | Attach a [`Workspace`](/v6/reference/capabilities#workspace) serving `name` over `ssh/2`, wiring its start, publish, and stop lifecycle. File tracking runs by default (`track_files` defaults to `HUD_FILE_TRACKING_ENABLED`). |
 | `env.start()` / `env.stop()` | Run the `@env.initialize` / `@env.shutdown` hooks directly (`start` is idempotent until `stop`). |
-| `env.tasks` / `env.templates` | The registered template factories by id (`templates` is an alias of `tasks`). |
+| `env.tasks` | The registered templates by id. |
 
 The `@env.template()` decorator takes optional arguments:
 
