@@ -235,11 +235,9 @@ Measured behavior at scale, up to 256 concurrent sandboxes with warm pools, is w
 ### `HUDRuntime`
 
 ```python
-HUDRuntime(*, run_timeout=None, runtime_url=None)
+HUDRuntime(*, runtime_url=None)
 ```
 
-- **`run_timeout`** - deprecated alias for the `rollout_timeout` passed to `Task.run` or
-  `Taskset.run`.
 - **`runtime_url`** - override the runtime endpoint the tunnel connects to.
 
 The SDK leases your deployed env by name and tunnels to its control channel; the agent loop runs local.
@@ -247,12 +245,10 @@ The SDK leases your deployed env by name and tunnels to its control channel; the
 ### `HostedRuntime`
 
 ```python
-HostedRuntime(*, poll_interval=5.0, run_timeout=None)
+HostedRuntime(*, poll_interval=5.0)
 ```
 
 - **`poll_interval`** - seconds between trace-status polls while the rollout runs remotely.
-- **`run_timeout`** - deprecated alias for the `rollout_timeout` passed to `Task.run` or
-  `Taskset.run`.
 
 For example, a task with `RuntimeLimits(run_timeout_s=18_000)` can omit `rollout_timeout` to avoid
 adding an SDK-wide cap. To add one, pass a larger value such as

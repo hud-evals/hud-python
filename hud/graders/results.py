@@ -39,6 +39,7 @@ class SubScore(BaseModel):
         default=None,
         description="Input subscores this node was combined from",
     )
+    # Environments built before ``info`` was named send it as ``metadata``.
     info: dict[str, Any] | None = Field(
         default=None,
         validation_alias=AliasChoices("info", "metadata"),
@@ -62,20 +63,6 @@ class SubScore(BaseModel):
             mode="json",
             context={_SUMMARY_SERIALIZATION_CONTEXT: True},
         )
-
-    @property
-    def metadata(self) -> dict[str, Any] | None:
-        """Alias for ``info``."""
-        return self.info
-
-    @metadata.setter
-    def metadata(self, value: dict[str, Any] | None) -> None:
-        self.info = value
-
-    @property
-    def score(self) -> float:
-        """Deprecated alias for ``value``."""
-        return self.value
 
 
 class EvaluationResult(BaseModel):

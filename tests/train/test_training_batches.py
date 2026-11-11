@@ -91,7 +91,12 @@ async def test_a_step_sends_the_sampled_runs_then_one_optimizer_step(
     await TrainingClient("owner/model").step(runs, learning_rate=1e-5, group_size=2)
 
     (sent,) = trainer.bodies("rl", "POST", f"{TRAIN}/forward-backward")
-    sample = {"prompt_token_ids": [1, 2, 3], "output_token_ids": [7], "output_logprobs": [-0.5]}
+    sample = {
+        "prompt_token_ids": [1, 2, 3],
+        "prompt_chunks": None,
+        "output_token_ids": [7],
+        "output_logprobs": [-0.5],
+    }
     assert [(i["samples"], i["reward"], i["trace_id"]) for i in sent["inputs"]] == [
         ([sample], 1.0, TRACE_ID),
         ([sample], 0.0, TRACE_ID),

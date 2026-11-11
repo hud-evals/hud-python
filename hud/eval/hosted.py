@@ -53,18 +53,17 @@ async def hosted_rollout(
     trace_id = trace_id or uuid.uuid4().hex
     parent = parent_trace(trace_id)
     parent_trace_id = str(parent) if parent is not None else None
-    timeout = runtime.run_timeout if rollout_timeout is None else rollout_timeout
     validate_rollout_timeouts(
         task,
         agent,
-        timeout,
+        rollout_timeout,
         actor_runtime_config=task.runtime_config,
         verifier_runtime_config=(
             task.verifier.runtime_config if task.verifier is not None else None
         ),
     )
     try:
-        if timeout is None:
+        if rollout_timeout is None:
             state = await _submit_and_await(
                 task,
                 agent,
@@ -75,7 +74,7 @@ async def hosted_rollout(
                 poll_interval=runtime.poll_interval,
             )
         else:
-            async with asyncio.timeout(timeout):
+            async with asyncio.timeout(rollout_timeout):
                 state = await _submit_and_await(
                     task,
                     agent,
@@ -90,9 +89,9 @@ async def hosted_rollout(
         await _cancel(trace_id)
         raise
     except TimeoutError:
-        assert timeout is not None
+        assert rollout_timeout is not None
         await _cancel(trace_id)
-        detail = f"hosted rollout {trace_id} did not finish within {timeout:g}s"
+        detail = f"hosted rollout {trace_id} did not finish within {rollout_timeout:g}s"
         logger.warning(detail)
         trace = Trace.failed(detail)
         trace.stop_reason = "timeout"

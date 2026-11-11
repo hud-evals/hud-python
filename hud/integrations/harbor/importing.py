@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 IMPORT_FORMAT = "harbor"
-# v5 added the ``updated`` task status; v4 reports read as v5 reports without it.
+# Stored v4 reports lack the ``updated`` task status and otherwise read as v5.
 ReportSchema = Literal["harbor_import_report.v4", "harbor_import_report.v5"]
 REPORT_SCHEMAS: tuple[ReportSchema, ...] = get_args(ReportSchema)
 

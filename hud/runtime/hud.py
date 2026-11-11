@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import logging
 import uuid
-import warnings
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
@@ -40,17 +39,8 @@ class HUDRuntime:
     def __init__(
         self,
         *,
-        run_timeout: float | None = None,
         runtime_url: str | None = None,
     ) -> None:
-        if run_timeout is not None:
-            warnings.warn(
-                "HUDRuntime(run_timeout=...) is deprecated; pass "
-                "rollout_timeout=... to Task.run or Taskset.run",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        self.run_timeout = run_timeout
         self.runtime_url = runtime_url
         self._warned_unsupported_config = False
 

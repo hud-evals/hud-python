@@ -65,7 +65,8 @@ class ForwardBackwardRequest(BaseModel):
     # Forwarded verbatim to the provider's loss; keys are provider-defined.
     loss_fn_config: dict[str, float] | None = None
     # GRPO advantages normalize within contiguous groups of this size; None is one group.
-    group_size: int | None = Field(default=None, ge=1)
+    # A one-member group has no reward spread, so its advantage is always zero.
+    group_size: int | None = Field(default=None, ge=2)
     reward_scale: float = 1.0
     num_substeps: int = Field(default=1, ge=1)
 
@@ -137,7 +138,8 @@ class ForwardRequest(BaseModel):
 
     inputs: list[TrainInput] = Field(min_length=1)
     # Contiguous groups for caller-side advantage normalization; None is one group.
-    group_size: int | None = Field(default=None, ge=1)
+    # The floor is 2, as for ForwardBackwardRequest.
+    group_size: int | None = Field(default=None, ge=2)
     reward_scale: float = 1.0
 
 

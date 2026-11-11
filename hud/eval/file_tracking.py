@@ -113,7 +113,8 @@ async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
         yield
         return
 
-    # Older servers can only advance past setup; both set the agent-edit baseline.
+    # Env images whose tracker lacks ``setup_diff`` can only ``advance`` past setup; both
+    # calls set the baseline agent edits are diffed against.
     ft: FileTrackingClient | None = None
     try:
         ft = await FileTrackingClient.connect(cap)

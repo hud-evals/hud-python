@@ -108,7 +108,8 @@ async def trace_exit(trace: Trace) -> None:
 
 async def _report(path: str, payload: dict[str, Any]) -> None:
     body = {k: v for k, v in payload.items() if v is not None}
-    # One retry: bursts of concurrent rollouts draw transient rejections, even 401s.
+    # Retried once on any rejection, a plain 500 included; a report still lost is only
+    # logged, since telemetry never fails the run.
     for attempt in (1, 2):
         try:
             await PlatformClient.from_settings().apost(path, json=body)

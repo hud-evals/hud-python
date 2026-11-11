@@ -71,7 +71,8 @@ TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
 | `set_head(checkpoint_id)` | `None` | Promote a checkpoint to head - roll back to, or branch from, it. |
 
 Advantages are group-relative (GRPO-style) when `group_size` is set, normalized within contiguous
-**groups** of that size; `None` treats the whole batch as one group. The `loss_fn` selects the
+**groups** of that size; `None` treats the whole batch as one group. A set `group_size` is at least 2, since
+a one-member group has no reward spread. The `loss_fn` selects the
 policy-gradient objective applied on top, defaulting to `importance_sampling` (not GRPO itself). The
 batch must divide evenly into groups - `forward_backward` rejects a partial final group before spending
 a forward pass - and traces that share a `group_id` must be adjacent, as in `job.traces`. `num_substeps`

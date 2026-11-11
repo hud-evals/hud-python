@@ -157,10 +157,7 @@ class TrainingClient(BaseTrainingClient):
             reward_scale=reward_scale,
             num_substeps=num_substeps,
         )
-        # An older server rejects optional fields it doesn't know, even null ones.
-        return await self._post(
-            "forward-backward", request.model_dump(exclude_none=True), ForwardBackwardResult
-        )
+        return await self._post("forward-backward", request.model_dump(), ForwardBackwardResult)
 
     async def forward(
         self,
@@ -181,7 +178,7 @@ class TrainingClient(BaseTrainingClient):
             group_size=group_size,
             reward_scale=reward_scale,
         )
-        return await self._post("forward", request.model_dump(exclude_none=True), ForwardResult)
+        return await self._post("forward", request.model_dump(), ForwardResult)
 
     async def backward(
         self,

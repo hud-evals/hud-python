@@ -237,9 +237,6 @@ class Taskset:
         group = (job.group if job else 1) if group is None else group
         if group < 1:
             raise ValueError("group must be >= 1")
-        timeout = rollout_timeout
-        if timeout is None and isinstance(placement, (HUDRuntime, HostedRuntime)):
-            timeout = placement.run_timeout
         for task in task_list:
             if isinstance(placement, HostedRuntime):
                 actor_runtime_config = task.runtime_config
@@ -257,7 +254,7 @@ class Taskset:
             validate_rollout_timeouts(
                 task,
                 agent,
-                timeout,
+                rollout_timeout,
                 actor_runtime_config=actor_runtime_config,
                 verifier_runtime_config=verifier_runtime_config,
             )
@@ -289,7 +286,7 @@ class Taskset:
                         agent,
                         job_id=job_id,
                         group_id=group_id,
-                        rollout_timeout=timeout,
+                        rollout_timeout=rollout_timeout,
                     )
                 ]
             return [
@@ -299,7 +296,7 @@ class Taskset:
                     runtime=placement,
                     job_id=job_id,
                     group_id=group_id,
-                    rollout_timeout=timeout,
+                    rollout_timeout=rollout_timeout,
                 )
             ]
 
