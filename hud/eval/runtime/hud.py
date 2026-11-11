@@ -164,8 +164,19 @@ class HUDRuntime:
                 headers={"Authorization": f"Bearer {api_key}"},
                 json=payload,
             )
-            resp.raise_for_status()
-            body = resp.json()
+        if resp.is_error:
+            try:
+                error = resp.json()
+            except ValueError:
+                error = None
+            detail = error.get("detail") if isinstance(error, dict) else None
+            raise httpx2.HTTPStatusError(
+                f"HUD runtime refused a session for environment {task.env!r} "
+                f"({resp.status_code}): {detail if isinstance(detail, str) else resp.text}",
+                request=resp.request,
+                response=resp,
+            )
+        body = resp.json()
         session_id = body.get("id")
         if not isinstance(session_id, str):
             raise RuntimeError("Runtime gateway did not return a session id")

@@ -62,6 +62,26 @@ async def test_with_telemetry_off_the_hosted_environment_opens_without_a_trace(
     assert len(services.requests("runtime", "DELETE", SESSION)) == 1
 
 
+async def test_a_refused_session_fails_the_run_with_the_platform_reason(
+    reporting: FakeServices,
+) -> None:
+    reason = "Trace 1234 is not one of the caller's traces"
+    reporting.route(
+        "runtime",
+        "POST",
+        SESSIONS,
+        status=400,
+        json={"error": "bad_request", "source": "user", "detail": reason},
+    )
+
+    job = await Task(env="checked", id="check").run(ScriptedAgent("yes"), runtime=HUDRuntime())
+
+    (run,) = job.runs
+    assert run.grade.is_error
+    assert reason in (run.trace.error or "")
+    assert "'checked'" in (run.trace.error or "")
+
+
 async def dropped(websocket: WebSocket, params: dict[str, str]) -> None:
     await websocket.accept()
     await websocket.close()
