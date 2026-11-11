@@ -177,7 +177,6 @@ lint.select = [
 lint.ignore = [
     "ANN401",
     "W293",
-    "PLC0415",
     "S101",
     "S603",
     "E731",
@@ -188,6 +187,22 @@ lint.ignore = [
 # Typer reads command annotations at runtime.
 "hud/cli/*.py" = ["TC003"]
 "hud/environment/robot/**" = ["T201"]
+# Imports inside functions: optional extras and provider SDKs load where they are used.
+"hud/runtime/daytona.py" = ["PLC0415"]
+"hud/runtime/modal.py" = ["PLC0415"]
+"hud/environment/robot/gym.py" = ["PLC0415"]
+"hud/train/client.py" = ["PLC0415"]
+"hud/utils/gateway.py" = ["PLC0415"]
+"hud/clients/client.py" = ["PLC0415"]
+"tests/conftest.py" = ["PLC0415"]
+"tests/eval/test_runtimes.py" = ["PLC0415"]
+# Imports inside functions: modules that import each other (shapes and agents, environment and engine).
+"hud/types.py" = ["PLC0415"]
+"hud/environment/__init__.py" = ["PLC0415"]
+"hud/environment/env.py" = ["PLC0415"]
+"hud/eval/task.py" = ["PLC0415"]
+# Imports inside functions: Windows-only modules.
+"hud/environment/workspace.py" = ["PLC0415"]
 "hud/agents/robot/**" = ["T201"]
 "*.ipynb" = ["ALL"]
 "**/cookbooks/**/*.py" = ["ALL"]
