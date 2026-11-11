@@ -28,7 +28,7 @@ def serve_command(
     host: str = typer.Option(
         "127.0.0.1", "--host", help="Interface to bind (use 0.0.0.0 inside containers)."
     ),
-    arg: list[str] | None = typer.Option(  # noqa: B008
+    arg: list[str] | None = typer.Option(
         None, "--arg", help="key=value passed to a factory target (repeatable)."
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs."),

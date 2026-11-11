@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -30,6 +29,7 @@ from hud.runtime import LocalRuntime, Shared
 from .sims import EPISODE_TICKS, StubSim, sim_env, stub_episode
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
 

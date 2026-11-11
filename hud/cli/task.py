@@ -113,7 +113,7 @@ def start_command(
         "-s",
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
-    args: dict[str, Any] | None = typer.Option(  # noqa: B008
+    args: dict[str, Any] | None = typer.Option(
         None,
         "--args",
         "-a",
@@ -164,7 +164,7 @@ def grade_command(
         "-s",
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
-    args: dict[str, Any] | None = typer.Option(  # noqa: B008
+    args: dict[str, Any] | None = typer.Option(
         None,
         "--args",
         "-a",

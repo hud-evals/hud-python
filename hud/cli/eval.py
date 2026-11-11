@@ -144,9 +144,7 @@ def eval_command(
         "wins).",
     ),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
-    config: list[str] | None = typer.Option(  # noqa: B008
-        None, "--config", "-c", help="Agent config: key=value"
-    ),
+    config: list[str] | None = typer.Option(None, "--config", "-c", help="Agent config: key=value"),
     max_concurrent: int | None = typer.Option(
         None, "--max-concurrent", help="Max concurrent tasks"
     ),

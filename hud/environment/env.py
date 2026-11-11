@@ -13,6 +13,7 @@ import contextlib
 import functools
 import inspect
 import logging
+import types
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, Protocol, TypeVar, cast
@@ -87,6 +88,22 @@ def _args_json_schema(sig: inspect.Signature) -> dict[str, Any]:
     return schema
 
 
+def _parameter_signature(func: types.FunctionType) -> inspect.Signature:
+    """``func``'s signature with its parameter annotations evaluated.
+
+    A template's return annotation is never read, so it is left unevaluated and may
+    name a type imported only under ``TYPE_CHECKING``.
+    """
+    params_only = types.FunctionType(
+        func.__code__, func.__globals__, func.__name__, func.__defaults__, func.__closure__
+    )
+    params_only.__kwdefaults__ = func.__kwdefaults__
+    params_only.__annotations__ = {
+        name: hint for name, hint in func.__annotations__.items() if name != "return"
+    }
+    return inspect.signature(params_only, eval_str=True)
+
+
 class TaskTemplate(Generic[P]):
     """A registered ``@env.template``: calling it with args binds a runnable ``Task``.
 
@@ -112,7 +129,7 @@ class TaskTemplate(Generic[P]):
         # Type the agent must produce (``None`` = plain text). Drives answer
         # deserialization into ``Answer[T]``.
         self.return_type = returns
-        self.sig = inspect.signature(func, eval_str=True)
+        self.sig = _parameter_signature(cast("types.FunctionType", func))
         functools.update_wrapper(self, func)
 
     def manifest_entry(self) -> dict[str, Any]:

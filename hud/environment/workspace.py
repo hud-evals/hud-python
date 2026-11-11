@@ -56,6 +56,8 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger("hud.environment.workspace")
 
 _PROCESS_CLOSE_TIMEOUT_S = 5.0
+# The sandbox's own tmpfs, mounted inside its namespace; no host process shares it.
+_SANDBOX_TMP = "/tmp"  # noqa: S108
 _CREATE_SUSPENDED = 0x00000004
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
@@ -324,7 +326,7 @@ def usable_bwrap() -> Bubblewrap | None:
             )
             if probe.returncode == 0:
                 separator = argv.index("--")
-                mode_probe = [*argv[:separator], "--perms", "1777", "--tmpfs", "/tmp"]  # noqa: S108
+                mode_probe = [*argv[:separator], "--perms", "1777", "--tmpfs", _SANDBOX_TMP]
                 modes = subprocess.run(
                     [*mode_probe, *argv[separator:]],
                     capture_output=True,
@@ -404,7 +406,7 @@ DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
     Mount("proc", dst="/proc"),
     Mount("dev", dst="/dev"),
     # World-writable like a host /tmp, so unprivileged sessions get scratch space.
-    Mount("tmpfs", dst="/tmp", mode=0o1777),  # noqa: S108 — namespace-local tmpfs, not a host tempdir
+    Mount("tmpfs", dst=_SANDBOX_TMP, mode=0o1777),
 )
 
 

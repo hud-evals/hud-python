@@ -11,7 +11,6 @@ import shlex
 import shutil
 import socket
 import tempfile
-from collections.abc import AsyncGenerator, Generator  # noqa: TC003
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -25,6 +24,8 @@ from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
 from hud.utils.process import ProcessResult, bound_shell_output, create_process_group_exec
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Generator
+
     from hud.environment.namespace import NamespaceProcess
 
 CONTROLLER_ROOT = Path("/controller")

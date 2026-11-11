@@ -9,6 +9,7 @@ import inspect
 import logging
 import math
 import secrets
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
@@ -586,7 +587,9 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
     try:
         server = await bind(env, host, port)
         port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
-        print(port_line, flush=True)  # noqa: T201 - the spawn provider reads this from stdout
+        # The runtimes that spawn this process read the port from its stdout.
+        sys.stdout.write(f"{port_line}\n")
+        sys.stdout.flush()
         # The bound server is already accepting. Not serve_forever(): cancelling it
         # waits for open connections to close, and only unbind() closes them.
         await asyncio.Event().wait()

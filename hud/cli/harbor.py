@@ -93,7 +93,7 @@ class _Target:
 
 @harbor_app.command("import")
 def import_command(
-    paths: list[Path] = typer.Argument(  # noqa: B008
+    paths: list[Path] = typer.Argument(
         ...,
         help="Harbor task, dataset, or job folders, or one .zip of them",
     ),

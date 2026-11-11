@@ -56,7 +56,7 @@ app = CLI(
 
 
 def set_command(
-    assignments: list[str] = typer.Argument(  # noqa: B008
+    assignments: list[str] = typer.Argument(
         ..., help="One or more KEY=VALUE pairs to persist in ~/.hud/.env"
     ),
 ) -> dict[str, object]:
@@ -265,6 +265,7 @@ def render_hud_warnings() -> None:
         else:
             show_default(message, category, filename, lineno, file, line)
 
+    # Python documents replacing showwarning; ty rejects assigning to a module function.
     warnings.showwarning = show  # ty: ignore[invalid-assignment]
 
 

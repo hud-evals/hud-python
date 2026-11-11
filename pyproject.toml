@@ -185,10 +185,10 @@ lint.ignore = [
 
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
+# Typer reads command annotations at runtime.
+"hud/cli/*.py" = ["TC003"]
 "hud/environment/robot/**" = ["T201"]
 "hud/agents/robot/**" = ["T201"]
-"hud/capabilities/robot.py" = ["T201"]
-"hud/telemetry/lerobot.py" = ["T201"]
 "*.ipynb" = ["ALL"]
 "**/cookbooks/**/*.py" = ["ALL"]
 
@@ -196,8 +196,11 @@ lint.ignore = [
 [tool.ruff.format]
 docstring-code-format = true
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
 [tool.ruff.lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "fastmcp.tools.Tool"]
 
 [tool.ty.src]
 include = ["hud", "tests"]

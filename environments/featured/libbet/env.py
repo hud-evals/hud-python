@@ -26,17 +26,17 @@ import sys
 # Make sibling modules importable regardless of how the server is launched.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from collections.abc import AsyncGenerator  # noqa: E402
-from typing import Any  # noqa: E402
+from collections.abc import AsyncGenerator
+from typing import Any
 
-from fastmcp import FastMCP  # noqa: E402
-from hud import Environment  # noqa: E402
-from hud.capabilities import Capability  # noqa: E402
-from mcp.types import ContentBlock, ImageContent, TextContent  # noqa: E402
-from PIL import Image  # noqa: E402
+from fastmcp import FastMCP
+from hud import Environment
+from hud.capabilities import Capability
+from mcp.types import ContentBlock, ImageContent, TextContent
+from PIL import Image
 
-import games_loader  # noqa: E402
-from emulator import GB_BUTTONS, GameBoyEmulator, sanitize_buttons  # noqa: E402
+import games_loader
+from emulator import GB_BUTTONS, GameBoyEmulator, sanitize_buttons
 
 env = Environment(name="libbet")
 

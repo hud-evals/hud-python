@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, cast
-from uuid import UUID  # noqa: TC003 - typer resolves argument annotations at runtime
+from uuid import UUID
 
 import typer
 from pydantic import ConfigDict, with_config
@@ -444,7 +444,7 @@ def list_command(
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one check key per line, with no headers (for piping)."
     ),
-    level: Level | None = typer.Option(  # noqa: B008
+    level: Level | None = typer.Option(
         None, "--level", case_sensitive=False, help="Only the checks that run at this level."
     ),
 ) -> Any:
@@ -490,7 +490,7 @@ def qa_command(
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one check key per line, with no headers (for piping)."
     ),
-    level: Level | None = typer.Option(  # noqa: B008
+    level: Level | None = typer.Option(
         None, "--level", case_sensitive=False, help="Only the checks that run at this level."
     ),
 ) -> Any:
@@ -513,7 +513,7 @@ def run_checks(
         ...,
         help="QA check key from `hud qa list`, or several separated by commas.",
     ),
-    ids: list[UUID] = typer.Argument(  # noqa: B008
+    ids: list[UUID] = typer.Argument(
         ...,
         help=(
             "Completed evaluation trace UUIDs for trace-level checks, or task UUIDs for "
@@ -619,11 +619,11 @@ def run_checks(
 
 @qa_app.command("results")
 def list_results(
-    ids: list[UUID] = typer.Argument(  # noqa: B008
+    ids: list[UUID] = typer.Argument(
         ...,
         help="Evaluation trace UUIDs, or task UUIDs with --level task (at most 100).",
     ),
-    level: Level = typer.Option(  # noqa: B008
+    level: Level = typer.Option(
         Level.trace, "--level", case_sensitive=False, help="Whether the IDs are traces or tasks."
     ),
     history: bool = typer.Option(

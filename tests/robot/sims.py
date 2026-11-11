@@ -11,7 +11,6 @@ verdict is about. ``ScriptedLLM`` stands in for a tool-calling model.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
@@ -24,7 +23,7 @@ from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncGenerator, Callable
 
     from numpy.typing import NDArray
 

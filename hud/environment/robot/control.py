@@ -18,7 +18,7 @@ import io
 import math
 import re
 import socket
-from collections.abc import Callable  # noqa: TC003 - pydantic resolves the field at runtime
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
