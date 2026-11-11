@@ -90,16 +90,16 @@ def _sanitize_schema_for_openai(schema: dict[str, Any]) -> dict[str, Any]:
             else:
                 sanitized["type"] = "string"
         elif key == "prefixItems" and isinstance(value, list):
+            # The subset has no tuples or unions: the items are typed only when every
+            # position shares one type.
             sanitized["type"] = "array"
-            prefix_items = cast("list[Any]", value)
-            if prefix_items:
-                first: Any = prefix_items[0]
-                if isinstance(first, dict):
-                    sanitized["items"] = {
-                        "type": cast("dict[str, Any]", first).get("type", "string")
-                    }
-                else:
-                    sanitized["items"] = {"type": "string"}
+            item_types = [
+                cast("dict[str, Any]", item).get("type") if isinstance(item, dict) else None
+                for item in cast("list[Any]", value)
+            ]
+            first = item_types[0] if item_types else None
+            if first is not None and all(item_type == first for item_type in item_types):
+                sanitized["items"] = {"type": first}
         elif key == "properties" and isinstance(value, dict):
             sanitized[key] = {
                 k: _sanitize_schema_for_openai(cast("dict[str, Any]", v))

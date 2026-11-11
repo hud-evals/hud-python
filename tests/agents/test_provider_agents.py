@@ -246,3 +246,37 @@ async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
 
     assert (trace.status, len(models.requests())) == ("error", 1)
     assert error in (trace.error or "")
+
+
+# Strict mode offers each position's type; the Chat Completions subset has no unions,
+# so a mixed tuple's items stay untyped.
+@pytest.mark.parametrize(
+    ("agent_type", "model", "expected"),
+    [
+        (agent_type, model, {"string", "integer"} if agent_type == "openai" else {None})
+        for agent_type, model in PROVIDERS
+        if agent_type in {"openai", "openai_compatible"}
+    ],
+    ids=["openai", "openai_compatible"],
+)
+async def test_a_tuple_argument_is_offered_with_every_type_its_positions_take(
+    agent_type: str, model: str, expected: set[str | None], models: Models, tmp_path: Path
+) -> None:
+    labels = FastMCP("labels")
+
+    @labels.tool(description="Label a pair.")
+    def label(pair: tuple[str, int]) -> str:
+        return f"{pair[0]}={pair[1]}"
+
+    models.script([Turn(text="done")])
+    kind = AgentType(agent_type).cls
+
+    async with mcp_server(labels, name="labels") as tools:
+        task = workspace_task(tmp_path / "ws", capabilities=(tools,))
+        await task().run(kind(kind.config_cls(model=model)))
+
+    (request,) = models.requests()
+    (tool,) = [t for t in request.body["tools"] if (t.get("function") or t).get("name") == "label"]
+    items = (tool.get("function") or tool)["parameters"]["properties"]["pair"].get("items", {})
+    offered = {option.get("type") for option in items.get("anyOf", [items])}
+    assert offered == expected

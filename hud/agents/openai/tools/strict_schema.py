@@ -126,21 +126,18 @@ def _ensure_strict_json_schema(
     if _is_dict(items):
         json_schema["items"] = _ensure_strict_json_schema(items, path=(*path, "items"), root=root)
 
-    # Strict mode has no tuple schemas (prefixItems), so they become plain arrays.
-    prefix_items = json_schema.get("prefixItems")
+    # Strict mode has no tuple schemas (prefixItems), so a tuple becomes an array whose
+    # items may be any of its positions' schemas.
+    prefix_items = json_schema.pop("prefixItems", None)
     if _is_list(prefix_items) and prefix_items:
-        item_types: set[Any] = set()
-        for item in prefix_items:
-            if _is_dict(item) and "type" in item:
-                item_types.add(item["type"])
-
-        if len(item_types) == 1:
-            json_schema["items"] = {"type": item_types.pop()}
-        else:
-            # Mixed types or complex schemas — use integer as fallback (common for coordinates).
-            json_schema["items"] = {"type": "integer"}
-
-        json_schema.pop("prefixItems")
+        options: list[object] = []
+        for i, item in enumerate(prefix_items):
+            option = _ensure_strict_json_schema(
+                item, path=(*path, "prefixItems", str(i)), root=root
+            )
+            if option not in options:
+                options.append(option)
+        json_schema["items"] = options[0] if len(options) == 1 else {"anyOf": options}
 
     any_of = json_schema.get("anyOf")
     if _is_list(any_of):
