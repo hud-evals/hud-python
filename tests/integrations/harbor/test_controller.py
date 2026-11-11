@@ -41,6 +41,14 @@ if TYPE_CHECKING:
     from hud.eval.run import Run
 
 TASKS = Path(__file__).parent / "tasks"
+VERIFIER_OUTPUT_LIMIT = 1_024_000
+LONG_OUTPUT_VERIFIER = """\
+#!/bin/sh
+mkdir -p /logs/verifier
+seq 1 3000 | sed 's/^/stdout line /'
+{ echo "stderr head"; head -c 2000000 /dev/zero | tr '\\0' x; echo; echo "stderr tail"; } >&2
+echo 1 > /logs/verifier/reward.txt
+"""
 
 pytestmark = [
     pytest.mark.e2e,
@@ -180,6 +188,30 @@ async def test_a_harbor_task_grades_as_its_fixture_expects(
             assert case.error in detail
     if case.probe is not None:
         assert oracle.probed == [sorted(case.probe["tools"])] * len(job.runs)
+
+
+@pytest.mark.parametrize("fixture", ["agent-answer", "agent-answer-separate"])
+async def test_verifier_output_reaches_the_evaluation_whole_up_to_the_stream_limit(
+    fixture: str, sdk_wheel: Path, tmp_path: Path
+) -> None:
+    task = tmp_path / "harbor-fixtures" / fixture
+    assemble_case(TASKS / fixture, task, "managed")
+    (task / "tests" / "test.sh").write_text(LONG_OUTPUT_VERIFIER, "utf-8")
+    result = harbor.adapt(task.parent, hud_requirement=str(sdk_wheel))
+    assert result.failures == ()
+    oracle = Oracle((task / "solution" / "solve.sh").read_text("utf-8"), repeat=1, probe=None)
+
+    job = await result.taskset.run(oracle, runtime=DockerRuntime(), max_concurrent=1)
+
+    (run,) = job.runs
+    assert run.reward == 1.0, report(run)
+    info = run.evaluation["info"]
+    assert info["stdout"] == "".join(f"stdout line {index}\n" for index in range(1, 3001))
+    stderr = info["stderr"]
+    assert len(stderr) == VERIFIER_OUTPUT_LIMIT
+    assert stderr.startswith("stderr head\nxxx")
+    assert stderr.endswith("xxx\nstderr tail\n")
+    assert stderr.count("[truncated]") == 1
 
 
 @pytest.mark.parametrize("case", REFUSED, ids=[case.id for case in REFUSED])

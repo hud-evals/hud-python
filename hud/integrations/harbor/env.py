@@ -39,6 +39,8 @@ RUNTIME_ROOT = Path("/runtime")
 SESSIONS = RUNTIME_ROOT / "sessions"
 DOCKER_SOCKET = Path("/var/run/docker.sock")
 MANAGED_AGENTS = Path("/usr/local/lib/agents")
+#: Characters of each verifier stream kept on the evaluation, head and tail around a marker.
+VERIFIER_OUTPUT_LIMIT = 1_024_000
 
 ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
 
@@ -707,7 +709,7 @@ async def grade_separate(
 
 def evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult:
     stdout, stderr = (
-        bound_shell_output(stream.decode("utf-8", "replace"), "", 4000)[0]
+        bound_shell_output(stream.decode("utf-8", "replace"), "", VERIFIER_OUTPUT_LIMIT)[0]
         for stream in (execution.stdout, execution.stderr)
     )
     info: dict[str, Any] = {"exit_code": execution.returncode, "stdout": stdout, "stderr": stderr}

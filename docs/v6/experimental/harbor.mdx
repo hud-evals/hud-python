@@ -137,6 +137,10 @@ environment configures the actor task, and a separate verifier environment can
 configure its verifier task independently. The selected runtime decides whether
 it can provision those requirements.
 
+The evaluation's `info` carries the verifier's `exit_code`, `stdout`, and
+`stderr`. Each stream keeps up to 1,024,000 characters; a longer stream keeps
+its head and tail around a `[truncated]` marker.
+
 stdio MCP servers and skills directories configure Harbor's own agents; the
 adapter accepts them and does not expose them to HUD agents.
 
