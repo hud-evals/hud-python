@@ -23,8 +23,8 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `DockerRuntime("my-env")` | A fresh local container per rollout | Reproducibility and parity with production |
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com/) sandbox per rollout | Cloud scale, no infra to manage |
 | `DaytonaRuntime("my-env")` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout | Cloud scale on Daytona |
-| `Runtime("tcp://host:8765")` | A substrate you already started | Attaching to a long-lived container or sandbox you own |
-| `Shared(provider, width=N)` | One substrate from `provider`, shared by up to N concurrent connections | Multi-agent evals - agents that share, compete, or coordinate over one live environment |
+| `Runtime("tcp://host:8765")` | A host you already started | Attaching to a long-lived container or sandbox you own |
+| `Shared(provider, width=N)` | One host from `provider`, shared by up to N concurrent connections | Multi-agent evals - agents that share, compete, or coordinate over one live environment |
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
 | `HostedRuntime()` | The whole rollout managed by HUD | Agent and env execute remotely together |
 
@@ -269,7 +269,7 @@ custom `model_client` must use `HUDRuntime` or `LocalRuntime`.
 Runtime(url, params=..., config=...)
 ```
 
-- **`url`** - control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
+- **`url`** - control-channel address of an already-running host (e.g. `tcp://host:8765`).
 - **`params`** - connection-time data a transport may need (auth token, sandbox id).
 
 Provisioned runtimes expose `snapshot_session(session_id)` and
@@ -284,15 +284,15 @@ Shared(provider, *, width)
 ```
 
 - **`provider`** - the `Provider` to provision once, e.g. `DockerRuntime("my-env")`.
-- **`width`** - how many concurrent connections that one substrate accepts.
+- **`width`** - how many concurrent connections that one host accepts.
 
-A lease pool over one substrate: it boots through `provider` on the first lease and lives for the
+A lease pool over one host: it boots through `provider` on the first lease and lives for the
 enclosing `async with` scope, so every rollout in that scope is handed the same address - agents
 that need to share, compete, or coordinate in the same environment (a vectorized sim's `num_envs`
 slots, see [robots](/v6/advanced/robots#vectorized-envs-and-evals), are one case). Lease
 `width + 1` waits for a slot to free instead of erroring, so `group` and `max_concurrent` keep
 their ordinary meanings. `Taskset.run` scopes a context-manager placement to the call, so a bare
-`runtime=Shared(...)` boots once per `run(...)`; open the scope yourself to keep the substrate
+`runtime=Shared(...)` boots once per `run(...)`; open the scope yourself to keep the host
 warm across several calls:
 
 ```python
@@ -327,7 +327,7 @@ await taskset.run(agent, runtime=my_runtime)
 `DockerRuntime` and the rest are just built-in versions of this. Anything that starts your image and
 hands back a URL plugs in with no change to the environment or the task - that's what "run anywhere"
 means concretely. Constructed directly, `Runtime(url)` yields itself with a no-op lifecycle, since
-whoever provisioned the substrate owns teardown.
+whoever provisioned the host owns teardown.
 
 Placement can also vary per task: a runtime is called once per rollout with the task row being placed,
-so one callable can route heavier rows to heavier substrates.
+so one callable can route heavier rows to heavier hosts.

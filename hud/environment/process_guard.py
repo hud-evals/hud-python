@@ -257,7 +257,7 @@ def _detected_backend() -> GuardBackend | None:
 
 
 def process_connections_supported() -> bool:
-    """Whether this substrate has a race-free process connection guard."""
+    """Whether this host has a race-free process connection guard."""
     return _detected_backend() is not None
 
 
@@ -568,7 +568,7 @@ class ProcessConnectionGuard:
             raise ValueError("allowed process connections must be protected destinations")
         selected_backend = backend or _detected_backend()
         if selected_backend is None:
-            raise RuntimeError("process connection guards are unavailable on this substrate")
+            raise RuntimeError("process connection guards are unavailable on this host")
         self.backend: GuardBackend = selected_backend
         self._server: socket.socket | None = None
         self._listener: int | None = None

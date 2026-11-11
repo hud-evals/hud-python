@@ -187,7 +187,7 @@ class Taskset:
         if self.taskset_id is not None:
             return HUDRuntime()
         rows = list(self)
-        # A verifier sharing its task's substrate is placed with that task, not on its own.
+        # A verifier sharing its task's host is placed with that task, not on its own.
         rows.extend(
             task.verifier
             for task in self
@@ -199,7 +199,7 @@ class Taskset:
                 "no placement: pass runtime= — "
                 'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
                 "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
-                "(a served substrate), or HUDRuntime() (your deployed env)"
+                "(a served host), or HUDRuntime() (your deployed env)"
             )
         docker = DockerRuntime()
         live: dict[int, LocalRuntime] = {}

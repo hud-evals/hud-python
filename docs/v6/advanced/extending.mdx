@@ -204,10 +204,10 @@ job = await taskset.run(agent, group=8, max_concurrent=10)
 rewards = [trace.reward for trace in job.traces]
 ```
 
-### Route tasks to different substrates
+### Route tasks to different hosts
 
 A [runtime](/v6/reference/runtime) is called once per rollout with the task row, so a callable can place
-heavier rows on heavier substrates:
+heavier rows on heavier hosts:
 
 ```python run.py
 def placer(task):

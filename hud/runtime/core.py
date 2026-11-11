@@ -148,10 +148,10 @@ def validate_session_id(session_id: str) -> None:
 
 @dataclass(frozen=True)
 class Runtime:
-    """A provisioned substrate's control-channel ``url`` plus connection-time ``params``.
+    """A provisioned host's control-channel ``url`` plus connection-time ``params``.
 
     Constructed directly, it is also a provider that yields itself and leaves teardown
-    to whoever provisioned the substrate.
+    to whoever provisioned the host.
     """
 
     url: str
@@ -182,10 +182,10 @@ class Runtime:
 class Shared:
     """Lease provider: at most ``width`` rollouts share each task placement.
 
-    One substrate per environment and runtime config boots on its first lease and
+    One host per environment and runtime config boots on its first lease and
     lives for the ``async with`` scope, or until its run timeout, when the next lease
     boots a fresh one. Excess leases wait for a slot. ``Taskset.run`` opens the scope
-    for one call; open it yourself to keep the substrate warm across calls.
+    for one call; open it yourself to keep the host warm across calls.
     """
 
     def __init__(self, inner: Provider, *, width: int) -> None:
@@ -220,7 +220,7 @@ class Shared:
     async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
         if self._opens == 0:
             raise RuntimeError(
-                "Shared substrates outlive single rollouts; lease inside the scope "
+                "Shared hosts outlive single rollouts; lease inside the scope "
                 "(Taskset.run opens it for you, or wrap calls in `async with Shared(...)`)"
             )
         config = (

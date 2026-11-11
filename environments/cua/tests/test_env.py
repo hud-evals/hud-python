@@ -108,4 +108,4 @@ async def test_a_desktop_serves_one_task():
         with pytest.raises(HudProtocolError) as failure:
             await client.start_task(row.id, {**row.args, "prompt": "second"})
 
-    assert "one task per substrate" in failure.value.message
+    assert "one task per host" in failure.value.message

@@ -139,10 +139,10 @@ asyncio.run(main())
 
 @dataclass(frozen=True, slots=True)
 class Peer:
-    """A substrate service a bounded workspace may reach.
+    """A host service a bounded workspace may reach.
 
     ``name`` and ``port`` are what the workspace calls it; ``target`` is where it
-    answers on the substrate (its own port on loopback by default).
+    answers on the host (its own port on loopback by default).
     """
 
     name: str
@@ -151,7 +151,7 @@ class Peer:
 
     @property
     def address(self) -> tuple[str, int]:
-        """Where the service actually listens, on the substrate."""
+        """Where the service actually listens, on the host."""
         return self.target or ("127.0.0.1", self.port)
 
 
@@ -259,7 +259,7 @@ def hosts_text(
     *,
     local_aliases: Collection[str] = (),
 ) -> str:
-    """``base`` (the substrate's ``/etc/hosts``) plus a line per local alias and peer.
+    """``base`` (the host's ``/etc/hosts``) plus a line per local alias and peer.
 
     Only the workspace's mount namespace sees these names; a process joining just its
     network (such as the Harbor verifier) reaches peers by address only.
@@ -282,7 +282,7 @@ def proxy_environment(
 ) -> dict[str, str]:
     """Proxy variables for a process on a workspace's loopback.
 
-    Peers bypass the proxy, which would resolve them on the substrate. ``no_proxy`` names
+    Peers bypass the proxy, which would resolve them on the host. ``no_proxy`` names
     each one because most clients, curl among them, match 127.0.0.0/8 literally.
     """
     credentials = f"hud:{urllib.parse.quote(token, safe='')}@" if token else ""
@@ -365,7 +365,7 @@ class _Proxy(BaseHTTPRequestHandler):
     token: str | None = None
 
     def log_message(self, format: str, *args: Any) -> None:
-        """The workspace's traffic is not the substrate's log."""
+        """The workspace's traffic is not the host's log."""
 
     def _fail(self, status: int, reason: str) -> None:
         # The reason header keeps a refusal from reading as a merely broken network.

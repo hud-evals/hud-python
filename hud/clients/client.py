@@ -434,7 +434,7 @@ async def connect(
 ) -> AsyncGenerator[HudClient]:
     """Connect a ``HudClient`` to a runtime's control channel, retrying until it answers.
 
-    The substrate's teardown stays with its provider. While open, a periodic heartbeat
+    The host's teardown stays with its provider. While open, a periodic heartbeat
     probes the transport; a transport failure cancels the body and raises that error.
     """
     parts = urlsplit(runtime.url)

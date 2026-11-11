@@ -59,7 +59,7 @@ async def cua_task(
     if grading_criteria and not settings.api_key:
         raise RuntimeError("HUD_API_KEY is required for CUA tasks with grading_criteria")
     if _task_started:
-        raise RuntimeError("CUA supports one task per substrate; start a fresh runtime")
+        raise RuntimeError("CUA supports one task per host; start a fresh runtime")
     _task_started = True
 
     answer = yield f"Use computer use tools to complete the following task:\n\n{prompt}"

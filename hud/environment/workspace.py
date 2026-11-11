@@ -255,13 +255,13 @@ class Bubblewrap:
     tmpfs_modes: bool = False
 
 
-# Cached probe of this substrate: a ``Bubblewrap`` launch mode, or the failure reason
+# Cached probe of this host: a ``Bubblewrap`` launch mode, or the failure reason
 # when none works.
 _bwrap_usable: Bubblewrap | str | None = None
 
 
 def usable_bwrap() -> Bubblewrap | None:
-    """A working bubblewrap launch mode for this substrate, if one exists."""
+    """A working bubblewrap launch mode for this host, if one exists."""
     global _bwrap_usable
     if isinstance(_bwrap_usable, Bubblewrap):
         return _bwrap_usable
@@ -522,7 +522,7 @@ class Workspace:
     capability yourself.
 
     When the server runs as root on Linux, ``shell_uid`` and ``shell_gid`` drop
-    agent sessions to that identity: the privilege wall for substrates where bwrap
+    agent sessions to that identity: the privilege wall for hosts where bwrap
     is unavailable and the env process holds secrets the agent must not read. Off
     root they do nothing; as root on another platform, ``start`` refuses. Unless
     ``hand_over_root`` is false, only the root directory itself is handed to that
@@ -568,25 +568,25 @@ class Workspace:
         self.mounts: tuple[Mount, ...] = tuple(mounts)
         self.network = network
         # Which hosts a session may reach. ``None`` leaves the network as the
-        # substrate's — sessions share it, and so can reach whatever else is
+        # host's — sessions share it, and so can reach whatever else is
         # listening there, the control channel included. A set (``{ANY_HOST}``
         # for everything) gives the workspace its own network namespace whose
-        # only route out is the policy: nothing else on the substrate is
+        # only route out is the policy: nothing else on the host is
         # addressable from inside, and no session can reach a host the task
         # did not declare.
         self.allowed_hosts = None if allowed_hosts is None else frozenset(allowed_hosts)
-        # Substrate services the workspace may reach, each at the address the
+        # Host services the workspace may reach, each at the address the
         # task expects. A workspace with a network of its own cannot address
-        # the substrate at all, so anything the environment itself runs — a
+        # the host at all, so anything the environment itself runs — a
         # database the task depends on, an API it is meant to call — has to be
         # named here to exist for it. Nothing to do where sessions share the
-        # substrate's network: the services are already at those addresses.
+        # host's network: the services are already at those addresses.
         self.peers: tuple[Peer, ...] = tuple(peers)
         self._process_connections: dict[str, Peer] = {}
         self.local_aliases = frozenset(local_aliases)
         self.ports = frozenset(ports)
         self._egress: Egress | None = None
-        # The workspace's own /etc/hosts (the substrate's, plus its peers),
+        # The workspace's own /etc/hosts (the host's, plus its peers),
         # materialized alongside the session keys when there is one to write.
         self._hosts_path: Path | None = None
         self.env: dict[str, str] = dict(env or {})
@@ -689,13 +689,13 @@ class Workspace:
 
         True when the task severed the network, and true when it declared what
         may be reached — a policy needs somewhere to apply. False leaves
-        sessions on the substrate's network, where they can address whatever
+        sessions on the host's network, where they can address whatever
         else is listening on it.
         """
         return not self.network or self.allowed_hosts is not None
 
     async def add_peer(self, peer: Peer, *, first: bool = False) -> None:
-        """Add a substrate service, to a running sandbox too.
+        """Add a host service, to a running sandbox too.
 
         Its address answers and its name resolves before this returns, and every
         other peer keeps the address it was bound at.
@@ -714,7 +714,7 @@ class Workspace:
                 self._hosts_path = self._write_hosts()
 
     def remove_peer(self, peer: Peer) -> None:
-        """Remove a substrate service, from a running sandbox too.
+        """Remove a host service, from a running sandbox too.
 
         Its name stops resolving and its address stops answering, while every other
         peer keeps the address it was bound at.
@@ -1421,14 +1421,14 @@ class Workspace:
         return self._cred_dir
 
     def _write_hosts(self) -> Path:
-        """The workspace's own ``/etc/hosts``: the substrate's, plus its peers.
+        """The workspace's own ``/etc/hosts``: the host's, plus its peers.
 
         It is bound read-only over ``/etc/hosts`` inside the sandbox, where
         every session resolves names from it. Callers which protect credentials
         at a recognizable path can place this non-secret file separately so
         process arguments do not disclose that path.
         """
-        substrate = Path("/etc/hosts")
+        hosts_file = Path("/etc/hosts")
         local_aliases = {*self.local_aliases, socket.gethostname()}
         peer_names = {peer.name for peer in self.peers}
         if collision := local_aliases & peer_names:
@@ -1438,7 +1438,7 @@ class Workspace:
         path.write_text(
             hosts_text(
                 self.addresses,
-                substrate.read_text() if substrate.is_file() else "",
+                hosts_file.read_text() if hosts_file.is_file() else "",
                 local_aliases=sorted(local_aliases),
             ),
             encoding="utf-8",

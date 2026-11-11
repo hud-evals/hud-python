@@ -193,7 +193,7 @@ def drain(client: socket.socket) -> bytes:
             b"CONNECT 127.0.0.1:8765 HTTP/1.1\r\nHost: 127.0.0.1:8765\r\n\r\n",
             b"403",
             b"blocked-by-address",
-            id="connect-to-a-substrate-address",
+            id="connect-to-a-host-address",
         ),
         pytest.param(
             {ANY_HOST},
@@ -201,7 +201,7 @@ def drain(client: socket.socket) -> bytes:
             b"GET http://internal.example:8765/ HTTP/1.1\r\nHost: internal.example\r\n\r\n",
             b"403",
             b"blocked-by-address",
-            id="a-name-resolving-into-the-substrate",
+            id="a-name-resolving-into-the-host",
         ),
         pytest.param(
             {"example.com"},

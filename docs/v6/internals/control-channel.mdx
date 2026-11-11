@@ -143,7 +143,7 @@ mechanism behind split `hud task start` and `hud task grade` invocations.
 ## Capability streams
 
 A capability binding describes a backing daemon inside the environment's
-substrate. The agent reaches that daemon through a second connection to the
+host. The agent reaches that daemon through a second connection to the
 control address. Its first frame names the capability:
 
 ```mermaid
@@ -209,7 +209,7 @@ for capability in bindings:
 `open(ref)` resolves that same binding, constructs the registered protocol
 client, and caches it for the life of the `HudClient`. All external capability
 traffic therefore follows the control address even when a manifest binding
-contains a substrate-local or otherwise unreachable address.
+contains a host-local or otherwise unreachable address.
 
 The [walkthrough](/v6/internals/walkthrough#connecting) places the handshake and
 forwarders on the execution path. [Placement](/v6/internals/placement) explains

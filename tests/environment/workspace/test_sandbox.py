@@ -198,7 +198,7 @@ async def test_concurrent_sessions_share_one_sandbox(tmp_path: Path) -> None:
         pytest.param({"example.com"}, True, True, id="a-policy-needs-a-network-to-apply-to"),
         pytest.param(set(), True, True, id="declared-unreachable"),
         pytest.param(None, False, True, id="no-network"),
-        pytest.param(None, True, False, id="the-substrates-network"),
+        pytest.param(None, True, False, id="the-hosts-network"),
     ],
 )
 async def test_sessions_get_a_network_of_their_own_exactly_when_the_task_bounds_it(
@@ -360,7 +360,7 @@ async def test_a_task_image_without_util_linux_runs_its_processes_dropped() -> N
             {"peers": [Peer("db", 5432)], "network": True},
             {},
             ["db"],
-            id="the-substrates-hosts-where-the-network-is-shared",
+            id="the-host-etc-hosts-where-the-network-is-shared",
         ),
     ],
 )

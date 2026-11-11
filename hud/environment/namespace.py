@@ -394,7 +394,7 @@ class NamespaceHost:
         self._listeners.append(
             await asyncio.start_server(
                 accept,
-                "0.0.0.0",  # noqa: S104 - publish into the substrate network
+                "0.0.0.0",  # noqa: S104 - publish into the host network
                 port,
             )
         )

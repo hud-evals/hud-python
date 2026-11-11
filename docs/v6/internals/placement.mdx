@@ -14,10 +14,10 @@ callable.
 
 | Concept | What it is |
 | --- | --- |
-| **Task row** | A `Task` (`hud/eval/task.py`): an env *name*, a task id, bound args. The name is a join key, never a live object - see [what we start with](/v6/internals/walkthrough#what-we-start-with). |
+| **Task row** | A `Task` (`hud/eval/task.py`): an env *name*, a task id, bound args. The name is the join key; a row a template minted also carries the live `environment`, which is never serialized - see [what we start with](/v6/internals/walkthrough#what-we-start-with). |
 | **Provider** | Anything callable as `(task) -> async context manager yielding a Runtime` (`hud/runtime/`). Entering the context provisions; exiting tears down. |
-| **Runtime** | Pure data: the connectable address of one substrate (`url`, connection `params`, optional `config`). |
-| **Substrate** | The provisioned instance behind a url - a local env, a subprocess, a container, a cloud sandbox. |
+| **Runtime** | Pure data: the connectable address of one host (`url`, connection `params`, optional `config`). |
+| **Host** | The provisioned instance behind a url - a local env, a subprocess, a container, a cloud sandbox. |
 
 ## The contract
 
@@ -70,7 +70,7 @@ Two consequences do most of the work:
 
 The built-ins (`LocalRuntime`, `SubprocessRuntime`, `DockerRuntime`, `ModalRuntime`,
 `DaytonaRuntime`, `HUDRuntime`) are all providers of this shape. They differ only in *where* the
-substrate runs and how its url is reached; all of them serve the same module and speak the same
+host runs and how its url is reached; all of them serve the same module and speak the same
 channel.
 
 ## Resolution
@@ -106,7 +106,7 @@ this process drives through the [rollout atom](/v6/internals/walkthrough#into-th
 Because the contract is a callable that receives the row, routing is composition, not
 configuration. Four patterns cover what exists today.
 
-### Fresh substrate per rollout
+### Fresh host per rollout
 
 `SubprocessRuntime` starts a process per rollout; `DockerRuntime` starts a container.
 Both stop it afterward. Processes share host files and ports, so concurrent runs
@@ -141,11 +141,11 @@ providers = {"web": DockerRuntime("web-env"), "sim": DockerRuntime("sim-env")}
 runtime = lambda task: providers[task.env](task)
 ```
 
-### Borrow warm substrates
+### Borrow warm hosts
 
 When provisioning is expensive (a sim that takes a minute to boot), serve long-lived processes once
 and map rows onto them as bare `Runtime` addresses. Entering the context is a no-op, so episodes
-against one task reuse its warm substrate, and per-episode variation travels through task args
+against one task reuse its warm host, and per-episode variation travels through task args
 instead of fresh builds.
 
 ```python
@@ -157,7 +157,7 @@ runtime = lambda task: servers[task.args["task"]](task)
 <Note>
 A control channel supports concurrent sessions, one suspended task each (see the
 [control channel](/v6/internals/control-channel#the-suspended-task)). Independent rows can use a
-shared warm server concurrently. Its substrate is one resource, so rows that drive a single shared
+shared warm server concurrently. Its host is one resource, so rows that drive a single shared
 world (one sim) require bounded concurrency or sequential execution.
 </Note>
 

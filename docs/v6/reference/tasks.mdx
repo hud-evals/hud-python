@@ -81,8 +81,8 @@ Parameterize across difficulties, inputs, or seeds and one definition becomes an
 
 A `Task` is a Pydantic model - one portable, validated row of data. `env` is a *name*, the join key
 between the row and whatever brings that environment up at run time. So a task runs anywhere without an
-env object in-process - the prompt and reward arrive over the wire from the substrate that placement
-brings up. A row a template minted also carries that live `environment`, which placement can serve in-process;
+env object in-process - the prompt and reward arrive over the wire from the host that placement brings
+up. A row a template minted also carries that live `environment`, which placement can serve in-process;
 it is never serialized.
 
 | Field | Type | Description |

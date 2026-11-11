@@ -353,7 +353,7 @@ until the environment terminates. You supply two objects.
 - **`Model`** - something with an `infer()` function that returns action chunks (pre-/post-processing included)
 - **`Adapter`** - translates env ↔ model spaces.
 
-Run it with the normal engine - `Taskset(...).run(agent, runtime=...)` - against any substrate
+Run it with the normal engine - `Taskset(...).run(agent, runtime=...)` - against any host
 serving an env with the robot capability and an adaptable embodiment.
 
 ## LeRobot integration
@@ -457,7 +457,7 @@ container pays for its own physics from scratch, when a sim like Isaac Sim could
 N copies together in one [vectorized](#gym-style-envs) instance. Running an eval against a vectorized sim needs no changes to
 the agent or the env's contract, only to how the eval provisions rollouts: wrap the runtime in
 [`Shared(provider, width=N)`](/v6/reference/runtime#shared) so `width` rollouts share that one
-substrate instead of provisioning `N` containers.
+host instead of provisioning `N` containers.
 
 ```python
 from hud.runtime import DockerRuntime, Shared
@@ -475,7 +475,7 @@ job = await taskset.run(
 - **The agent doesn't change.** Each rollout still drives one ordinary WebSocket connection and
   calls `reset` / `result` as usual - the environment resolves each call to that rollout's own
   [slot](#gym-style-envs).
-- **One boot per run.** The substrate boots on the first rollout and is torn down when `run(...)`
+- **One boot per run.** The host boots on the first rollout and is torn down when `run(...)`
   returns; rollout `width + 1` waits for capacity instead of provisioning (or erroring). To
   keep the sim warm across several calls, open the scope yourself:
   `async with Shared(...) as rt: await taskset.run(..., runtime=rt)`.
@@ -760,7 +760,7 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 | `BatchedAgent` / `BatchedModel` | `hud.agents.robot` | Many concurrent rollouts against one shared, batched model |
-| `Shared(provider, width=N)` | `hud.runtime` | Refcounting provider: N concurrent rollouts share one substrate |
+| `Shared(provider, width=N)` | `hud.runtime` | Refcounting provider: N concurrent rollouts share one host |
 
 ## See also
 

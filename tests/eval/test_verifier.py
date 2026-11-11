@@ -68,7 +68,7 @@ async def test_a_verifier_on_its_own_env_runs_after_the_actors_env_is_torn_down(
     assert events == ["actor up", "actor down", "judge up", "judge down"]
 
 
-async def test_a_verifier_on_the_actors_env_grades_on_the_same_substrate() -> None:
+async def test_a_verifier_on_the_actors_env_grades_on_the_same_host() -> None:
     events = []
     env = Environment("reviewed")
 

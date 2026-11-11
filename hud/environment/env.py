@@ -1,7 +1,7 @@
 """Environment: capabilities and task templates behind the HUD wire protocol.
 
 It declares what exists (identity, capabilities, registered templates) and the
-daemon hooks a substrate runs around serving, and holds the per-session
+daemon hooks a host runs around serving, and holds the per-session
 connections and routes the server binds. ``hud.environment.server`` puts it on
 the wire.
 """
@@ -188,7 +188,7 @@ class Environment:
         # Registered task templates by id (the ``@env.template`` registry).
         # Each value mints concrete ``Task`` rows when called.
         self.tasks: dict[str, TaskTemplate[Any]] = {}
-        # Backing-daemon lifecycle hooks run once by the serving substrate
+        # Backing-daemon lifecycle hooks run once by the serving host
         # around its lifetime.
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
@@ -369,7 +369,7 @@ class Environment:
     async def start(self) -> None:
         """Run ``@env.initialize`` hooks. Idempotent until ``stop``.
 
-        Run by the substrate before the control channel serves, so every
+        Run by the host before the control channel serves, so every
         capability — including ones published by hooks — is concrete by the
         time a client says ``hello``.
         """

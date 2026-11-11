@@ -1,7 +1,7 @@
 """HUD environment authoring: workspaces, mounts, typed answers, and ``load_environment``.
 
 ``Environment`` itself is exported from ``hud``; ``hud.environment.server`` is the
-serving entry point substrates run. The robot runtime (``RobotBridge``,
+serving entry point hosts run. The robot runtime (``RobotBridge``,
 ``RobotEndpoint``, ``DirectControl``, ``wrap``) lives in ``hud.environment.robot``;
 import it directly, since it needs the ``robot`` extra.
 """

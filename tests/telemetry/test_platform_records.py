@@ -150,7 +150,7 @@ async def test_a_rollout_that_never_launched_reports_where_it_failed(
 ) -> None:
     @asynccontextmanager
     async def unavailable(task: Task) -> AsyncGenerator[Runtime]:
-        raise RuntimeError("no substrate")
+        raise RuntimeError("no host")
         yield Runtime("tcp://127.0.0.1:1")
 
     await rollout(Task(env="checked", id="check"), ScriptedAgent("yes"), runtime=unavailable)
@@ -158,7 +158,7 @@ async def test_a_rollout_that_never_launched_reports_where_it_failed(
     (exited,) = reporting.bodies("api", "POST", TRACE_EXIT)
     assert (exited["status"], exited["reward"]) == ("error", 0.0)
     assert exited["error"].startswith("[provisioning] ")
-    assert "no substrate" in exited["error"]
+    assert "no host" in exited["error"]
 
 
 async def test_a_cancelled_rollout_still_closes_its_trace(reporting: FakeServices) -> None:

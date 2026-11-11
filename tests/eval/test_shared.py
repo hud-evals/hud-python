@@ -1,4 +1,4 @@
-"""``Shared``: one substrate per environment and runtime configuration, leased to at most
+"""``Shared``: one host per environment and runtime configuration, leased to at most
 ``width`` rollouts at once for the life of its scope."""
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ async def test_an_open_pool_stays_warm_across_calls_and_stops_when_its_scope_clo
     assert events == ["up", "down"]
 
 
-async def test_each_environment_and_runtime_configuration_gets_its_own_substrate() -> None:
+async def test_each_environment_and_runtime_configuration_gets_its_own_host() -> None:
     placed = []
 
     def build(task: Task) -> Environment:
