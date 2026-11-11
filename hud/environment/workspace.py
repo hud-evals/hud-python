@@ -56,7 +56,6 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger("hud.environment.workspace")
 
 _PROCESS_CLOSE_TIMEOUT_S = 5.0
-# The sandbox's own tmpfs, mounted inside its namespace; no host process shares it.
 _SANDBOX_TMP = "/tmp"  # noqa: S108
 _CREATE_SUSPENDED = 0x00000004
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
@@ -337,7 +336,8 @@ def usable_bwrap() -> Bubblewrap | None:
                 if not _bwrap_usable.tmpfs_modes:
                     LOGGER.warning(
                         "bwrap cannot set tmpfs modes (bubblewrap 0.5+ is required); "
-                        "the sandbox /tmp is not writable by unprivileged agent sessions."
+                        "the /tmp of commands the environment runs is not writable by "
+                        "unprivileged users."
                     )
                 return _bwrap_usable
             detail = probe.stderr.decode("utf-8", "replace").strip()[:120]
@@ -1109,12 +1109,16 @@ class Workspace:
         isolate_users: bool = True,
         bind_devices: bool | None = None,
         mounts: Sequence[Mount] | None = None,
+        session: bool = False,
     ) -> list[str]:
         """Argv for a bwrap that builds a view and holds it with ``_SANDBOX_HOLDER``.
 
         Nothing else runs under bwrap: processes enter the view with
-        ``entry_argv``.
-        Every option here is one bubblewrap 0.4 understands.
+        ``entry_argv``. A ``session`` view mounts the sandbox's shared tmpfs
+        directories in place of fresh tmpfs mounts, so every agent session sees
+        one ``/tmp``; views for commands the environment runs keep fresh ones, so
+        nothing an agent leaves there reaches them. Every option here is one
+        bubblewrap 0.4 understands.
         """
         if self._bwrap is None:
             raise RuntimeError("bwrap not available on this host")
@@ -1138,6 +1142,9 @@ class Workspace:
         bind_host_devices = not isolate_users if bind_devices is None else bind_devices
         tmpfs_modes = self._bwrap.tmpfs_modes
         for mount in self._system_mounts:
+            if session and mount.kind == "tmpfs":
+                argv.extend(["--bind", str(self._shared_tmpfs(mount)), mount.dst])
+                continue
             argv.extend(
                 mount.to_bwrap_args(bind_devices=bind_host_devices, tmpfs_modes=tmpfs_modes)
             )
@@ -1259,7 +1266,10 @@ class Workspace:
                 )
                 self._egress.start()
             staged = bwrap.pid_unshare is not None
-            holder_argv = self._view_argv(network=True, isolate_users=staged, bind_devices=True)
+            self._create_shared_tmpfs()
+            holder_argv = self._view_argv(
+                network=True, isolate_users=staged, bind_devices=True, session=True
+            )
             socket_path = self._credentials_dir() / "namespace.sock"
             host_argv = [
                 sys.executable,
@@ -1387,11 +1397,46 @@ class Workspace:
             self._egress.stop()
             self._egress = None
         sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
-        if sandbox is None or sandbox.returncode is not None:
+        if sandbox is not None and sandbox.returncode is None:
+            sandbox.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(sandbox.wait(), 10.0)
+        if self._cred_dir is not None:
+            self._remove_shared_tmpfs()
+
+    def _remove_shared_tmpfs(self) -> None:
+        """Delete the sandbox's shared tmpfs directories, whatever modes the agent left.
+
+        A rootless server owns what the sandbox wrote but cannot delete from a directory
+        it may not write, so every directory is made owner-writable first. Only called
+        once the sandbox's processes are gone, so nothing swaps a directory for a link.
+        """
+        root = self._credentials_dir() / "tmpfs"
+        if not root.exists():
             return
-        sandbox.kill()
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(sandbox.wait(), 10.0)
+        root.chmod(0o700)
+        for directory, subdirectories, _ in os.walk(root):
+            for name in subdirectories:
+                path = Path(directory, name)
+                if not path.is_symlink():
+                    path.chmod(0o700)
+        shutil.rmtree(root)
+
+    def _shared_tmpfs(self, mount: Mount) -> Path:
+        """The host directory backing ``mount`` in every session view of the sandbox."""
+        return self._credentials_dir() / "tmpfs" / mount.dst.strip("/").replace("/", "-")
+
+    def _create_shared_tmpfs(self) -> None:
+        """Fresh, empty directories for the sandbox's tmpfs mounts, with their declared modes.
+
+        A ``credentials_dir`` the caller configured can hold a previous process's.
+        """
+        self._remove_shared_tmpfs()
+        for mount in self._system_mounts:
+            if mount.kind == "tmpfs":
+                directory = self._shared_tmpfs(mount)
+                directory.mkdir(parents=True)
+                directory.chmod(0o755 if mount.mode is None else mount.mode)
 
     async def terminate_sessions(self) -> None:
         """Terminate session-owned processes while preserving the workload."""
@@ -1665,6 +1710,7 @@ class Workspace:
                         *self.mounts,
                         Mount("ro", src=str(guard.directory), dst=sandbox_directory),
                     ),
+                    session=True,
                 )
             else:
                 # The session env reaches the shell only after any drop: an LD_PRELOAD

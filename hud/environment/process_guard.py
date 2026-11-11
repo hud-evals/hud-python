@@ -52,8 +52,9 @@ _SECCOMP_IOCTL_NOTIF_SEND = 0xC0182101
 _PIDFD_OPEN_SYSCALL = 434
 _PIDFD_GETFD_SYSCALL = 438
 _REGISTER_ADDRESS = b"\0hud-process-connection-register"
-# In the sandbox's own /tmp, which no host process shares.
-_SANDBOX_DIR = "/tmp/.hud-process-connection"  # noqa: S108
+# Outside /tmp, which every session of the sandbox shares; the guard's directory is bound
+# read-only into the guarded session's own view.
+_SANDBOX_DIR = "/.hud-process-connection"
 _SANDBOX_SOCKET = f"{_SANDBOX_DIR}/control.sock"
 _SANDBOX_HELPER = f"{_SANDBOX_DIR}/process_guard.py"
 _READY_TIMEOUT_SECONDS = 10.0
