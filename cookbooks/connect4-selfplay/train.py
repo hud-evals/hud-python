@@ -90,7 +90,8 @@ async def main(
         inner_count = 0
 
         for trace in batch:
-            combined.append(trace)
+            if trace.grade.is_error:
+                continue
             inner_dicts = trace.grade.info.get("inner_samples", [])
             inner_turns = [
                 Sample(
@@ -101,20 +102,19 @@ async def main(
                 for s in inner_dicts
                 if s.get("output_token_ids")
             ]
+            # A game trains as a group of two, so one the inner side never moved in is left out.
             if inner_turns:
                 inner_count += 1
+                combined.append(trace)
                 combined.append(TrajectoryPayload(samples=inner_turns, reward=1.0 - trace.reward))
 
-        # group_size=2 pairs each outer with its inner per game. Fall back to
-        # None (single group) if any inner samples are missing.
-        effective_group = 2 if inner_count == len(batch) else None
-        if effective_group is None:
-            print(f"  warning: {len(batch) - inner_count}/{len(batch)} games missing inner samples")
-
         print(f"  rollout done: {t_rollout:.1f}s  {len(batch)} games  {len(combined)} trajectories")
+        if not combined:
+            raise RuntimeError(f"step {step + 1}: no game produced both sides to train on")
 
         t0 = time.perf_counter()
-        await trainer.forward_backward(combined, loss_fn="ppo", group_size=effective_group)
+        # Each game is one group of two: the outer side and its inner opponent.
+        await trainer.forward_backward(combined, loss_fn="ppo", group_size=2)
         t_fwdbwd = time.perf_counter() - t0
 
         t0 = time.perf_counter()

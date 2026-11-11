@@ -14,7 +14,7 @@ from hud.environment.env import current_session_id
 from hud.environment.utils import read_frame, send_frame
 from hud.utils.process import create_process_group_exec
 
-from .bridge import HUD_STATE, PORT_ANNOUNCEMENT, RobotBridge
+from .bridge import HUD_STATE, PORT_ANNOUNCEMENT, SLOTS_FULL, RobotBridge, SlotsFull
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -240,10 +240,8 @@ class RobotEndpoint:
         while True:
             try:
                 ep = await self._call("reset", task_args)
-            except RuntimeError as exc:
-                # Batch full: drop the lock between tries so a peer can result.
-                if "slots are claimed" not in str(exc):
-                    raise
+            except SlotsFull:
+                # Retried outside the link's lock, so a peer can result and free a slot.
                 await asyncio.sleep(0.05)
                 continue
             session_id, token = current_session_id.get(), ep.get("token")
@@ -327,7 +325,10 @@ class RobotEndpoint:
             if msg is None:
                 raise ConnectionError(f"connection closed awaiting {method!r} reply")
             if "error" in msg:
-                raise RuntimeError(f"{method} failed: {msg['error']['message']}")
+                failure = f"{method} failed: {msg['error']['message']}"
+                if msg["error"]["code"] == SLOTS_FULL:
+                    raise SlotsFull(failure)
+                raise RuntimeError(failure)
             return msg["result"]
 
 

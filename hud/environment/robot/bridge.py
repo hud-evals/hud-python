@@ -40,6 +40,13 @@ PORT_ANNOUNCEMENT = "HUD_SIM_PORT="
 # applied after the child ctor — keeps them out of subclass ``__init__`` signatures.
 HUD_STATE = "__hud_state__"
 
+# The control-channel error code for a claim while every slot is taken.
+SLOTS_FULL = -32001
+
+
+class SlotsFull(RuntimeError):
+    """Every slot of the batch is claimed; a claim may succeed once a peer results."""
+
 
 @dataclass
 class _Slot:
@@ -256,7 +263,7 @@ class RobotBridge(ABC):
             slot = self._registry.free_slot()
             # Fail fast — endpoint.reset retries outside its lock so peers can still result.
             if slot is None:
-                raise RuntimeError(f"all {self.num_envs} slots are claimed")
+                raise SlotsFull(f"all {self.num_envs} slots are claimed")
         token = self._registry.claim(slot, max_ticks)
         return {"prompt": self.task_description, "token": token}
 
@@ -501,7 +508,8 @@ class RobotBridge(ABC):
                     result = await self._dispatch_control(msg["method"], msg.get("params") or {})
                     await send_frame(writer, reply(msg["id"], result))
                 except Exception as exc:  # surface to the caller, keep serving the link
-                    await send_frame(writer, error(msg["id"], -32000, str(exc)))
+                    code = SLOTS_FULL if isinstance(exc, SlotsFull) else -32000
+                    await send_frame(writer, error(msg["id"], code, str(exc)))
         writer.close()
         with contextlib.suppress(Exception):
             await writer.wait_closed()

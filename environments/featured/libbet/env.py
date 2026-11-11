@@ -165,11 +165,8 @@ def _record_frame() -> None:
     emu = _session.emulator
     if not rd or emu is None:
         return
-    try:
-        emu.get_screen().save(os.path.join(rd, f"frame_{_session.frame_idx:05d}.png"))
-        _session.frame_idx += 1
-    except Exception:
-        pass
+    emu.get_screen().save(os.path.join(rd, f"frame_{_session.frame_idx:05d}.png"))
+    _session.frame_idx += 1
 
 
 async def press_buttons(buttons: list[str], frames: int | None = None) -> list[ContentBlock]:

@@ -142,12 +142,8 @@ class RamScorer:
     def on_step(self, *, screen: Image.Image | None = None, emulator: Any | None) -> None:
         if emulator is None:
             return
-        try:
-            self.last_values = self.ram_map.read(emulator)
-            r = float(self.ram_map.reward(self.last_values))
-        except Exception as exc:  # never let a flaky RAM read crash an eval
-            self.last_values = {"error": str(exc)}
-            return
+        self.last_values = self.ram_map.read(emulator)
+        r = float(self.ram_map.reward(self.last_values))
         self.best = max(self.best, max(0.0, min(1.0, r)))
 
     def value(self) -> float:
