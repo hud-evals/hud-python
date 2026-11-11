@@ -56,13 +56,8 @@ class Job:
         return out
 
 
-def reporting_enabled() -> bool:
-    """Whether runs are reported to the platform: telemetry is on and an API key is set."""
-    return bool(settings.telemetry_enabled and settings.api_key)
-
-
 async def job_enter(job_id: str, *, name: str, group: int, taskset_id: str | None = None) -> None:
-    if not reporting_enabled():
+    if not settings.reporting_enabled:
         return
     await _report(
         f"/trace/job/{job_id}/enter",
@@ -80,7 +75,7 @@ async def trace_enter(
     model: str | None = None,
     parent_trace_id: str | None = None,
 ) -> None:
-    if not reporting_enabled():
+    if not settings.reporting_enabled:
         return
     await _report(
         f"/trace/{trace_id}/enter",
@@ -95,7 +90,7 @@ async def trace_enter(
 
 
 async def trace_exit(trace: Trace) -> None:
-    if not reporting_enabled() or trace.trace_id is None:
+    if not settings.reporting_enabled or trace.trace_id is None:
         return
     await _report(
         f"/trace/{trace.trace_id}/exit",

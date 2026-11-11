@@ -15,8 +15,6 @@ import httpx2
 import websockets
 from websockets.exceptions import ConnectionClosedOK
 
-from hud.eval.job import reporting_enabled
-from hud.eval.run import rollout
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
 
@@ -25,9 +23,7 @@ from .core import Runtime
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from hud.agents.base import Agent
     from hud.eval.task import Task
-    from hud.types import Trace
 
 logger = logging.getLogger("hud.runtime")
 
@@ -57,26 +53,6 @@ class HUDRuntime:
         self.run_timeout = run_timeout
         self.runtime_url = runtime_url
         self._warned_unsupported_config = False
-
-    async def run(
-        self,
-        task: Task,
-        agent: Agent,
-        *,
-        job_id: str,
-        group_id: str | None = None,
-        trace_id: str | None = None,
-        rollout_timeout: float | None = None,
-    ) -> Trace:
-        return await rollout(
-            task,
-            agent,
-            runtime=self,
-            trace_id=trace_id,
-            job_id=job_id,
-            group_id=group_id,
-            rollout_timeout=(self.run_timeout if rollout_timeout is None else rollout_timeout),
-        )
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return self._runtime_session(task)
@@ -152,7 +128,7 @@ class HUDRuntime:
         payload: dict[str, Any] = {"environment": task.env}
         trace_id = get_current_trace_id()
         # Only a trace the platform has registered can own the session.
-        if trace_id is not None and reporting_enabled():
+        if trace_id is not None and settings.reporting_enabled:
             with contextlib.suppress(ValueError):
                 payload["trace_id"] = str(uuid.UUID(trace_id))
         async with httpx2.AsyncClient(timeout=30.0) as client:

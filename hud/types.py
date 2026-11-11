@@ -31,6 +31,7 @@ from hud.telemetry.span import (
     new_span_id,
     normalize_trace_id,
 )
+from hud.utils.hud_console import hud_console
 from hud.utils.serialization import JsonObject, JsonValue
 from hud.utils.time import now_iso
 
@@ -217,8 +218,6 @@ class ToolCall(BaseModel):
         return s
 
     def __rich__(self) -> str:
-        from hud.utils.hud_console import hud_console
-
         s = hud_console.format_tool_call(self.name, self.arguments)
         if self.annotation:
             s += f"  [bright_black]# {escape(self.annotation)}[/bright_black]"
@@ -261,8 +260,6 @@ class ToolResult(BaseModel):
             return f"✓ {content_summary}"
 
     def __rich__(self) -> str:
-        from hud.utils.hud_console import hud_console
-
         content_summary = self._get_content_summary()
         return hud_console.format_tool_result(content_summary, self.isError)
 

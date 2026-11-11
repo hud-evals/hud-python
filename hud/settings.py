@@ -156,6 +156,11 @@ class Settings(BaseSettings):
     )
 
     @property
+    def reporting_enabled(self) -> bool:
+        """Whether runs and spans reach the platform: telemetry is on and an API key is set."""
+        return bool(self.telemetry_enabled and self.api_key)
+
+    @property
     def span_dir(self) -> str | None:
         if self.telemetry_local_dir:
             return self.telemetry_local_dir

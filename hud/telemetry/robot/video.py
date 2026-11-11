@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
+from hud.telemetry.robot.steps import VideoSegmentStep
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
@@ -223,8 +225,6 @@ class VideoStreamer:
                 encoder.finalize()
 
     def _make_encoder(self, camera: str) -> SegmentEncoder:
-        from hud.agents.types import VideoSegmentStep
-
         trace_id, fps = self._trace_id, self._fps
 
         def on_segment(index: int, data: bytes) -> None:

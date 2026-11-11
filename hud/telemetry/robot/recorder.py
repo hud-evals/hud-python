@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from hud.agents.types import InferenceStep, ObservationStep, StateFeature
+from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
+from hud.telemetry.exporter import flush
+from hud.telemetry.robot.steps import InferenceStep, ObservationStep, StateFeature
 from hud.types import PromptMessage, Step, TextContent
 from hud.utils.platform import PlatformClient
 
@@ -35,9 +37,7 @@ def to_numpy(x: Any) -> NDArray[Any]:
 
 def _report_sync(path: str, payload: dict[str, Any]) -> None:
     """Best-effort job/trace lifecycle POST; a no-op without telemetry and an API key."""
-    from hud.settings import settings
-
-    if not (settings.telemetry_enabled and settings.api_key):
+    if not settings.reporting_enabled:
         return
     body = {k: v for k, v in payload.items() if v is not None}
     try:
@@ -208,8 +208,6 @@ class JobRecorder:
 
     @property
     def job_url(self) -> str:
-        from hud.settings import settings
-
         return f"{settings.hud_web_url}/jobs/{self.job_id}"
 
     def _open(self, i: int) -> TraceRecorder:
@@ -300,8 +298,6 @@ class JobRecorder:
     def close(self) -> None:
         """Close open traces and flush all telemetry to the platform."""
         self.close_slots()
-        from hud.telemetry.exporter import flush
-
         flush()
 
     def __enter__(self) -> Self:

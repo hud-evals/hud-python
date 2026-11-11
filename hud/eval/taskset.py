@@ -16,8 +16,10 @@ from hud.runtime.hosted import HostedRuntime
 from hud.runtime.hud import HUDRuntime
 from hud.runtime.local import LocalRuntime
 from hud.telemetry.exporter import flush
+from hud.utils.modules import iter_modules
 from hud.utils.platform import PlatformClient
 
+from .hosted import hosted_rollout
 from .job import Job, job_enter
 from .run import rollout, validate_rollout_timeouts
 from .sync import fetch_taskset_tasks, resolve_taskset_id
@@ -72,8 +74,6 @@ class Taskset:
 
     @classmethod
     def from_module(cls, source: str | Path) -> Taskset:
-        from hud.utils.modules import iter_modules
-
         path = Path(source).resolve()
         found = {id(task): task for module in iter_modules(path) for task in module_tasks(module)}
         return cls(path.stem if path.is_file() else path.name, found.values())
@@ -283,7 +283,8 @@ class Taskset:
             assert placement is not None
             if isinstance(placement, HostedRuntime):
                 return [
-                    await placement.run(
+                    await hosted_rollout(
+                        placement,
                         task,
                         agent,
                         job_id=job_id,

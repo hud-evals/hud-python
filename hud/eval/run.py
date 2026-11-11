@@ -15,6 +15,7 @@ from hud.agents.types import AgentConfig
 from hud.capabilities.connection import Connection
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients.client import HudProtocolError, connect
+from hud.runtime.core import resolve_runtime_config
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
@@ -380,8 +381,6 @@ async def rollout(
     errored and graded best-effort. ``rollout_timeout`` bounds everything
     through grading; on expiry the env's task is cancelled.
     """
-    from hud.runtime.core import resolve_runtime_config  # hud.runtime imports this module
-
     actor_runtime_config = resolve_runtime_config(runtime, task)
     agent_timeout = validate_rollout_timeouts(
         task,

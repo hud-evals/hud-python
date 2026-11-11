@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx2
 
+from hud.settings import settings
 from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE
 from hud.utils.requests import make_request_sync
 
@@ -71,12 +72,10 @@ def queue_span(span: dict[str, Any]) -> None:
     Spans without a ``hud.task_run_id`` attribute are dropped. The backend upload needs
     telemetry enabled and an API key.
     """
-    from hud.settings import settings
-
     if not span.get("attributes", {}).get(TASK_RUN_ID_ATTRIBUTE):
         return
     _export_local(span, settings.span_dir)
-    if not settings.telemetry_enabled or not settings.api_key:
+    if not settings.reporting_enabled:
         return
     _ensure_worker()
     _queue.put(span)
@@ -148,8 +147,6 @@ def _run() -> None:
 def _dispatch(batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     """Queue one upload per trace in the batch; return an empty batch."""
     global _pending
-    from hud.settings import settings
-
     api_key = settings.api_key
     if not batch or not api_key:
         return [], 0
