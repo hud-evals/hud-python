@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 from anthropic import AsyncAnthropicBedrock
 from fastmcp import FastMCP
+from pydantic import ValidationError
 
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent
 from hud.agents.claude.tools.hosted import ClaudeToolSearchTool
@@ -317,3 +318,12 @@ async def test_tools_past_the_search_threshold_are_deferred_to_tool_search(
         if tool.get("name") in {"first", "second"}
     }
     assert deferred == {"first": True, "second": True}
+
+
+def test_an_openai_setting_the_installed_sdk_does_not_declare_is_refused() -> None:
+    with pytest.raises(ValidationError, match=r"format\.strictness"):
+        OpenAIConfig(
+            text={
+                "format": {"type": "json_schema", "name": "answer", "schema": {}, "strictness": 1}
+            }
+        )

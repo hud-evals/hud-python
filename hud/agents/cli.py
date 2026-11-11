@@ -7,7 +7,7 @@ import base64
 import contextlib
 import os
 import shlex
-from typing import TYPE_CHECKING, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
 import asyncssh
 
@@ -40,7 +40,7 @@ class CLIAgent(Agent[ConfigT_co]):
     """
 
     # The provider whose API the CLI speaks.
-    provider: ClassVar[str]
+    provider: ClassVar[Literal["anthropic", "openai"]]
 
 
 class ModelEndpoint(NamedTuple):
@@ -51,7 +51,9 @@ class ModelEndpoint(NamedTuple):
     connection: Connection | None
 
 
-def model_endpoint(run: Run, provider: str, *, gateway: bool) -> ModelEndpoint | None:
+def model_endpoint(
+    run: Run, provider: Literal["anthropic", "openai"], *, gateway: bool
+) -> ModelEndpoint | None:
     """Where the CLI in ``run`` calls its model, or ``None`` to use the workspace's own login.
 
     Through the run's ``inference`` connection when it has one. Otherwise the CLI

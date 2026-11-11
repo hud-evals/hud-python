@@ -1,17 +1,22 @@
-"""Agent configs, importable without provider SDKs, and the step payloads agents record."""
+"""Agent configs and the step payloads agents record."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, NotRequired, Self
+from typing import Annotated, Any, Literal, NotRequired, Self, cast
 from uuid import uuid4
 
+from openai.types.responses import ResponseTextConfigParam
+from openai.types.responses.response_create_params import ToolChoice
+from openai.types.shared_params.reasoning import Reasoning
 from pydantic import (
     AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
     StringConstraints,
+    ValidatorFunctionWrapHandler,
     field_serializer,
+    field_validator,
     model_validator,
     with_config,
 )
@@ -137,9 +142,9 @@ class OpenAIConfig(ToolAgentConfig):
     model: str = Field(default="gpt-5.6", validation_alias=_model_alias)
     max_output_tokens: int | None = None
     temperature: float | None = None
-    reasoning: Any = None  # openai Reasoning
-    tool_choice: Any = None  # openai ToolChoice
-    text: Any = None  # {"verbosity": "low"|"medium"|"high"}
+    reasoning: Reasoning | None = None
+    tool_choice: ToolChoice | None = None
+    text: ResponseTextConfigParam | None = None
     truncation: Literal["auto", "disabled"] | None = None
     parallel_tool_calls: bool | None = None
     prompt_cache_key: str = Field(
@@ -147,6 +152,30 @@ class OpenAIConfig(ToolAgentConfig):
         min_length=1,
         max_length=64,
     )
+
+    @field_validator("reasoning", "tool_choice", "text", mode="wrap")
+    @classmethod
+    def _declared_keys_only(cls, value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
+        """Raise on a key the OpenAI SDK's type does not declare, which validation would drop."""
+        validated = handler(value)
+        if dropped := _dropped_keys(value, validated):
+            raise ValueError(f"unknown keys for the installed openai SDK: {', '.join(dropped)}")
+        return validated
+
+
+def _dropped_keys(raw: Any, kept: Any, path: str = "") -> list[str]:
+    if not isinstance(raw, dict) or not isinstance(kept, dict):
+        return []
+    raw_dict, kept_dict = cast("dict[str, Any]", raw), cast("dict[str, Any]", kept)
+    return [
+        dropped
+        for key, value in raw_dict.items()
+        for dropped in (
+            [f"{path}{key}"]
+            if key not in kept_dict
+            else _dropped_keys(value, kept_dict[key], f"{path}{key}.")
+        )
+    ]
 
 
 class OpenAIChatConfig(ToolAgentConfig):

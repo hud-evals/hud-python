@@ -13,6 +13,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     PrivateAttr,
     SerializeAsAny,
     model_validator,
@@ -32,7 +33,7 @@ from hud.telemetry.span import (
     normalize_trace_id,
 )
 from hud.utils.hud_console import hud_console
-from hud.utils.serialization import JsonObject, JsonValue
+from hud.utils.serialization import JsonObject
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
@@ -88,7 +89,7 @@ class AgentType(StrEnum):
 
     @property
     def config_cls(self) -> type[AgentConfig]:
-        """The agent's config class, importable without the agent's provider SDK."""
+        """The agent's config class, without importing the agent."""
         from hud.agents.types import (
             ClaudeCLIConfig,
             ClaudeConfig,

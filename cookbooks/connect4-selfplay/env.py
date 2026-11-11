@@ -30,7 +30,6 @@ from hud.utils.gateway import build_gateway_client, resolve_gateway_model
 
 _INNER_MODEL: str = "c4-selfplay"
 _INNER_MODEL_NAME: str = "c4-selfplay"  # resolved model_name (gateway routing key)
-_INNER_PROVIDER: str = "openai"
 _OUTER_MARK: str = "X"  # set per game; "X" drops first, "O" drops second
 
 # Per-game inner model samples (reset at game start, read at game end).
@@ -128,7 +127,7 @@ async def _inner_move(inner_mark: str) -> int:
     logprobs) into _inner_samples so the training loop can train on both sides
     of each game with a flipped reward.
     """
-    client = build_gateway_client(_INNER_PROVIDER)
+    client = build_gateway_client("openai")
     available = game.available()
 
     try:
@@ -257,11 +256,10 @@ async def _down() -> None:
 @env.template()
 async def play_self(model: str = _INNER_MODEL, seed: int = 0) -> None:
     """Self-play game. seed % 2 decides who drops first: even → outer is X, odd → outer is O."""
-    global _INNER_MODEL, _INNER_MODEL_NAME, _INNER_PROVIDER, _OUTER_MARK, _inner_samples
+    global _INNER_MODEL, _INNER_MODEL_NAME, _OUTER_MARK, _inner_samples
     _INNER_MODEL = model
     # The gateway's token-id extensions need the resolved model name, not a slug or id.
-    inner = resolve_gateway_model(model)
-    _INNER_MODEL_NAME, _INNER_PROVIDER = inner.model_name, inner.provider.name
+    _INNER_MODEL_NAME = resolve_gateway_model(model).model_name
     _OUTER_MARK = "X" if seed % 2 == 0 else "O"
     inner_mark = "O" if _OUTER_MARK == "X" else "X"
 

@@ -18,7 +18,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import asyncssh
 
@@ -363,14 +363,21 @@ def _is_root() -> bool:
 
 MountKind = Literal["ro", "rw", "tmpfs", "symlink", "proc", "dev"]
 
-# kind -> (normal flag, optional modifier, takes source)
-_MOUNT_FLAGS: dict[MountKind, tuple[str, str | None, bool]] = {
-    "ro": ("--ro-bind", "--ro-bind-try", True),
-    "rw": ("--bind", "--bind-try", True),
-    "symlink": ("--symlink", None, True),
-    "tmpfs": ("--tmpfs", None, False),
-    "proc": ("--proc", None, False),
-    "dev": ("--dev", None, False),
+
+class _MountFlags(NamedTuple):
+    flag: str
+    # The flag that skips a missing source, for kinds that have one.
+    optional_flag: str | None
+    takes_source: bool
+
+
+_MOUNT_FLAGS: dict[MountKind, _MountFlags] = {
+    "ro": _MountFlags("--ro-bind", "--ro-bind-try", takes_source=True),
+    "rw": _MountFlags("--bind", "--bind-try", takes_source=True),
+    "symlink": _MountFlags("--symlink", None, takes_source=True),
+    "tmpfs": _MountFlags("--tmpfs", None, takes_source=False),
+    "proc": _MountFlags("--proc", None, takes_source=False),
+    "dev": _MountFlags("--dev", None, takes_source=False),
 }
 
 
@@ -390,9 +397,9 @@ class Mount:
             return ["--dev-bind", "/dev", self.dst]
         if self.kind == "tmpfs" and self.mode is not None and tmpfs_modes:
             return ["--perms", f"{self.mode:04o}", "--tmpfs", self.dst]
-        normal, optional_flag, takes_src = _MOUNT_FLAGS[self.kind]
-        flag = optional_flag if (self.optional and optional_flag) else normal
-        return [flag, self.src, self.dst] if takes_src else [flag, self.dst]
+        flags = _MOUNT_FLAGS[self.kind]
+        flag = flags.optional_flag if (self.optional and flags.optional_flag) else flags.flag
+        return [flag, self.src, self.dst] if flags.takes_source else [flag, self.dst]
 
 
 # Slim distros merge ``/lib`` into ``/usr/lib`` with symlinks; the sandbox mirrors them.

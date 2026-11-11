@@ -16,13 +16,11 @@ from openai.types.responses import (
     ToolParam,
 )
 from openai.types.responses.easy_input_message_param import EasyInputMessageParam
-from openai.types.responses.response_create_params import ToolChoice  # noqa: TC002
 from openai.types.responses.response_input_param import (
     ComputerCallOutput,
     Message,
     ResponseInputItemParam,
 )
-from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
 from hud.agents.tool_agent import DegenerateTurnError, RunState, ToolAgent
 from hud.agents.tools.base import result_text
@@ -78,8 +76,8 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         self._model = config.model
         self.max_output_tokens = config.max_output_tokens
         self.temperature = config.temperature
-        self.reasoning: Reasoning | None = config.reasoning
-        self.tool_choice: ToolChoice | None = config.tool_choice
+        self.reasoning = config.reasoning
+        self.tool_choice = config.tool_choice
         self.parallel_tool_calls = config.parallel_tool_calls
         self.text = config.text
         self.truncation: Literal["auto", "disabled"] | None = config.truncation

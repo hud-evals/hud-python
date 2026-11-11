@@ -13,7 +13,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Literal, TypeAlias
 
 from .utils import error, read_frame, reply, send_frame
 
@@ -140,12 +140,15 @@ class Snapshot:
     scan_duration_ms: float = 0.0
 
 
+ChangeStatus: TypeAlias = Literal["added", "modified", "deleted"]
+
+
 @dataclass
 class PatchEntry:
     """A single file's diff between two snapshots."""
 
     rel_path: str
-    status: str  # "added", "modified", "deleted"
+    status: ChangeStatus
     patch: str  # unified diff text (placeholder for binary/redacted/over-limit)
     size_before: int = 0
     size_after: int = 0
@@ -350,7 +353,7 @@ class FileTracker:
         ]
 
     def _capture_artifacts(self, current: Snapshot) -> dict[str, Any]:
-        changed: list[tuple[str, FileEntry]] = []
+        changed: list[tuple[ChangeStatus, FileEntry]] = []
         if self._baseline_snapshot is not None:
             for path in sorted(current.files):
                 entry = current.files[path]
@@ -403,7 +406,7 @@ class FileTracker:
             payload["truncated"] = True
         return payload
 
-    def _capture_file(self, status: str | None, entry: FileEntry) -> dict[str, Any] | None:
+    def _capture_file(self, status: ChangeStatus | None, entry: FileEntry) -> dict[str, Any] | None:
         raw_path = self._root / entry.rel_path
         try:
             if raw_path.is_symlink():
@@ -634,7 +637,7 @@ class FileTracker:
 
     def _diff(self, old: Snapshot, new: Snapshot) -> DiffResult:
         """Unified diffs between two snapshots, smallest-first within a byte cap."""
-        changed: list[tuple[str, FileEntry | None, FileEntry | None, str]] = []
+        changed: list[tuple[str, FileEntry | None, FileEntry | None, ChangeStatus]] = []
         for path in set(old.files) | set(new.files):
             old_entry = old.files.get(path)
             new_entry = new.files.get(path)

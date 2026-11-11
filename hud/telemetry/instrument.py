@@ -19,12 +19,14 @@ from hud.telemetry.span import (
     new_span_id,
     normalize_trace_id,
 )
-from hud.utils.serialization import JsonObject, JsonValue, json_safe_value
+from hud.utils.serialization import JsonObject, json_safe_value
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from typing import ParamSpec
+
+    from pydantic import JsonValue
 
     P = ParamSpec("P")
     R = TypeVar("R")

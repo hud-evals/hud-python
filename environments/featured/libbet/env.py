@@ -37,6 +37,8 @@ from PIL import Image
 
 import games_loader
 from emulator import GB_BUTTONS, GameBoyEmulator, sanitize_buttons
+from games_loader import GameSpec
+from scoring import ScoreBoard
 
 env = Environment(name="libbet")
 
@@ -90,31 +92,33 @@ def _resolve_record_dir(game: str) -> str | None:
     return rd if os.path.isabs(rd) else os.path.join(_REPO_DIR, rd)
 
 
-# Module-global session (one game per container).
-_session: dict[str, Any] = {
-    "emulator": None,  # GameBoyEmulator
-    "spec": None,  # GameSpec
-    "board": None,  # ScoreBoard
-    "steps": 0,
-    "max_steps": 0,
-    "record_dir": None,
-    "frame_idx": 0,
-}
+class _Session:
+    """The one game this container plays."""
+
+    def __init__(
+        self,
+        emulator: GameBoyEmulator | None = None,
+        spec: GameSpec | None = None,
+        board: ScoreBoard | None = None,
+        max_steps: int = 0,
+    ) -> None:
+        self.emulator = emulator
+        self.spec = spec
+        self.board = board
+        self.max_steps = max_steps
+        self.steps = 0
+        self.record_dir: str | None = None
+        self.frame_idx = 0
+
+
+_session = _Session()
 
 
 def _teardown() -> None:
-    emu = _session.get("emulator")
-    if emu is not None:
-        emu.close()
-    _session.update(
-        emulator=None,
-        spec=None,
-        board=None,
-        steps=0,
-        max_steps=0,
-        record_dir=None,
-        frame_idx=0,
-    )
+    global _session
+    if _session.emulator is not None:
+        _session.emulator.close()
+    _session = _Session()
 
 
 def _png_b64(img) -> str:
@@ -124,14 +128,14 @@ def _png_b64(img) -> str:
 
 
 def _status(prefix: str) -> str:
-    board = _session["board"]
+    board = _session.board
     extra = f" | {board.summary()}" if board is not None else ""
-    return f"{prefix} [step {_session['steps']}/{_session['max_steps']}{extra}]"
+    return f"{prefix} [step {_session.steps}/{_session.max_steps}{extra}]"
 
 
 def _observe(text: str) -> list[ContentBlock]:
     """Return text + the current screen (upscaled) as MCP content blocks."""
-    screen = _session["emulator"].get_screen()
+    screen = _session.emulator.get_screen()
     if GB_SCALE != 1:
         screen = screen.resize((screen.width * GB_SCALE, screen.height * GB_SCALE), Image.NEAREST)
     return [
@@ -146,7 +150,7 @@ def _no_game() -> list[ContentBlock]:
 
 def _score_current() -> None:
     """Feed the current screen + RAM to the scorers (called after each action)."""
-    emu, board = _session["emulator"], _session["board"]
+    emu, board = _session.emulator, _session.board
     if board is not None and emu is not None:
         board.on_step(screen=emu.get_screen(), emulator=emu)
 
@@ -157,13 +161,13 @@ def _clamp_frames(frames: int) -> int:
 
 def _record_frame() -> None:
     """Save the current frame to the per-game recording dir, if recording."""
-    rd = _session.get("record_dir")
-    emu = _session.get("emulator")
+    rd = _session.record_dir
+    emu = _session.emulator
     if not rd or emu is None:
         return
     try:
-        emu.get_screen().save(os.path.join(rd, f"frame_{_session['frame_idx']:05d}.png"))
-        _session["frame_idx"] += 1
+        emu.get_screen().save(os.path.join(rd, f"frame_{_session.frame_idx:05d}.png"))
+        _session.frame_idx += 1
     except Exception:
         pass
 
@@ -175,15 +179,15 @@ async def press_buttons(buttons: list[str], frames: int | None = None) -> list[C
     the buttons are held and how far the game advances; omit it to use the game-specific
     default shown in the prompt.
     """
-    emu = _session["emulator"]
+    emu = _session.emulator
     if emu is None:
         return _no_game()
     valid, invalid = sanitize_buttons(buttons)
     if not valid:
         return [TextContent(type="text", text=f"No valid buttons in {buttons}. Valid buttons: {GB_BUTTONS}.")]
-    action_frames = _session["spec"].action_frames if frames is None else frames
+    action_frames = _session.spec.action_frames if frames is None else frames
     emu.step({b: True for b in valid}, frames=_clamp_frames(action_frames))
-    _session["steps"] += 1
+    _session.steps += 1
     _score_current()
     _record_frame()
     note = f"Pressed {'+'.join(valid)}"
@@ -194,11 +198,11 @@ async def press_buttons(buttons: list[str], frames: int | None = None) -> list[C
 
 async def wait(frames: int = 30) -> list[ContentBlock]:
     """Advance the game 1-600 frames (default 30) without pressing anything, letting animations and dialogue play."""
-    emu = _session["emulator"]
+    emu = _session.emulator
     if emu is None:
         return _no_game()
     emu.no_op(_clamp_frames(frames))
-    _session["steps"] += 1
+    _session.steps += 1
     _score_current()
     _record_frame()
     return _observe(_status("Waited"))
@@ -206,7 +210,7 @@ async def wait(frames: int = 30) -> list[ContentBlock]:
 
 async def screenshot() -> list[ContentBlock]:
     """Return the current game screen without advancing the game."""
-    emu = _session["emulator"]
+    emu = _session.emulator
     if emu is None:
         return _no_game()
     return _observe(_status("Screenshot"))
@@ -267,6 +271,7 @@ async def play_game(
     is an advisory budget shown to the agent; ``threshold`` overrides the checkpoint
     perceptual-hash threshold.
     """
+    global _session
     _teardown()
     spec = games_loader.load_game_spec(game, threshold_override=threshold)
     emu = GameBoyEmulator(render=False)
@@ -275,7 +280,7 @@ async def play_game(
         emu.pre_load_file(spec.preload_path)
 
     board = spec.new_board()
-    _session.update(emulator=emu, spec=spec, board=board, steps=0, max_steps=max_steps)
+    _session = _Session(emulator=emu, spec=spec, board=board, max_steps=max_steps)
     board.on_step(screen=emu.get_screen(), emulator=emu)  # initial snapshot
 
     rd = _resolve_record_dir(game)
@@ -283,8 +288,8 @@ async def play_game(
         os.makedirs(rd, exist_ok=True)
         for old in glob.glob(os.path.join(rd, "frame_*.png")):
             os.remove(old)
-        _session["record_dir"] = rd
-        _session["frame_idx"] = 0
+        _session.record_dir = rd
+        _session.frame_idx = 0
         _record_frame()
 
     prompt = (
@@ -297,7 +302,7 @@ async def play_game(
 
     result = board.result(done=True)
     result.info["game"] = game
-    result.info["steps_used"] = _session["steps"]
+    result.info["steps_used"] = _session.steps
     result.info["max_steps"] = max_steps
     if answer:
         result.info["agent_answer"] = str(answer)[:500]
