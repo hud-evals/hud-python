@@ -224,7 +224,7 @@ async def test_in_a_sandbox_the_cli_reaches_its_model_without_its_key(
     stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
     env = Environment("ws")
-    workspace = env.workspace(
+    env.workspace(
         tmp_path / "ws",
         guest_path=str(tmp_path / "ws"),
         env=stub.shell_env(),
@@ -235,8 +235,6 @@ async def test_in_a_sandbox_the_cli_reaches_its_model_without_its_key(
 
     @env.template()
     async def task():
-        # Start the sandbox first, so the agent's connection is bound into a running one.
-        await workspace.run(["true"])
         yield "Do the task."
         yield 1.0
 

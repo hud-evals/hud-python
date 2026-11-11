@@ -406,6 +406,12 @@ class Environment:
             raise RuntimeError(f"workspace capability {capability!r} does not exist")
         return workspace
 
+    async def open_session(self) -> None:
+        """Start every workspace's sandbox, so a new session's first command does not pay
+        for starting it inside its own timeout."""
+        for workspace in self._workspaces.values():
+            await workspace.sandbox_pid()
+
     async def bind_connections(self, connections: Sequence[Connection], *, session: str) -> None:
         """Install one control session's controller connections into their workspaces.
 

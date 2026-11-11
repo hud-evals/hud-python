@@ -453,6 +453,9 @@ class _Session:
             return
         await self.env.bind_connections(connections, session=self.id)
         await self.env.bind_workspace_routes(workspace_routes, session=self.id)
+        if requested is None:
+            # Only a new session: a resume or a rebind must answer within its heartbeat.
+            await self.env.open_session()
         # env.start() ran before serving, so hook-published capabilities (e.g. a
         # workspace's ssh address) are already concrete here.
         bindings = [c.to_manifest() for c in self.env.capabilities]

@@ -182,7 +182,6 @@ async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeo
     """Claude's editor reads the file itself, so a fifo blocks it rather than the shell."""
     root = tmp_path / "ws"
     root.mkdir()
-    # Made here, not by a tool call: a sandbox's first command also pays for starting it.
     os.mkfifo(root / "pipe")
     edit = call(
         "str_replace_based_edit_tool",
