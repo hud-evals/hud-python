@@ -46,6 +46,10 @@ FIXTURES = ROOT / "tests" / "fixtures"
 # The fixture environments that need nothing but the SDK, so a container can serve them.
 IMAGE_FIXTURES = ("echo", "faulty", "sessions", "broken", "stalls")
 
+# Rows that need Linux, root and bubblewrap: they run in the sandbox lane
+# (``-m "e2e and sandbox"``), where every workspace session runs in the sandbox.
+SANDBOX = (pytest.mark.e2e, pytest.mark.sandbox)
+
 # The developer's or CI's own environment, captured before any test isolates it.
 # Only ``live`` tests read credentials from it.
 REAL_ENVIRONMENT = dict(os.environ)

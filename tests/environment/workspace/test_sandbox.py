@@ -23,8 +23,9 @@ import pytest
 from hud.environment import Mount, Workspace
 from hud.environment.egress import Peer
 from hud.environment.workspace import usable_bwrap
+from tests.conftest import SANDBOX
 
-from .conftest import SANDBOX, shell
+from .conftest import shell
 
 if TYPE_CHECKING:
     from tests.conftest import HudEnv

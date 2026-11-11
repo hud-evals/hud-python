@@ -15,8 +15,6 @@ import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
-import pytest
-
 from hud import Environment, Task
 from hud.clients import connect
 from hud.runtime import LocalRuntime
@@ -27,8 +25,6 @@ if TYPE_CHECKING:
 
     from hud.capabilities import SSHClient
     from hud.environment import Workspace
-
-SANDBOX = (pytest.mark.e2e, pytest.mark.sandbox)
 
 if sys.platform == "win32":
     collect_ignore_glob = ["test_*.py"]

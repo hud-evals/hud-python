@@ -9,12 +9,8 @@ session is spawned by the sandbox's namespace host.
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import os
 import shlex
 import shutil
-import signal
-import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING, Any
@@ -23,40 +19,29 @@ from urllib.parse import urlsplit
 import asyncssh
 import pytest
 
-from hud.environment.workspace import usable_bwrap
-from tests.conftest import eventually
+from tests.conftest import SANDBOX, eventually
 
-from .conftest import SANDBOX, shell
+from .conftest import shell
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from hud.capabilities import SSHClient
+    from hud.environment import Workspace
 
 BACKINGS = [
     pytest.param({}, id="host"),
     pytest.param({"require_isolation": True}, id="sandbox", marks=SANDBOX),
 ]
 
-UNSANDBOXED = pytest.mark.skipif(
-    usable_bwrap() is not None,
-    reason="a sandboxed command keeps its process group until the sandbox is discarded",
-)
 
-
-def alive(pid: int) -> bool:
-    """Whether ``pid`` is a live process on this host (an unreaped zombie counts as gone)."""
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    status = subprocess.run(
-        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
-    ).stdout.strip()
-    return bool(status) and not status.startswith("Z")
+async def alive(client: SSHClient, pid: int) -> bool:
+    """Whether ``pid``, as the session numbers it, is a live process (an unreaped zombie
+    counts as gone). A sandbox numbers its processes in a pid namespace of its own."""
+    status = (await client.run(f"ps -o stat= -p {pid}")).stdout
+    assert isinstance(status, str)
+    return bool(status.strip()) and not status.strip().startswith("Z")
 
 
 async def test_output_arrives_while_the_command_is_still_running(tmp_path: Path) -> None:
@@ -222,17 +207,22 @@ async def test_a_backgrounded_job_finishing_leaves_the_next_sandboxed_command_wo
     assert (probe.exit_status, probe.stdout) == (0, "healthy")
 
 
-async def output_split_mid_character_is_replaced(client: SSHClient, root: Path) -> None:
-    del root
+async def output_split_mid_character_is_replaced(
+    workspace: Workspace, client: SSHClient, root: Path
+) -> None:
+    del workspace, root
     completed = await client.run("printf '\\226\\214 split-utf8'", check=True)
     assert completed.stdout == "�� split-utf8"
 
 
-async def a_channel_closed_while_its_command_is_torn_down(client: SSHClient, root: Path) -> None:
+async def a_channel_closed_while_a_trapped_child_runs(
+    workspace: Workspace, client: SSHClient, root: Path
+) -> None:
     # The pid file doubles as the child's readiness signal: it is written after
-    # the TERM trap is installed, and teardown's TERM only fires once the
-    # foreground command exits. Exiting before the child is ready would kill it
-    # while still untrapped.
+    # the TERM trap is installed, and the foreground command exits only after it.
+    # Unsandboxed, teardown's TERM fires once the foreground command exits, so
+    # the close lands mid-teardown; a sandboxed session tears down when its
+    # channel closes.
     remote = await client.conn.create_process(
         "sh -c 'trap \"echo started > teardown-started; "
         'while :; do sleep 1; done" TERM; '
@@ -242,15 +232,22 @@ async def a_channel_closed_while_its_command_is_torn_down(client: SSHClient, roo
     )
     pid = 0
     try:
-        await eventually(lambda: (root / "teardown-started").exists())
-        pid = int((root / "close-race-child.pid").read_text())
+        child = root / "close-race-child.pid"
+        await eventually(lambda: child.exists() and bool(child.read_text().strip()))
+        pid = int(child.read_text())
+        if not workspace.bwrap_available:
+            await eventually(lambda: (root / "teardown-started").exists())
         remote.close()
         await asyncio.wait_for(remote.wait_closed(), 5.0)
-        await eventually(lambda: not alive(pid), within=5.0)
+        await eventually(lambda: gone(client, pid), within=5.0)
     finally:
         remote.close()
-        if pid and alive(pid):
-            os.kill(pid, signal.SIGKILL)
+        if pid:
+            await client.run(f"kill -KILL {pid}")
+
+
+async def gone(client: SSHClient, pid: int) -> bool:
+    return not await alive(client, pid)
 
 
 @pytest.mark.parametrize(
@@ -258,28 +255,30 @@ async def a_channel_closed_while_its_command_is_torn_down(client: SSHClient, roo
     [
         pytest.param(output_split_mid_character_is_replaced, id="invalid-utf8-output"),
         pytest.param(
-            a_channel_closed_while_its_command_is_torn_down,
-            id="channel-closed-during-teardown",
-            marks=UNSANDBOXED,
+            a_channel_closed_while_a_trapped_child_runs,
+            id="channel-closed-while-a-trapped-child-runs",
         ),
     ],
 )
+@pytest.mark.parametrize("backing", BACKINGS)
 async def test_the_connection_survives_a_command_that_goes_wrong(
-    tmp_path: Path, fault: Callable[[SSHClient, Path], Awaitable[None]]
+    tmp_path: Path,
+    fault: Callable[[Workspace, SSHClient, Path], Awaitable[None]],
+    backing: dict[str, Any],
 ) -> None:
     root = tmp_path / "root"
-    async with shell(root) as (_, client):
+    async with shell(root, **backing) as (workspace, client):
         connection = client.conn
-        await fault(client, root)
+        await fault(workspace, client, root)
         after = await client.run("printf healthy", check=True, timeout=5.0)
 
     assert after.stdout == "healthy"
     assert client.conn is connection
 
 
-@UNSANDBOXED
+@pytest.mark.parametrize("backing", BACKINGS)
 async def test_a_command_returns_although_a_detached_descendant_holds_its_output(
-    tmp_path: Path,
+    tmp_path: Path, backing: dict[str, Any]
 ) -> None:
     root = tmp_path / "root"
     setsid = shutil.which("setsid")
@@ -301,27 +300,23 @@ async def test_a_command_returns_although_a_detached_descendant_holds_its_output
         )
         detached_command = f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
 
-    pid = 0
-    try:
-        async with shell(root) as (_, client):
-            remote = await client.conn.create_process(f"{detached_command} & wait")
-            try:
-                await eventually(
-                    lambda: bool(
-                        (root / "detached.pid").exists()
-                        and (root / "detached.pid").read_text().strip()
-                    )
+    async with shell(root, **backing) as (_, client):
+        remote = await client.conn.create_process(f"{detached_command} & wait")
+        try:
+            await eventually(
+                lambda: bool(
+                    (root / "detached.pid").exists() and (root / "detached.pid").read_text().strip()
                 )
-                pid = int((root / "detached.pid").read_text())
-                completed = await remote.wait(timeout=5.0)
-            finally:
-                remote.close()
-                await asyncio.wait_for(remote.wait_closed(), 5.0)
-            survived = alive(pid)
-    finally:
-        if pid and alive(pid):
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(pid, signal.SIGKILL)
+            )
+            pid = int((root / "detached.pid").read_text())
+            completed = await remote.wait(timeout=5.0)
+        finally:
+            remote.close()
+            await asyncio.wait_for(remote.wait_closed(), 5.0)
+        try:
+            survived = await alive(client, pid)
+        finally:
+            await client.run(f"kill -KILL -- -{pid}")
 
     assert completed.stdout == "ready"
     assert survived
