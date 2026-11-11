@@ -10,6 +10,7 @@ stepped with.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +59,29 @@ async def test_a_spawned_bridge_carries_its_declaration_into_the_child() -> None
     assert greeting == {"backend": "test", "claim_required": True}
     with pytest.raises(OSError):
         await websockets.connect(robot.url, open_timeout=5)
+
+
+async def test_a_client_whose_sim_stops_raises_instead_of_waiting() -> None:
+    declared = Reach(use_delta=True)
+    declared.contract = CONTRACT
+    declared.num_envs = 2
+    endpoint = RobotEndpoint(declared)
+
+    await endpoint.start()
+    try:
+        (robot,) = await endpoint.capabilities()
+        claimed = await endpoint.reset()
+        client = await RobotClient.connect(robot, token=claimed["token"])
+        await client.get_observation()
+    finally:
+        await endpoint.stop()
+
+    try:
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match="connection closed"):
+                await asyncio.wait_for(client.get_observation(), timeout=10)
+    finally:
+        await client.close()
 
 
 def gym_env(factory: Callable[..., Any], **defaults: Any) -> Environment:

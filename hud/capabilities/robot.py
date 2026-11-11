@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from typing import Any, ClassVar, Self, cast
 
 import numpy as np
@@ -12,6 +13,8 @@ import websockets.exceptions
 from openpi_client import msgpack_numpy
 
 from .base import Capability, CapabilityClient
+
+LOGGER = logging.getLogger(__name__)
 
 # openpi's msgpack-numpy codec serializes nested numpy arrays, so neither end wraps
 # obs/action fields by hand.
@@ -90,9 +93,13 @@ class RobotClient(CapabilityClient):
         """Await the latest observation: ``{"data": {name: ndarray}, "terminated": bool}``.
 
         A per-step ``"reward"`` and, from realtime bridges, ``"meta"`` ride alongside.
-        Raises on an env error frame.
+        Raises on an env error frame, and once the connection has ended.
         """
         msg = await self._queue.get()
+        if "ended" in msg:
+            # Every read after the end raises, not only the first.
+            self._queue.put_nowait(msg)
+            raise RuntimeError(f"robot env error:\n{msg['ended']}")
         if "error" in msg:
             raise RuntimeError(f"robot env error:\n{msg['error']}")
         # Scalar openpi: each connection is one slot; terminated is always a bool.
@@ -140,13 +147,11 @@ class RobotClient(CapabilityClient):
                 if self._queue.full():
                     self._queue.get_nowait()
                 await self._queue.put(msg)
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # never silently stop draining the socket
-            import traceback
-
-            print(f"[agent] robot recv loop crashed: {exc!r}", flush=True)
-            traceback.print_exc()
-            raise
+            ended = "the robot connection closed"
+        except websockets.exceptions.ConnectionClosed as exc:
+            ended = f"the robot connection closed: {exc}"
+        except Exception as exc:
+            LOGGER.exception("robot receive loop failed")
+            ended = f"the robot receive loop failed: {exc!r}"
+        # Queued behind any observation not yet read, so the next read after it raises.
+        await self._queue.put({"ended": ended})
