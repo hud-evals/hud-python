@@ -22,7 +22,7 @@ _unpackb = msgpack_numpy.unpackb
 class RobotClient(CapabilityClient):
     """Live ``openpi/0`` connection: send actions, receive observations."""
 
-    protocol: ClassVar[str] = "openpi"
+    protocol: ClassVar[str] = "openpi/0"
 
     def __init__(
         self, capability: Capability, ws: Any, *, seed: dict[str, Any] | None = None

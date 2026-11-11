@@ -290,7 +290,7 @@ class HudClient:
         cap_client = self._opened.get(cap.name)
         if cap_client is None:
             client_cls = _CLIENT_REGISTRY.get(cap.protocol)
-            if client_cls is None and cap.protocol.split("/", 1)[0] == "openpi":
+            if client_cls is None and cap.protocol == "openpi/0":
                 # RobotClient needs the robot extra, so it joins the registry on first open.
                 from hud.capabilities.robot import RobotClient
 
