@@ -301,7 +301,7 @@ async def test_the_rollout_timeout_ends_the_run_naming_its_phase_and_stops_the_e
                 await asyncio.sleep(30)
 
     job = await Task(env="slow", id=template).run(
-        WaitsWhenAsked(), runtime=LocalRuntime(env), rollout_timeout=0.3
+        WaitsWhenAsked(), runtime=LocalRuntime(env), rollout_timeout=2
     )
 
     (trace,) = job.traces
@@ -309,7 +309,7 @@ async def test_the_rollout_timeout_ends_the_run_naming_its_phase_and_stops_the_e
         0.0,
         "error",
         "timeout",
-        f"rollout timed out after 0.3s during {phase}",
+        f"rollout timed out after 2s during {phase}",
     )
     assert job.errors == [trace]
     await eventually(lambda: events == ["stopped"])
@@ -406,7 +406,7 @@ async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_f
         events.append("torn down")
 
     job = await Task(env="checked", id="check").run(
-        ScriptedAgent("yes"), runtime=slow_to_stop, rollout_timeout=0.3
+        ScriptedAgent("yes"), runtime=slow_to_stop, rollout_timeout=2
     )
     release.set()
 

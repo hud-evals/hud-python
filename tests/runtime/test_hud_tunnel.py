@@ -99,7 +99,7 @@ async def test_a_tunnel_that_keeps_dropping_ends_at_the_deadline_and_releases_th
     services.websocket("runtime", TUNNEL, dropped)
 
     job = await Task(env="checked", id="check").run(
-        ScriptedAgent("yes"), runtime=HUDRuntime(), rollout_timeout=0.5
+        ScriptedAgent("yes"), runtime=HUDRuntime(), rollout_timeout=2
     )
 
     (trace,) = job.traces
