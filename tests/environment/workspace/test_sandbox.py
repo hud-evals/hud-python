@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 
@@ -26,9 +26,6 @@ from hud.environment.workspace import usable_bwrap
 from tests.conftest import SANDBOX
 
 from .conftest import shell
-
-if TYPE_CHECKING:
-    from tests.conftest import HudEnv
 
 IDENTITY = "echo $(id -u) $(id -g) $(id -G)"
 
@@ -73,7 +70,6 @@ async def test_a_session_runs_as_the_identity_the_workspace_was_given(
         assert str(identity).split()[0] == str(0 if sandboxed else os.getuid())
     else:
         assert str(identity).strip() == expected
-    if "shell_uid" in options and expected is not None:
         # A setuid binary must not let the dropped shell regain root.
         assert str(no_new_privs).split() == ["NoNewPrivs:", "1"]
 
@@ -105,16 +101,13 @@ async def test_only_the_workspace_directory_is_handed_to_the_shell_uid(tmp_path:
     assert owners == {"root": 1000, "pkg": 0, "mod.py": 0}
 
 
-def isolation_unavailable(_: pytest.MonkeyPatch, hud_env: HudEnv) -> dict[str, Any]:
-    del hud_env
+def isolation_unavailable(_: pytest.MonkeyPatch) -> dict[str, Any]:
     if usable_bwrap() is not None:
         pytest.skip("this host can sandbox")
     return {"require_isolation": True}
 
 
-def chown_denied(monkeypatch: pytest.MonkeyPatch, hud_env: HudEnv) -> dict[str, Any]:
-    del hud_env
-
+def chown_denied(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def deny(*_: object) -> None:
         raise PermissionError("operation not permitted")
 
@@ -139,12 +132,11 @@ def chown_denied(monkeypatch: pytest.MonkeyPatch, hud_env: HudEnv) -> dict[str, 
 async def test_a_workspace_that_cannot_wall_its_sessions_refuses_to_serve(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    hud_env: HudEnv,
     cause: Any,
     error: type[Exception],
     message: str,
 ) -> None:
-    workspace = Workspace(tmp_path / "root", **cause(monkeypatch, hud_env))
+    workspace = Workspace(tmp_path / "root", **cause(monkeypatch))
 
     with pytest.raises(error, match=message):
         await workspace.start()

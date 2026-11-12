@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 class ToolCall:
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
-    id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,7 +50,6 @@ class Turn:
 
     text: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
-    reasoning: str | None = None
     truncated: bool = False
     fail: Reply | None = None
     native: tuple[dict[str, Any], ...] = ()
@@ -61,21 +59,6 @@ class Turn:
 
 def call(name: str, /, **arguments: Any) -> Turn:
     return Turn(tool_calls=(ToolCall(name, arguments),))
-
-
-def shell_call(*commands: str, id: str = "call_shell", **action: Any) -> Turn:
-    """A Responses ``shell_call``; ``action`` adds ``timeout_ms`` or ``max_output_length``."""
-    return Turn(
-        native=(
-            {
-                "type": "shell_call",
-                "id": f"sh_{id}",
-                "call_id": id,
-                "action": {"commands": list(commands), **action},
-                "status": "completed",
-            },
-        )
-    )
 
 
 def stream_error(kind: str, *, headers: dict[str, str] | None = None) -> Turn:
@@ -262,7 +245,7 @@ class Models:
             return turn.fail
         tool_calls = [
             {
-                "id": tool.id or self._id("call"),
+                "id": self._id("call"),
                 "type": "function",
                 "function": {"name": tool.name, "arguments": json.dumps(tool.arguments)},
             }
@@ -272,8 +255,6 @@ class Models:
         message: dict[str, Any] = {"role": "assistant", "content": turn.text}
         if tool_calls:
             message["tool_calls"] = tool_calls
-        if turn.reasoning is not None:
-            message["reasoning_content"] = turn.reasoning
         finish = turn.finish or (
             "length" if turn.truncated else ("tool_calls" if tool_calls else "stop")
         )
@@ -299,14 +280,6 @@ class Models:
         with self._lock:
             self._responses[response_id] = request.turn
         output: list[dict[str, Any]] = []
-        if turn.reasoning is not None:
-            output.append(
-                {
-                    "type": "reasoning",
-                    "id": self._id("rs"),
-                    "summary": [{"type": "summary_text", "text": turn.reasoning}],
-                }
-            )
         if turn.text is not None:
             output.append(
                 {
@@ -321,7 +294,7 @@ class Models:
             {
                 "type": "function_call",
                 "id": self._id("fc"),
-                "call_id": tool.id or self._id("call"),
+                "call_id": self._id("call"),
                 "name": tool.name,
                 "arguments": json.dumps(tool.arguments),
                 "status": "completed",
@@ -360,14 +333,12 @@ class Models:
         if turn.fail is not None:
             return turn.fail
         blocks: list[dict[str, Any]] = []
-        if turn.reasoning is not None:
-            blocks.append({"type": "thinking", "thinking": turn.reasoning, "signature": "sig"})
         if turn.text is not None:
             blocks.append({"type": "text", "text": turn.text})
         blocks.extend(
             {
                 "type": "tool_use",
-                "id": tool.id or self._id("toolu"),
+                "id": self._id("toolu"),
                 "name": tool.name,
                 "input": tool.arguments,
             }
@@ -397,8 +368,6 @@ class Models:
         if turn.fail is not None:
             return turn.fail
         parts: list[dict[str, Any]] = []
-        if turn.reasoning is not None:
-            parts.append({"text": turn.reasoning, "thought": True})
         if turn.text is not None:
             parts.append({"text": turn.text})
         parts.extend(
@@ -469,28 +438,6 @@ def _anthropic_events(message: dict[str, Any]) -> Iterator[bytes]:
                     "content_block_delta",
                     {"index": index, "delta": {"type": "citations_delta", "citation": citation}},
                 )
-        elif block["type"] == "thinking":
-            yield event(
-                "content_block_start",
-                {
-                    "index": index,
-                    "content_block": {"type": "thinking", "thinking": "", "signature": ""},
-                },
-            )
-            yield event(
-                "content_block_delta",
-                {
-                    "index": index,
-                    "delta": {"type": "thinking_delta", "thinking": block["thinking"]},
-                },
-            )
-            yield event(
-                "content_block_delta",
-                {
-                    "index": index,
-                    "delta": {"type": "signature_delta", "signature": block["signature"]},
-                },
-            )
         elif "input" in block:
             # A string input streams verbatim, so a script can send malformed tool JSON.
             partial = block["input"]

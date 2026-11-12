@@ -119,9 +119,6 @@ class HudEnv:
                 self._monkeypatch.setenv(name, value)
         self._apply()
 
-    def get(self, name: str) -> str | None:
-        return os.environ.get(name)
-
     def _apply(self) -> None:
         fresh = Settings(_env_file=None)
         for name in Settings.model_fields:
@@ -447,8 +444,7 @@ def modal_account(hud_env: HudEnv) -> HudEnv:
 def live(hud_env: HudEnv) -> HudEnv:
     """Configure the SDK for a real HUD account: the real key and the real services."""
     key = real_hud_api_key()
-    if key is None:
-        pytest.skip("needs HUD_API_KEY")
+    assert key is not None
     hud_env.set(
         HUD_API_KEY=key,
         **{name: REAL_ENVIRONMENT.get(name) for name in SERVICE_URL_VARIABLES},

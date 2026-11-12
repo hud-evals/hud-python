@@ -65,12 +65,8 @@ class FakeScreen:
     events: list[KeyEvent | PointerEvent] = field(default_factory=list)
     connections: int = 0
     port: int = 0
-    # Close the connection instead of answering this framebuffer update request
-    # (counted across connections, from 1); 0 never drops.
-    drop_on_update: int = 0
     # Require this VNC password (security type 2); None offers no authentication.
     password: str | None = None
-    updates: int = 0
     sessions: set[asyncio.Task[None]] = field(default_factory=set)
 
     @property
@@ -120,9 +116,6 @@ class FakeScreen:
                     zlib_encoding = 6 in encodings
                 elif kind == ClientMessage.FRAMEBUFFER_UPDATE_REQUEST:
                     await reader.readexactly(9)
-                    self.updates += 1
-                    if self.updates == self.drop_on_update:
-                        return
                     pixel = bytes([*self.color, 255])
                     pixels = pixel * (self.width * self.height)
                     writer.write(struct.pack(">BxH", 0, 1))
@@ -160,11 +153,10 @@ async def fake_screen(
     height: int = 48,
     color: tuple[int, int, int] = (40, 120, 200),
     *,
-    drop_on_update: int = 0,
     password: str | None = None,
 ) -> AsyncGenerator[FakeScreen]:
     """Serve a ``FakeScreen`` on loopback for the duration of the block."""
-    screen = FakeScreen(width, height, color, drop_on_update=drop_on_update, password=password)
+    screen = FakeScreen(width, height, color, password=password)
     server = await asyncio.start_server(screen.session, "127.0.0.1", 0)
     screen.port = server.sockets[0].getsockname()[1]
     async with server:

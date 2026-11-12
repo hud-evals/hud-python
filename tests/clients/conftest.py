@@ -1,5 +1,5 @@
-"""What several client tests share: a scripted control-channel peer, a port with nothing
-listening, and a binding reached through a relay that can drop it."""
+"""What several client tests share: a scripted control-channel peer and a binding reached
+through a relay that can drop it."""
 
 from __future__ import annotations
 
@@ -56,7 +56,6 @@ class ControlPeer:
     accepted: int = 0
     tunnels: int = 0
     frames: list[Frame] = field(default_factory=list)
-    server: asyncio.Server | None = None
     handlers: set[asyncio.Task[None]] = field(default_factory=set)
 
     @property
@@ -70,11 +69,6 @@ class ControlPeer:
             for frame in self.frames
             if method is None or frame.message.get("method") == method
         ]
-
-    def stop_accepting(self) -> None:
-        """Close the listening socket; open connections stay up."""
-        assert self.server is not None
-        self.server.close()
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
@@ -167,7 +161,6 @@ async def control_peer(
     """Serve a ``ControlPeer`` answering connections from ``scripts`` for the block."""
     peer = ControlPeer(scripts=scripts or ([],), upstreams=upstreams or {})
     server = await asyncio.start_server(peer.handle, "127.0.0.1", 0)
-    peer.server = server
     peer.port = server.sockets[0].getsockname()[1]
     try:
         yield peer
