@@ -149,9 +149,9 @@ def split_taskset(
 
 def resolve_rollout_source(
     args: argparse.Namespace,
-) -> tuple[Taskset, Taskset, Provider | HUDRuntime]:
+) -> tuple[Taskset, Taskset, Provider]:
     """Resolve bundled, local-file, or hosted HUD tasks and their runtime."""
-    eval_count = 0 if getattr(args, "calibrate", False) else args.eval_tasks
+    eval_count = 0 if args.calibrate else args.eval_tasks
     if args.taskset:
         source = Taskset.from_api(args.taskset)
         train, evaluation = split_taskset(
@@ -258,7 +258,6 @@ class FireworksAgent(Agent):
             )
         )
         run.trace.content = content
-        run.trace.status = "completed"
         run.trace.stop_reason = "done"
 
 
@@ -287,8 +286,6 @@ def make_training_batch(traces: list[Trace]) -> tuple[list[tinker.Datum], int]:
         for trace, advantage in zip(group_traces, advantages, strict=True):
             sample = _sample(trace)
             assert sample is not None
-            if not sample.prompt_token_ids or not sample.output_token_ids:
-                continue
 
             # Position i predicts token i + 1, so the model input is
             # prompt + response[:-1], the targets are the response shifted one
@@ -352,7 +349,7 @@ async def run_rollouts(
     renderer: Any,
     snapshot_name: str,
     taskset: Taskset,
-    runtime: Provider | HUDRuntime,
+    runtime: Provider,
     group_size: int,
     max_concurrent: int,
     max_tokens: int,
@@ -405,7 +402,7 @@ async def evaluate_policy(
     renderer: Any,
     snapshot_name: str,
     taskset: Taskset,
-    runtime: Provider | HUDRuntime,
+    runtime: Provider,
     args: argparse.Namespace,
     output_path: Path,
 ) -> tuple[float, str]:

@@ -141,6 +141,7 @@ def test_resolve_rollout_source_supports_hosted_and_local_tasks(
         "tasks_per_step": 2,
         "eval_tasks": 2,
         "seed": 0,
+        "calibrate": False,
     }
 
     _, _, hosted_runtime = resolve_rollout_source(
@@ -163,6 +164,7 @@ def test_default_rollout_source_has_disjoint_evaluation_tasks() -> None:
             tasks_per_step=5,
             eval_tasks=3,
             seed=0,
+            calibrate=False,
             min_a=10,
             max_a=99,
             min_b=10,

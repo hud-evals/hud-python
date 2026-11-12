@@ -29,7 +29,7 @@ from env import multiply
 TASKSET = ""
 
 
-def load_taskset_and_runtime() -> tuple[Taskset, Provider | HUDRuntime]:
+def load_taskset_and_runtime() -> tuple[Taskset, Provider]:
     """Resolve the rollout source from the ``TASKSET`` constant (see module docstring)."""
     if TASKSET:
         return Taskset.from_api(TASKSET), HUDRuntime()

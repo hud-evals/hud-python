@@ -10,9 +10,9 @@ from hud.graders import EvaluationResult
 env = Environment(name="fireworks-arithmetic")
 
 
-def grade_final_integer(answer: object, expected: int) -> EvaluationResult:
+def grade_final_integer(answer: str | None, expected: int) -> EvaluationResult:
     """Grade an integer on the last nonempty line, allowing thousands separators."""
-    text = (answer if isinstance(answer, str) else str(answer)).strip()
+    text = (answer or "").strip()
     final = text.splitlines()[-1].strip() if text else ""
     got = (
         int(final.replace(",", ""))

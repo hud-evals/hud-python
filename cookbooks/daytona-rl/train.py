@@ -141,7 +141,7 @@ async def main(
             ]
 
             samples = _samples(trainable)
-            rewards = [r.reward or 0.0 for r in batch]
+            rewards = [r.reward for r in batch]
             errored = sum(1 for r in batch if id(r) in failed)
             solved = sum(1 for r in rewards if r > 0)
             row = {
@@ -182,7 +182,7 @@ async def main(
             row["datums"] = datums
             row["chunks"] = -(-len(trainable) // chunk)
 
-            if len({round(r.reward or 0.0, 6) for r in trainable}) == 1:
+            if len({round(r.reward, 6) for r in trainable}) == 1:
                 row["train_s"] = round(time.perf_counter() - t1, 1)
                 row["optim_step"] = None
                 print(f"  no reward spread in batch — skipping optim_step", flush=True)

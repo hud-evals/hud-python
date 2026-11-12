@@ -59,7 +59,7 @@ async def chat_full(messages: list[PromptMessage]):
 
     answer = yield [system, *messages]
 
-    answer_str = answer if isinstance(answer, str) else str(answer)
+    answer_str = answer or ""
     yield EvaluationResult(
         reward=1.0,
         content=answer_str,
