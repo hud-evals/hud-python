@@ -112,6 +112,7 @@ async def test_an_overloaded_provider_is_asked_again(
 
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
+GEMINI_MODEL = "gemini-3.1-pro-preview"
 
 
 @pytest.mark.parametrize(
@@ -211,9 +212,6 @@ async def test_a_computer_toolset_member_lands_on_the_screen_and_answers_as_the_
         (3, 4, 1),
         (3, 4, 0),
     ]
-
-
-GEMINI_MODEL = "gemini-3.1-pro-preview"
 
 
 async def test_only_the_three_newest_computer_turns_keep_their_screenshots(

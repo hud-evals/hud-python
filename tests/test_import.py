@@ -35,14 +35,10 @@ print("IMPORTED")
 """
 
 
-def run(code: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, "-c", code, *args], capture_output=True, text=True, timeout=120
-    )
-
-
 def test_the_package_imports_where_unix_sockets_do_not_exist() -> None:
-    result = run(IMPORT_AS_WINDOWS)
+    result = subprocess.run(
+        [sys.executable, "-c", IMPORT_AS_WINDOWS], capture_output=True, text=True, timeout=120
+    )
 
     assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
     assert "IMPORTED" in result.stdout
