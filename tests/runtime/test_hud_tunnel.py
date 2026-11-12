@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING
 from hud import Task, Taskset
 from hud.runtime import HUDRuntime, LocalRuntime
 from tests.conftest import eventually
-from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, host_on_runtime
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
+from tests.runtime.conftest import SESSION, SESSIONS, TUNNEL, host_on_runtime
 
 if TYPE_CHECKING:
     from starlette.websockets import WebSocket

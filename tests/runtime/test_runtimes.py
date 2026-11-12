@@ -33,9 +33,9 @@ from hud.runtime import (
     SubprocessRuntime,
 )
 from tests.conftest import eventually
-from tests.eval.conftest import SESSION, SESSIONS, gone, host_on_runtime
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
+from tests.runtime.conftest import SESSION, SESSIONS, gone, host_on_runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable

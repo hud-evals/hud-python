@@ -7,7 +7,7 @@ import io
 from PIL import Image
 
 from hud.capabilities import Capability, RFBClient
-from tests.clients.conftest import relayed
+from tests.capabilities.conftest import relayed
 from tests.fixtures.screen import fake_screen
 
 COLOR = (10, 200, 30)

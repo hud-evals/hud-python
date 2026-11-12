@@ -16,8 +16,8 @@ from hud.agents.base import Agent
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime, SubprocessRuntime
 from tests.conftest import eventually
-from tests.eval.conftest import gone
 from tests.fixtures.agents import ScriptedAgent
+from tests.runtime.conftest import gone
 
 if TYPE_CHECKING:
     from pathlib import Path

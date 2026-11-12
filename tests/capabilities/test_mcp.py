@@ -18,7 +18,7 @@ from fastmcp.exceptions import ToolError
 from mcp.shared.exceptions import MCPError
 
 from hud.capabilities import Capability, MCPClient
-from tests.clients.conftest import relayed
+from tests.capabilities.conftest import relayed
 from tests.conftest import eventually
 from tests.fixtures.asgi import mcp_server, serve_asgi
 from tests.fixtures.services import Reply

@@ -1,5 +1,4 @@
-"""What several client tests share: a scripted control-channel peer and a binding reached
-through a relay that can drop it."""
+"""A scripted control-channel peer."""
 
 from __future__ import annotations
 
@@ -7,17 +6,11 @@ import asyncio
 import contextlib
 import json
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
-from urllib.parse import urlsplit, urlunsplit
-
-from tests.fixtures.relay import relay
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
-
-    from hud.capabilities import Capability
-    from tests.fixtures.relay import FlakyRelay
 
 
 _DEFAULT_ID = object()
@@ -171,15 +164,3 @@ async def control_peer(
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(*peer.handlers, return_exceptions=True)
         await server.wait_closed()
-
-
-@asynccontextmanager
-async def relayed(binding: Capability) -> AsyncGenerator[tuple[Capability, FlakyRelay]]:
-    """``binding``, reached through a relay that can sever, refuse, and stall its connections."""
-    parts = urlsplit(binding.url)
-    assert parts.hostname is not None and parts.port is not None
-    async with relay(parts.hostname, parts.port) as flaky:
-        user = f"{parts.username}@" if parts.username else ""
-        netloc = f"{user}127.0.0.1:{flaky.port}"
-        url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
-        yield replace(binding, url=url), flaky
