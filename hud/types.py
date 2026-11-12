@@ -465,7 +465,7 @@ class Grade(BaseModel):
 
     def model_post_init(self, context: Any, /) -> None:
         # Malformed subscores fail here, where the grade is built, not when read.
-        evaluation = dict(self.raw)
+        evaluation = {key: value for key, value in self.raw.items() if key != "info"}
         if isinstance(subscores := evaluation.get("subscores"), list):
             evaluation["subscores"] = [
                 SubScore.model_validate(subscore).to_summary() for subscore in subscores
@@ -474,7 +474,10 @@ class Grade(BaseModel):
 
     @property
     def evaluation(self) -> dict[str, Any]:
-        """A persistence-safe view of ``raw``: subscores reduced to their summaries."""
+        """A persistence-safe view of ``raw``: no ``info``, subscores reduced to their summaries.
+
+        ``info`` is span-only, like each subscore's; read it from ``Grade.info``.
+        """
         return dict(self._evaluation)
 
     @classmethod
