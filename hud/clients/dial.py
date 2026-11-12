@@ -28,11 +28,11 @@ Streams = tuple[asyncio.StreamReader, asyncio.StreamWriter]
 _CARRIERS: set[asyncio.Task[None]] = set()
 
 
-def dialer(url: str, params: Mapping[str, Any]) -> Callable[[], Awaitable[Streams]]:
+def dialer(url: str, headers: Mapping[str, str]) -> Callable[[], Awaitable[Streams]]:
     """The function that opens one connection to ``url``.
 
-    A WebSocket address sends ``params["headers"]`` with its handshake; its
-    server answering 5xx is not serving yet, like a refused TCP connect.
+    A WebSocket address sends ``headers`` with its handshake; its server answering 5xx
+    is not serving yet, like a refused TCP connect.
     """
     parts = urlsplit(url)
     host = parts.hostname or "127.0.0.1"
@@ -46,8 +46,8 @@ def dialer(url: str, params: Mapping[str, Any]) -> Callable[[], Awaitable[Stream
                 host, port or 443, ssl=context, server_hostname=host
             )
         case "ws" | "wss":
-            headers = dict(params.get("headers") or {})
-            return lambda: _websocket(url, headers)
+            sent = dict(headers)
+            return lambda: _websocket(url, sent)
         case scheme:
             raise NotImplementedError(f"control transport {scheme!r} is not supported")
 
