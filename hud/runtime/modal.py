@@ -6,20 +6,37 @@ import asyncio
 import contextlib
 import logging
 import math
+import os
+import re
 import shlex
 import sys
 import tarfile
 import tempfile
+import uuid
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from graphlib import CycleError, TopologicalSorter
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.parse import urlsplit, urlunsplit
+
+import websockets
 
 from hud.environment.server import DEFAULT_PORT, default_serve_command
+from hud.types import ClassifiedError
 from hud.utils.process import finish_output, stream_output
 
-from .compose import SECCOMP_PROFILE, ComposeConfig
+from .compose import (
+    DOCKER_DAEMON_IMAGE,
+    DOCKER_DAEMON_PORT,
+    DOCKER_DAEMON_SERVICE,
+    DOCKER_HOST,
+    ComposeConfig,
+    ComposeHealthcheck,
+)
 from .core import (
+    EXEC_LAUNCHER,
+    KILL_TREE,
     SESSION_ROOT,
     Checkpoint,
     CheckpointScope,
@@ -28,21 +45,190 @@ from .core import (
     Runtime,
     RuntimeConfig,
     SessionScope,
+    check_restorable,
     validate_archive,
 )
+from .tunnel import splice_websocket
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence
 
     import modal
+    from modal.sandbox import SidecarContainer
 
     from hud.eval.task import Task
 
 logger = logging.getLogger("hud.runtime")
 
-_MODAL_COMPOSE_CPU = 4.0
-_MODAL_COMPOSE_MEMORY_MB = 8192
-_ARCHIVE = "/runtime/transfer.tar.gz"
+_BRIDGE_SOURCE = Path(__file__).with_name("modal_bridge.py").read_text(encoding="utf-8")
+# The sandbox port the connect token routes to; the bridge listens here and
+# splices each WebSocket to the environment's own port on loopback.
+_BRIDGE_PORT = 18765
+_START_FILE = "/hud/start"
+_ARCHIVE = "/tmp/hud-transfer.tar.gz"  # noqa: S108 - inside the sandbox, every image has /tmp
+# Memory the VM runtime reserves for the Docker daemon sidecar; the sandbox's
+# own request does not cover sidecars there.
+_DOCKER_DAEMON_MEMORY_MIB = 1024
+_RESTART_POLL_SECONDS = 2.0
+
+_BYTES = re.compile(r"^(\d+)([kmg]?)b?$", re.IGNORECASE)
+
+
+def _mebibytes(value: str | int) -> int:
+    """A Compose byte value (``512m``, ``2g``, ``1073741824``) in whole MiB, rounded up."""
+    if isinstance(value, int):
+        return math.ceil(value / 2**20)
+    match = _BYTES.match(value.strip())
+    if match is None:
+        raise ValueError(f"invalid Compose memory value {value!r}")
+    scale = {"": 1, "k": 2**10, "m": 2**20, "g": 2**30}[match.group(2).lower()]
+    return math.ceil(int(match.group(1)) * scale / 2**20)
+
+
+@dataclass(frozen=True, slots=True)
+class _Service:
+    """One runnable Compose service as the sandbox runs it."""
+
+    name: str
+    image: str
+    argv: tuple[str, ...]
+    environment: dict[str, str]
+    workdir: str | None
+    # ``depends_on`` as {service: condition}.
+    dependencies: dict[str, str]
+    healthcheck: ComposeHealthcheck | None
+    restart: str
+    memory_mib: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _Plan:
+    """A Compose project laid out as one sandbox.
+
+    ``main`` is its main container, the sidecars run beside it, ``order`` starts every
+    service after what it depends on, and ``docker`` adds the daemon sidecar.
+    """
+
+    main: _Service
+    sidecars: tuple[_Service, ...]
+    order: tuple[str, ...]
+    docker: bool
+
+    def service(self, name: str) -> _Service:
+        return self.main if name == "main" else next(s for s in self.sidecars if s.name == name)
+
+
+def _healthcheck_argv(check: ComposeHealthcheck) -> list[str]:
+    assert check.test is not None
+    kind, *rest = check.test
+    if kind == "CMD":
+        return rest
+    if kind == "CMD-SHELL":
+        return ["sh", "-c", *rest]
+    raise ValueError(f"unsupported Compose healthcheck test {check.test!r}")
+
+
+def _plan(compose: ComposeConfig, *, docker: bool, gpu: bool, memory_mib: int | None) -> _Plan:
+    """Lay the project out as a sandbox; each refusal names what the sandbox cannot do."""
+    runnable = compose.started_services()
+    healthchecks = {
+        name: service.healthcheck
+        for name, service in runnable.items()
+        if service.healthcheck is not None and not service.healthcheck.disabled
+    }
+    if "main" not in runnable:
+        raise ValueError("ModalRuntime requires a Compose service named 'main'")
+    if docker and gpu:
+        raise ValueError(
+            "ModalRuntime cannot give a GPU environment a Docker daemon: the daemon needs "
+            "the VM runtime, which has no GPUs"
+        )
+    if docker and memory_mib is None:
+        raise ValueError(
+            "ModalRuntime needs resources.memory_mb for an environment with a Docker daemon: "
+            "the VM runtime sizes every container of the sandbox"
+        )
+    if DOCKER_DAEMON_SERVICE in runnable:
+        raise ValueError(
+            f"Compose service name {DOCKER_DAEMON_SERVICE!r} is reserved for the Docker daemon"
+        )
+    services: dict[str, _Service] = {}
+    for name, service in runnable.items():
+        extra = service.model_extra or {}
+        if service.image is None:
+            raise ValueError(
+                f"ModalRuntime runs pre-built images only; Compose service {name!r} has no image"
+            )
+        if service.network_mode is not None:
+            raise ValueError(
+                f"ModalRuntime cannot apply network_mode to Compose service {name!r}; "
+                "services share the sandbox's network and reach each other by name"
+            )
+        if service.user is not None:
+            raise ValueError(
+                f"ModalRuntime cannot run Compose service {name!r} as user {service.user!r}"
+            )
+        deploy = extra.get("deploy") or {}
+        devices = deploy.get("resources", {}).get("reservations", {}).get("devices")
+        if name != "main" and (devices or extra.get("gpus")):
+            raise ValueError(
+                f"ModalRuntime cannot attach a GPU to Compose service {name!r}: "
+                "only the environment (main) runs on the sandbox's GPU; sidecars are CPU-only"
+            )
+        dependencies: dict[str, str] = {
+            dependency: spec.condition for dependency, spec in service.depends_on.items()
+        }
+        for dependency, condition in dependencies.items():
+            if dependency not in runnable:
+                raise ValueError(
+                    f"Compose service {name!r} depends on {dependency!r}, which does not run"
+                )
+            if condition == "service_healthy" and dependency not in healthchecks:
+                raise ValueError(
+                    f"Compose service {name!r} waits for {dependency!r} to be healthy, "
+                    "which declares no healthcheck"
+                )
+            if condition == "service_completed_successfully" and dependency == "main":
+                raise ValueError(
+                    f"Compose service {name!r} waits for 'main' to complete, "
+                    "which serves for the whole rollout"
+                )
+        memory = extra.get("mem_limit") or deploy.get("resources", {}).get("limits", {}).get(
+            "memory"
+        )
+        if docker and name != "main" and memory is None:
+            raise ValueError(
+                f"ModalRuntime needs mem_limit on Compose service {name!r}: with a Docker "
+                "daemon the sandbox runs on the VM runtime, which sizes every container"
+            )
+        # As under Compose, an entrypoint override drops the image's command.
+        argv = (
+            (*service.entrypoint, *(service.command or ()))
+            if service.entrypoint is not None
+            else tuple(service.command or ())
+        )
+        services[name] = _Service(
+            name=name,
+            image=service.image,
+            argv=argv,
+            environment=dict(service.environment),
+            workdir=service.working_dir,
+            dependencies=dependencies,
+            healthcheck=healthchecks.get(name),
+            restart=service.restart or "no",
+            memory_mib=_mebibytes(memory) if memory is not None else None,
+        )
+    graph = {name: set(service.dependencies) for name, service in services.items()}
+    try:
+        ordered = tuple(TopologicalSorter(graph).static_order())
+    except CycleError:
+        raise ValueError("Compose depends_on forms a cycle") from None
+    return _Plan(
+        main=services["main"],
+        sidecars=tuple(services[name] for name in ordered if name != "main"),
+        order=ordered,
+        docker=docker,
+    )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -52,48 +238,54 @@ class ModalEndpoint(Runtime):
     transports_sessions: ClassVar[bool] = True
 
     sandbox: modal.Sandbox
-    compose: str | None
+    # Live sidecar handles by Compose service name; a restart replaces one.
+    sidecars: dict[str, SidecarContainer] = field(default_factory=dict)
+    # The task applying the sidecars' restart policies, for a Compose project.
+    watcher: asyncio.Task[None] | None = None
+    # Whether the sandbox runs on Modal's VM runtime, whose filesystem
+    # snapshots are faithful; the default gVisor runtime's are not.
+    vm: bool = False
 
-    def _container(self) -> str:
-        if self.compose is None:
-            return ""
-        compose = shlex.quote(self.compose)
-        project_directory = shlex.quote(str(PurePosixPath(self.compose).parent))
-        return (
-            f"CONTAINER=$(docker compose --project-directory {project_directory} "
-            f"--file {compose} --file /hud/override.json "
-            "--file /hud/ports.yaml ps --quiet main); "
-        )
+    def _check_watcher(self) -> None:
+        if self.watcher is not None and self.watcher.done() and not self.watcher.cancelled():
+            failure = self.watcher.exception()
+            raise RuntimeError(f"the sidecar watcher stopped: {failure}") from failure
+
+    def _target(self, service: str) -> modal.Sandbox | SidecarContainer:
+        self._check_watcher()
+        if service == "main":
+            return self.sandbox
+        try:
+            return self.sidecars[service]
+        except KeyError:
+            raise ValueError(f"Compose service {service!r} is not running") from None
 
     async def terminated(self) -> str | None:
         code = await self.sandbox.poll.aio()
-        return None if code is None else f"sandbox exited with code {code}"
+        return None if code is None else f"sandbox exited with exit code {code}"
 
-    async def _exec(self, command: str) -> str:
-        process = await self.sandbox.exec.aio("sh", "-c", command)
-        returncode = await process.wait.aio()
-        stdout = await process.stdout.read.aio()
-        if returncode != 0:
-            raise RuntimeError((await process.stderr.read.aio()).strip())
-        return stdout
-
-    async def exec(self, argv: Sequence[str], *, service: str = "main") -> ExecResult:
-        if service != "main":
-            raise ValueError(f"service {service!r}: only the environment is reachable")
-        if self.compose is None:
-            process = await self.sandbox.exec.aio(*argv)
-        else:
-            process = await self.sandbox.exec.aio(
-                "sh",
-                "-c",
-                self._container() + 'exec docker exec "$CONTAINER" "$@"',
-                "hud-exec",
-                *argv,
-            )
-        returncode = await process.wait.aio()
+    async def exec(
+        self, argv: Sequence[str], *, service: str = "main", max_wait: float | None = None
+    ) -> ExecResult:
+        target = self._target(service)
+        pidfile = f"/tmp/hud-exec-{uuid.uuid4().hex}.pid"  # noqa: S108 - inside the sandbox
+        try:
+            async with asyncio.timeout(max_wait):
+                process = await target.exec.aio("sh", "-c", EXEC_LAUNCHER, pidfile, *argv)
+                returncode = await process.wait.aio()
+        except (asyncio.CancelledError, TimeoutError):
+            killer = await target.exec.aio("sh", "-c", KILL_TREE, pidfile)
+            await killer.wait.aio()
+            raise
         return ExecResult(
             returncode, await process.stdout.read.aio(), await process.stderr.read.aio()
         )
+
+    async def _sh(self, command: str, *, service: str = "main") -> str:
+        result = await self.exec(["sh", "-c", command], service=service)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+        return result.stdout
 
     async def collect(
         self,
@@ -102,23 +294,15 @@ class ModalEndpoint(Runtime):
         *,
         service: str = "main",
     ) -> list[Path]:
-        if service != "main":
-            raise ValueError(f"service {service!r}: only the environment is reachable")
+        target = self._target(service)
         collected: list[Path] = []
         with tempfile.TemporaryDirectory(prefix="hud-collect-") as directory:
+            archive = Path(directory) / "collect.tar.gz"
             for path in paths:
                 source = PurePosixPath(path)
                 parent, name = shlex.quote(str(source.parent)), shlex.quote(source.name)
-                if self.compose is None:
-                    command = f"tar -czf {_ARCHIVE} -C {parent} {name}"
-                else:
-                    command = (
-                        self._container()
-                        + f'docker exec "$CONTAINER" tar -czf - -C {parent} {name} > {_ARCHIVE}'
-                    )
-                await self._exec(command)
-                archive = Path(directory) / "collect.tar.gz"
-                await self.sandbox.filesystem.copy_to_local.aio(_ARCHIVE, archive)
+                await self._sh(f"tar -czf {_ARCHIVE} -C {parent} {name}", service=service)
+                await target.filesystem.copy_to_local.aio(_ARCHIVE, archive)
                 with tarfile.open(archive) as tar:
                     tar.extractall(destination, filter="data")
                 collected.append(destination / source.name)
@@ -126,71 +310,61 @@ class ModalEndpoint(Runtime):
 
     @asynccontextmanager
     async def checkpoint(self, scope: CheckpointScope) -> AsyncGenerator[Checkpoint]:
+        self._check_watcher()
         if isinstance(scope, RootScope):
-            raise self._unsupported(
-                "checkpoint the root filesystem",
-                "the environment runs inside the sandbox's Docker daemon"
-                if self.compose is not None
-                else "Modal filesystem snapshots on this runtime do not preserve file modes",
-            )
+            if not self.vm:
+                raise self._unsupported(
+                    "checkpoint the root filesystem",
+                    "Modal's default runtime strips setuid, setgid and sticky bits from "
+                    "filesystem snapshots; only the VM runtime, which an environment with "
+                    "a Docker daemon runs on, snapshots faithfully",
+                )
+            image = await self.sandbox.snapshot_filesystem.aio()
+            yield Checkpoint(scope, f"modal://{image.object_id}")
+            return
         with tempfile.TemporaryDirectory(prefix="hud-checkpoint-") as directory:
             destination = Path(directory) / "checkpoint.tar.gz"
-            path = shlex.quote(str(scope.path))
-            optional = isinstance(scope, SessionScope)
-            if self.compose is None:
-                root = path
-                command = ""
-            else:
-                root = "/runtime/checkpoint-export"
-                command = (
-                    self._container()
-                    + f"rm -rf {root} && mkdir -p {root} && "
-                    + (f'if docker exec "$CONTAINER" test -d {path}; then ' if optional else "")
-                    + f'docker cp "$CONTAINER":{path}/. {root}'
-                    + ("; fi && " if optional else " && ")
-                )
-            command += (
-                (f"if [ ! -d {root} ]; then mkdir -p {root}; fi; " if optional else "")
+            root = shlex.quote(str(scope.path))
+            await self._sh(
+                (f"mkdir -p {root}; " if isinstance(scope, SessionScope) else "")
                 + f"if [ ! -d {root} ]; then echo '{root} is not a directory' >&2; exit 1; fi; "
                 + f"if find {root} -mindepth 1 ! -type f ! -type d -print -quit | grep -q .; "
                 + "then echo 'runtime archive contains an unsupported entry' >&2; exit 1; fi; "
                 + f"tar -czf {_ARCHIVE} -C {root} ."
             )
-            await self._exec(command)
             await self.sandbox.filesystem.copy_to_local.aio(_ARCHIVE, destination)
             yield Checkpoint(scope, str(destination))
 
     async def restore(self, checkpoint: Checkpoint, scope: CheckpointScope) -> None:
-        if isinstance(scope, RootScope) or isinstance(checkpoint.scope, RootScope):
-            raise self._unsupported(
-                "restore a root checkpoint into a running sandbox",
-                f"start a new sandbox from runtime_config.image={checkpoint.ref!r}",
-            )
-        if type(checkpoint.scope) is not type(scope):
-            raise ValueError("a checkpoint restores into a scope of its own kind")
+        self._check_watcher()
+        check_restorable(checkpoint, scope)
+        assert not isinstance(scope, RootScope)
         validate_archive(Path(checkpoint.ref))
         target = shlex.quote(str(scope.path))
         await self.sandbox.filesystem.copy_from_local.aio(checkpoint.ref, _ARCHIVE)
-        if self.compose is None:
-            command = f"rm -rf {target} && mkdir -p {target} && tar -xzf {_ARCHIVE} -C {target}"
-        else:
-            command = (
-                self._container()
-                + "rm -rf /runtime/restore && mkdir -p /runtime/restore && "
-                + f"tar -xzf {_ARCHIVE} -C /runtime/restore && "
-                + f'docker exec "$CONTAINER" sh -c "rm -rf {target} && mkdir -p {target}" && '
-                + f'docker cp /runtime/restore/. "$CONTAINER":{target}'
-            )
-        await self._exec(command)
+        await self._sh(f"rm -rf {target} && mkdir -p {target} && tar -xzf {_ARCHIVE} -C {target}")
 
 
 class ModalRuntime:
-    """The Modal provider: each acquisition ``Sandbox.create``s a fresh container.
+    """The Modal provider: each acquisition ``Sandbox.create``s a fresh sandbox.
 
-    The control channel is exposed as a raw TCP tunnel, the only kind ``connect``
-    dials, and the sandbox terminates on exit. ``image_name`` names a published image;
-    an ``image`` is built once, on first use. Requires the ``modal`` extra and a
-    configured token.
+    The environment is the sandbox's main container, where a requested GPU
+    attaches. A Compose project's other services run as sidecars of the same
+    sandbox, reached by service name; the runtime starts them in ``depends_on``
+    order, waits on their healthchecks, and restarts them by their ``restart``
+    policy. Every service image must be pre-built: a registry reference, or
+    ``modal://<image id>``. A project with ``service_access`` gets a Docker
+    daemon sidecar, which needs Modal's VM runtime and so excludes a GPU.
+
+    The control channel is reached through a connect-token WebSocket on the
+    sandbox: a local listener mints a token for every connection and splices
+    it to the environment's port. Sandboxes run in the caller's own region
+    (``MODAL_REGION``) unless ``region`` says otherwise, carry ``tags``, and
+    treat declared ``cpu`` and ``memory_mb`` as hard limits. Acquisitions are
+    independent, so a batch fans out into isolated sandboxes.
+
+    ``image_name`` names a published image; an ``image`` is built once, on first use.
+    Requires the ``modal`` extra and a configured token.
     """
 
     def __init__(
@@ -207,6 +381,9 @@ class ModalRuntime:
         env_vars: Mapping[str, str] | None = None,
         sandbox_secrets: Sequence[modal.Secret] | None = None,
         registry_secret: modal.Secret | None = None,
+        region: str | None = None,
+        tags: Mapping[str, str] | None = None,
+        volumes: Mapping[str, modal.Volume] | None = None,
     ) -> None:
         if app is not None and app_name is not None:
             raise ValueError("ModalRuntime accepts either app or app_name, not both")
@@ -216,6 +393,9 @@ class ModalRuntime:
         self.sandbox_secrets = tuple(sandbox_secrets or ())
         self.registry_secret = registry_secret
         self.workdir = workdir
+        self.region = region if region is not None else os.environ.get("MODAL_REGION")
+        self.tags = dict(tags or {})
+        self.volumes = dict(volumes or {})
         # An unset workdir keeps the image WORKDIR.
         self.command = (
             tuple(command) if command is not None else ("sh", "-c", default_serve_command(port))
@@ -230,6 +410,23 @@ class ModalRuntime:
         self._image = image
         self._resolved: modal.Image | None = None
         self._image_lock = asyncio.Lock()
+        # A sidecar needs its image's object id, so each reference hydrates once.
+        self._built: dict[str, modal.Image] = {}
+
+    def _reference(self, reference: str) -> modal.Image:
+        import modal
+
+        if reference.startswith("modal://"):
+            return modal.Image.from_id(reference.removeprefix("modal://"))
+        return modal.Image.from_registry(reference, secret=self.registry_secret)
+
+    async def _built_image(self, reference: str, app: modal.App) -> modal.Image:
+        async with self._image_lock:
+            if reference not in self._built:
+                image = self._reference(reference)
+                await image.build.aio(app=app)
+                self._built[reference] = image
+            return self._built[reference]
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
@@ -241,47 +438,34 @@ class ModalRuntime:
             resources.require_support("ModalRuntime", {"cpu", "memory_mb", "gpu"})
             if resources.gpu is not None and len(resources.gpu.acceptable_types) > 1:
                 raise ValueError("ModalRuntime does not support alternative GPU types")
-        project = config.compose
-        compose = None
-        if project is not None:
-            compose = project.document
-            if not isinstance(compose, Path):
-                raise ValueError("ModalRuntime requires compose as a local file path")
-            compose = compose.resolve()
-        if compose is not None and resources is not None and resources.gpu is not None:
-            raise ValueError(
-                "ModalRuntime cannot attach GPUs to services inside Docker-in-Docker; "
-                "use a materialized image or omit runtime_config.compose"
+        gpu = resources.gpu if resources is not None else None
+        memory = resources.memory_mb if resources is not None else None
+        plan: _Plan | None = None
+        if config.compose is not None:
+            document = config.compose.document
+            compose = ComposeConfig.from_file(document) if isinstance(document, Path) else document
+            plan = _plan(
+                compose,
+                docker=bool(config.compose.service_access),
+                gpu=gpu is not None,
+                memory_mib=memory,
             )
-        if compose is not None and self.sandbox_secrets:
-            raise ValueError(
-                "ModalRuntime sandbox secrets require an image runtime; attaching them to "
-                "the outer Docker-in-Docker sandbox would not expose them to main"
-            )
-        compose_config = ComposeConfig.from_file(compose) if compose is not None else None
-        port_service = compose_config.network_owner("main") if compose_config else "main"
-        if compose is not None:
-            image = modal.Image.from_registry("docker:28.3.3-dind")
-        elif config.image is not None:
-            image = (
-                modal.Image.from_id(config.image.removeprefix("modal://"))
-                if config.image.startswith("modal://")
-                else modal.Image.from_registry(config.image, secret=self.registry_secret)
-            )
-        elif self.image_name is not None:
-            image = modal.Image.from_name(self.image_name)
-        elif self._image is None:
+        elif config.image is None and self.image_name is None and self._image is None:
             raise ValueError(
                 "ModalRuntime requires image=, image_name=, runtime_config.image, "
                 "or runtime_config.compose"
             )
-        else:
-            image = self._resolved
 
         app = self.app
         if app is None:
             app = await modal.App.lookup.aio(self.app_name, create_if_missing=True)
-        if image is None:
+        if plan is not None:
+            image = self._reference(plan.main.image)
+        elif config.image is not None:
+            image = self._reference(config.image)
+        elif self.image_name is not None:
+            image = modal.Image.from_name(self.image_name)
+        else:
             assert self._image is not None
             if self._resolved is None:
                 async with self._image_lock:
@@ -289,35 +473,43 @@ class ModalRuntime:
                         await self._image.build.aio(app=app)
                         self._resolved = self._image
             image = self._image
+        sidecar_images = {
+            service.name: await self._built_image(service.image, app)
+            for service in (plan.sidecars if plan is not None else ())
+        }
+        docker_image = (
+            await self._built_image(DOCKER_DAEMON_IMAGE, app)
+            if plan is not None and plan.docker
+            else None
+        )
 
+        vm = plan is not None and plan.docker
         sandbox_kwargs: dict[str, Any] = {}
-        if compose is not None:
-            sandbox_kwargs["cpu"] = max(
-                resources.cpu if resources is not None and resources.cpu is not None else 0,
-                _MODAL_COMPOSE_CPU,
+        if resources is not None and resources.cpu is not None:
+            sandbox_kwargs["cpu"] = (resources.cpu, resources.cpu)
+        if plan is not None and plan.docker:
+            # The plan refused a project that leaves any of these undeclared.
+            assert memory is not None
+            reserve = _DOCKER_DAEMON_MEMORY_MIB + sum(
+                service.memory_mib for service in plan.sidecars if service.memory_mib is not None
             )
-            sandbox_kwargs["memory"] = max(
-                (
-                    resources.memory_mb
-                    if resources is not None and resources.memory_mb is not None
-                    else 0
-                ),
-                _MODAL_COMPOSE_MEMORY_MB,
-            )
-        else:
-            if resources is not None and resources.cpu is not None:
-                sandbox_kwargs["cpu"] = resources.cpu
-            if resources is not None and resources.memory_mb is not None:
-                sandbox_kwargs["memory"] = resources.memory_mb
-            if self.env_vars:
-                sandbox_kwargs["env"] = self.env_vars
-            if self.sandbox_secrets:
-                sandbox_kwargs["secrets"] = self.sandbox_secrets
-        if resources is not None and resources.gpu is not None:
-            gpu_types = resources.gpu.acceptable_types
-            gpu_type = gpu_types[0] if gpu_types else "any"
-            gpu = gpu_type if resources.gpu.count == 1 else f"{gpu_type}:{resources.gpu.count}"
-            sandbox_kwargs["gpu"] = gpu
+            total = memory + reserve
+            sandbox_kwargs["memory"] = (total, total)
+            sandbox_kwargs["runtime"] = "vm"
+            sandbox_kwargs["experimental_options"] = {"vm_sidecar_memory_reserve_mib": reserve}
+        elif memory is not None:
+            sandbox_kwargs["memory"] = (memory, memory)
+        if gpu is not None:
+            gpu_type = gpu.acceptable_types[0] if gpu.acceptable_types else "any"
+            sandbox_kwargs["gpu"] = gpu_type if gpu.count == 1 else f"{gpu_type}:{gpu.count}"
+        if self.region is not None:
+            sandbox_kwargs["region"] = self.region
+        if self.tags:
+            sandbox_kwargs["tags"] = self.tags
+        if self.sandbox_secrets:
+            sandbox_kwargs["secrets"] = self.sandbox_secrets
+        if self.volumes:
+            sandbox_kwargs["volumes"] = self.volumes
 
         # Without a declared run limit, the sandbox outlives the task's agent budget by the
         # default allowance for startup, grading, and teardown.
@@ -328,153 +520,290 @@ class ModalRuntime:
             run_timeout = config.limits.run_timeout_s or run_timeout
             ready_timeout = config.limits.startup_timeout_s or ready_timeout
 
+        environment = dict(self.env_vars)
+        workdir = self.workdir
+        argv: tuple[str, ...] = self.command
+        held_back = False
+        if plan is not None:
+            environment.update(plan.main.environment)
+            if plan.docker:
+                environment["DOCKER_HOST"] = DOCKER_HOST
+            if plan.main.workdir is not None:
+                workdir = plan.main.workdir
+            if plan.main.argv:
+                argv = plan.main.argv
+            # The environment starts once what it depends on is up, as under Compose.
+            held_back = bool(plan.main.dependencies) or plan.docker
         command = (
-            ()
-            if compose is not None
-            else (
-                "sh",
-                "-c",
-                f"mkdir -p {SESSION_ROOT} /media/hud && "
-                "rm -rf /media/hud/sessions && "
-                f"ln -s {SESSION_ROOT} /media/hud/sessions && "
-                'exec "$@"',
-                "hud-runtime",
-                *self.command,
-            )
+            "sh",
+            "-c",
+            f"mkdir -p {SESSION_ROOT} /media/hud /hud && "
+            "rm -rf /media/hud/sessions && "
+            f"ln -s {SESSION_ROOT} /media/hud/sessions && "
+            'exec "$@"',
+            "hud-runtime",
+            "python3",
+            "-c",
+            _BRIDGE_SOURCE,
+            "--listen",
+            str(_BRIDGE_PORT),
+            "--upstream",
+            str(self.port),
+            *(("--start-file", _START_FILE) if held_back else ()),
+            "--",
+            *argv,
         )
         sb = await modal.Sandbox.create.aio(
             *command,
             app=app,
             image=image,
-            workdir=None if compose is not None else self.workdir,
-            unencrypted_ports=[self.port],
-            readiness_probe=(None if compose is not None else modal.Probe.with_tcp(self.port)),
+            env=environment or None,
+            workdir=workdir,
+            readiness_probe=modal.Probe.with_tcp(self.port),
             # Modal types both timeouts as int seconds; floats raise at proto encode.
             timeout=run_timeout,
-            experimental_options={"vm_runtime": True} if compose is not None else None,
             **sandbox_kwargs,
         )
-        output_tasks: tuple[asyncio.Task[None], ...] = ()
-        if compose is None:
-            output_tasks = (
-                asyncio.create_task(stream_output(sb.stdout, sys.stdout)),
-                asyncio.create_task(stream_output(sb.stderr, sys.stderr)),
-            )
-        compose_path: str | None = None
+        output_tasks = (
+            asyncio.create_task(stream_output(sb.stdout, sys.stdout)),
+            asyncio.create_task(stream_output(sb.stderr, sys.stderr)),
+        )
+        sidecars: dict[str, SidecarContainer] = {}
+        watcher: asyncio.Task[None] | None = None
+        server: asyncio.Server | None = None
         try:
-            if project is None:
-                await sb.wait_until_ready.aio(timeout=ready_timeout)
-            else:
-                assert compose is not None
-                project_root = project.root if isinstance(project.root, Path) else compose.parent
-                compose_path = str(
-                    PurePosixPath("/hud/project")
-                    / compose.relative_to(project_root.resolve()).as_posix()
+            try:
+                async with asyncio.timeout(ready_timeout):
+                    if plan is not None:
+                        try:
+                            await _start_services(
+                                sb,
+                                sidecars,
+                                plan,
+                                sidecar_images,
+                                docker_image,
+                                vm,
+                                release_main=held_back,
+                            )
+                        except Exception as exc:
+                            raise ClassifiedError(
+                                str(exc), code="compose_execution_failed", source="user"
+                            ) from exc
+                    try:
+                        await sb.wait_until_ready.aio(timeout=ready_timeout)
+                    except Exception as exc:
+                        raise ClassifiedError(
+                            f"Modal sandbox did not become ready: {exc}",
+                            code="container_start_failed",
+                            source="user",
+                        ) from exc
+            except TimeoutError:
+                raise ClassifiedError(
+                    f"Modal sandbox startup timed out after {ready_timeout} seconds",
+                    code="container_start_failed",
+                    source="user",
+                ) from None
+            if plan is not None:
+                watcher = asyncio.create_task(
+                    _restart_exited(sb, sidecars, plan, sidecar_images, vm)
                 )
-                project_directory = str(PurePosixPath(compose_path).parent)
-                with project.stage(
-                    f"{self.port}:{self.port}",
-                    port_service=port_service,
-                    seccomp="/hud/docker-seccomp.json",
-                    docker=bool(project.service_access),
-                    env_vars=self.env_vars,
-                    cpu=resources.cpu if resources is not None else None,
-                    memory_mb=resources.memory_mb if resources is not None else None,
-                    gpu_count=(
-                        resources.gpu.count
-                        if resources is not None and resources.gpu is not None
-                        else None
-                    ),
-                    archive=True,
-                ) as files:
-                    assert files.archive is not None
-                    await sb.filesystem.copy_from_local.aio(files.archive, "/hud/project.tar.gz")
-                    await sb.filesystem.copy_from_local.aio(files.override, "/hud/override.json")
-                    await sb.filesystem.copy_from_local.aio(files.ports, "/hud/ports.yaml")
-                    await sb.filesystem.copy_from_local.aio(
-                        SECCOMP_PROFILE, "/hud/docker-seccomp.json"
-                    )
-                compose_command = (
-                    f"docker compose --project-directory {shlex.quote(project_directory)} "
-                    f"--file {shlex.quote(compose_path)} "
-                    "--file /hud/override.json --file /hud/ports.yaml"
-                )
-                assert compose_config is not None
-                awaited = compose_config.healthchecked_services()
-                command = (
-                    "mkdir -p /hud/project /runtime && "
-                    "tar -xzf /hud/project.tar.gz -C /hud/project && "
-                    "until docker info >/dev/null 2>&1; do sleep 1; done && "
-                    f"{compose_command} up --detach --build --remove-orphans"
-                ) + (
-                    f" && {compose_command} up --wait --no-deps --no-recreate --no-build "
-                    f"{shlex.join(awaited)}"
-                    if awaited
-                    else ""
-                )
-                try:
-                    async with asyncio.timeout(ready_timeout):
-                        process = await sb.exec.aio("sh", "-c", command, timeout=ready_timeout)
-                        returncode = await process.wait.aio()
-                except TimeoutError:
-                    raise TimeoutError(
-                        f"Modal Compose startup timed out after {ready_timeout} seconds"
-                    ) from None
-                if returncode != 0:
-                    error = (await process.stderr.read.aio()).strip()
-                    raise RuntimeError(f"Modal Compose startup failed: {error}")
-                logs = await sb.exec.aio(
-                    "docker",
-                    "compose",
-                    "--project-directory",
-                    project_directory,
-                    "--file",
-                    compose_path,
-                    "--file",
-                    "/hud/override.json",
-                    "--file",
-                    "/hud/ports.yaml",
-                    "logs",
-                    "--follow",
-                    "--no-color",
-                )
-                output_tasks = (
-                    asyncio.create_task(stream_output(logs.stdout, sys.stdout)),
-                    asyncio.create_task(stream_output(logs.stderr, sys.stderr)),
-                )
-            host, port = (await sb.tunnels.aio())[self.port].tcp_socket
+            server = await asyncio.start_server(
+                lambda reader, writer: _forward(sb, reader, writer), "127.0.0.1", 0
+            )
+            port = server.sockets[0].getsockname()[1]
             yield ModalEndpoint(
-                url=f"tcp://{host}:{port}",
+                url=f"tcp://127.0.0.1:{port}",
                 params={
                     "provider": "modal",
                     "instance_id": sb.object_id,
-                    **({"ready_timeout": ready_timeout} if compose is not None else {}),
+                    "ready_timeout": ready_timeout,
                 },
                 config=config if config.model_dump(exclude_none=True) else None,
                 sandbox=sb,
-                compose=compose_path,
+                sidecars=sidecars,
+                watcher=watcher,
+                vm=vm,
             )
         finally:
+            if watcher is not None:
+                watcher.cancel()
+                await asyncio.gather(watcher, return_exceptions=True)
+                if not watcher.cancelled() and (failure := watcher.exception()) is not None:
+                    # A dead watcher left the sidecars' restart policies unapplied.
+                    failing = sys.exc_info()[1]
+                    if failing is None:
+                        raise RuntimeError("the sidecar watcher stopped") from failure
+                    failing.add_note(f"the sidecar watcher stopped: {failure}")
+            if server is not None:
+                server.close()
+                await server.wait_closed()
             # Best-effort teardown: never shadow the run's own error.
-            if compose_path is not None:
-                with contextlib.suppress(Exception):
-                    process = await sb.exec.aio(
-                        "docker",
-                        "compose",
-                        "--project-directory",
-                        str(PurePosixPath(compose_path).parent),
-                        "--file",
-                        compose_path,
-                        "--file",
-                        "/hud/override.json",
-                        "--file",
-                        "/hud/ports.yaml",
-                        "down",
-                        "--volumes",
-                        "--remove-orphans",
-                        timeout=30,
-                    )
-                    await process.wait.aio()
             with contextlib.suppress(Exception):
                 await sb.terminate.aio()
             await finish_output(*output_tasks)
+
+
+async def _create_sidecar(
+    sb: modal.Sandbox, service: _Service, image: modal.Image, *, vm: bool
+) -> SidecarContainer:
+    return await sb._experimental_sidecars.create.aio(  # noqa: SLF001 - no public sidecar API
+        *service.argv,
+        name=service.name,
+        image=image,
+        env=service.environment or None,
+        workdir=service.workdir,
+        experimental_memory_reserve_consume_mib=service.memory_mib if vm else None,
+    )
+
+
+async def _start_services(
+    sb: modal.Sandbox,
+    sidecars: dict[str, SidecarContainer],
+    plan: _Plan,
+    images: Mapping[str, modal.Image],
+    docker_image: modal.Image | None,
+    vm: bool,
+    *,
+    release_main: bool,
+) -> None:
+    """Start the daemon, then every service once what it depends on is up.
+
+    ``main`` is released at its turn when it was held back. Like ``docker compose up
+    --wait``, it then waits for every healthchecked service.
+    """
+    healthy: set[str] = set()
+
+    def handle(name: str) -> modal.Sandbox | SidecarContainer:
+        return sb if name == "main" else sidecars[name]
+
+    async def satisfied(dependency: str, condition: str) -> None:
+        if condition == "service_healthy":
+            check = plan.service(dependency).healthcheck
+            assert check is not None
+            await _healthy(handle(dependency), dependency, check)
+            healthy.add(dependency)
+        elif condition == "service_completed_successfully":
+            sidecar = sidecars[dependency]
+            await sidecar.wait.aio(raise_on_termination=False)
+            code = await sidecar.poll.aio()
+            if code != 0:
+                raise RuntimeError(f"Compose service {dependency!r} exited with code {code}")
+
+    if docker_image is not None:
+        daemon = await sb._experimental_sidecars.create.aio(  # noqa: SLF001 - no public sidecar API
+            name=DOCKER_DAEMON_SERVICE,
+            image=docker_image,
+            env={"DOCKER_TLS_CERTDIR": ""},
+            experimental_memory_reserve_consume_mib=_DOCKER_DAEMON_MEMORY_MIB,
+        )
+        sidecars[DOCKER_DAEMON_SERVICE] = daemon
+        await _healthy(
+            daemon,
+            DOCKER_DAEMON_SERVICE,
+            ComposeHealthcheck(
+                test=["CMD", "docker", "-H", f"tcp://127.0.0.1:{DOCKER_DAEMON_PORT}", "info"],
+                interval="2s",
+                timeout="5s",
+                retries=30,
+            ),
+        )
+    for name in plan.order:
+        service = plan.service(name)
+        for dependency, condition in service.dependencies.items():
+            await satisfied(dependency, condition)
+        if name != "main":
+            sidecars[name] = await _create_sidecar(sb, service, images[name], vm=vm)
+        elif release_main:
+            process = await sb.exec.aio("touch", _START_FILE)
+            await process.wait.aio()
+    for name in plan.order:
+        check = plan.service(name).healthcheck
+        if check is not None and name not in healthy:
+            await _healthy(handle(name), name, check)
+
+
+async def _restart_exited(
+    sb: modal.Sandbox,
+    sidecars: dict[str, SidecarContainer],
+    plan: _Plan,
+    images: Mapping[str, modal.Image],
+    vm: bool,
+) -> None:
+    """Apply each sidecar's ``restart`` policy, as the Compose runtime would."""
+    failures: dict[str, int] = {}
+    while True:
+        await asyncio.sleep(_RESTART_POLL_SECONDS)
+        for service in plan.sidecars:
+            code = await sidecars[service.name].poll.aio()
+            if code is None:
+                continue
+            policy, _, limit = service.restart.partition(":")
+            if policy == "no" or (policy == "on-failure" and code == 0):
+                continue
+            failures[service.name] = failures.get(service.name, 0) + 1
+            if policy == "on-failure" and limit and failures[service.name] > int(limit):
+                logger.warning(
+                    "Compose service %r exited with code %s; its restart limit %s is reached",
+                    service.name,
+                    code,
+                    limit,
+                )
+                continue
+            logger.warning("Compose service %r exited with code %s; restarting", service.name, code)
+            sidecars[service.name] = await _create_sidecar(sb, service, images[service.name], vm=vm)
+
+
+async def _healthy(
+    handle: modal.Sandbox | SidecarContainer, name: str, check: ComposeHealthcheck
+) -> None:
+    """Return once ``check`` passes in the container.
+
+    Raises once it has failed ``retries`` times in a row after ``start_period``.
+    """
+    argv = _healthcheck_argv(check)
+    retries = check.retries if check.retries is not None else 3
+    loop = asyncio.get_running_loop()
+    grace_until = loop.time() + check.start_period_sec
+    failures = 0
+    while True:
+        try:
+            async with asyncio.timeout(check.timeout_sec):
+                process = await handle.exec.aio(*argv, timeout=math.ceil(check.timeout_sec))
+                code = await process.wait.aio()
+        except TimeoutError:
+            code = None
+        if code == 0:
+            return
+        if loop.time() >= grace_until:
+            failures += 1
+            if failures >= retries:
+                raise RuntimeError(
+                    f"Compose service {name!r} is unhealthy: "
+                    + ("its healthcheck timed out" if code is None else f"exit code {code}")
+                )
+        await asyncio.sleep(
+            check.start_interval_sec if loop.time() < grace_until else check.interval_sec
+        )
+
+
+async def _forward(
+    sb: modal.Sandbox, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    """Carry one local control connection to the sandbox over a fresh connect token."""
+    try:
+        credentials = await sb.create_connect_token.aio(port=_BRIDGE_PORT)
+        parts = urlsplit(credentials.url)
+        url = urlunsplit(
+            ("wss", parts.netloc, "/", f"_modal_connect_token={credentials.token}", "")
+        )
+        async with websockets.connect(url, max_size=None) as websocket:
+            await splice_websocket(reader, writer, websocket)
+    except Exception as exc:
+        # The local client retries until the environment answers; a sandbox
+        # that is gone fails the rollout with the sandbox's own reason.
+        logger.warning("modal control connection failed: %s", exc)
+    finally:
+        if not writer.is_closing():
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()

@@ -547,15 +547,10 @@ def adapt(
         peer_services: set[str] = set()
         completed_services: set[str] = set()
         for service in compose.services.values():
-            depends_on = (service.model_extra or {}).get("depends_on")
-            if not isinstance(depends_on, dict):
-                continue
             completed_services.update(
                 name
-                for name, dependency in depends_on.items()
-                if isinstance(name, str)
-                and isinstance(dependency, dict)
-                and dependency.get("condition") == "service_completed_successfully"
+                for name, dependency in service.depends_on.items()
+                if dependency.condition == "service_completed_successfully"
             )
         for service_name, service in compose.services.items():
             if service_name == "main" or service_name in completed_services:
@@ -709,15 +704,13 @@ def adapt(
             str(DEFAULT_PORT),
         ]
         for service_name, service in compose_project.services.items():
-            depends_on = (service.model_extra or {}).get("depends_on")
-            if service_name == "main" or not isinstance(depends_on, dict):
-                continue
-            main_dependency = depends_on.get("main")
+            main_dependency = service.depends_on.get("main")
             if (
-                isinstance(main_dependency, dict)
-                and main_dependency.get("condition") == "service_healthy"
+                service_name != "main"
+                and main_dependency is not None
+                and main_dependency.condition == "service_healthy"
             ):
-                main_dependency["condition"] = "service_started"
+                main_dependency.condition = "service_started"
         source_environment = source.path / "environment"
         project_environment = project / "environment"
         if source_environment.is_dir():

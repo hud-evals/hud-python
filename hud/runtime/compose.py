@@ -12,7 +12,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from dotenv import dotenv_values
@@ -169,7 +169,21 @@ def _interpolate_compose_node(
         )
 
 
+_DURATION = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)")
+_DURATION_UNITS = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
+
+
+def duration_seconds(text: str) -> float:
+    """A Compose duration (``1m30s``, ``500ms``) in seconds."""
+    parts = _DURATION.findall(text)
+    if not parts or "".join(number + unit for number, unit in parts) != text:
+        raise ValueError(f"invalid Compose duration {text!r}")
+    return sum(float(number) * _DURATION_UNITS[unit] for number, unit in parts)
+
+
 class ComposeHealthcheck(BaseModel):
+    """A service's healthcheck; the ``_sec`` properties apply Compose's defaults."""
+
     model_config = ConfigDict(extra="allow")
 
     disable: bool | None = None
@@ -179,6 +193,36 @@ class ComposeHealthcheck(BaseModel):
     start_period: str | None = None
     start_interval: str | None = None
     retries: int | None = None
+
+    @property
+    def disabled(self) -> bool:
+        return bool(self.disable) or self.test in (None, ["NONE"])
+
+    @property
+    def interval_sec(self) -> float:
+        return duration_seconds(self.interval) if self.interval is not None else 30.0
+
+    @property
+    def timeout_sec(self) -> float:
+        return duration_seconds(self.timeout) if self.timeout is not None else 30.0
+
+    @property
+    def start_period_sec(self) -> float:
+        return duration_seconds(self.start_period) if self.start_period is not None else 0.0
+
+    @property
+    def start_interval_sec(self) -> float:
+        return duration_seconds(self.start_interval) if self.start_interval is not None else 5.0
+
+
+class ComposeDependency(BaseModel):
+    """One ``depends_on`` entry: the condition the dependent service's start waits for."""
+
+    model_config = ConfigDict(extra="allow")
+
+    condition: Literal["service_started", "service_healthy", "service_completed_successfully"] = (
+        "service_started"
+    )
 
 
 class ComposePort(BaseModel):
@@ -205,6 +249,15 @@ class ComposeService(BaseModel):
     expose: list[str] = Field(default_factory=list)
     ports: list[ComposePort] = Field(default_factory=list)
     volumes: list[str | dict[str, Any]] = Field(default_factory=list)
+    depends_on: dict[str, ComposeDependency] = Field(default_factory=dict)
+    restart: str | None = Field(
+        default=None, pattern=r"^(no|always|unless-stopped|on-failure(:\d+)?)$"
+    )
+
+    @field_validator("depends_on", mode="before")
+    @classmethod
+    def normalize_depends_on(cls, value: Any) -> Any:
+        return {name: {} for name in value} if isinstance(value, list) else value
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -320,20 +373,24 @@ class ComposeConfig(BaseModel):
                 return current
             current = mode.removeprefix("service:")
 
-    def healthchecked_services(self) -> list[str]:
-        """Services startup waits on: started by default and declaring a live healthcheck.
+    def started_services(self) -> dict[str, ComposeService]:
+        """The services ``up`` starts by default: those without a profile or a zero scale."""
+        return {
+            name: service
+            for name, service in self.services.items()
+            if not (service.model_extra or {}).get("profiles")
+            and (service.model_extra or {}).get("scale") != 0
+        }
 
-        Naming a profiled or zero-scale service in ``up`` would start it, and
+    def healthchecked_services(self) -> list[str]:
+        """Started services declaring a live healthcheck, which startup waits on.
+
         ``up --wait`` fails on a service that exits, so only these are awaited.
         """
         return [
             name
-            for name, service in self.services.items()
-            if service.healthcheck is not None
-            and service.healthcheck.disable is not True
-            and service.healthcheck.test != ["NONE"]
-            and not (service.model_extra or {}).get("profiles")
-            and (service.model_extra or {}).get("scale") != 0
+            for name, service in self.started_services().items()
+            if service.healthcheck is not None and not service.healthcheck.disabled
         ]
 
     @classmethod

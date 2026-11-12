@@ -6,7 +6,6 @@ task row's ``task`` argument as a ``TaskSpec``; ``env.py`` reads both back.
 
 from __future__ import annotations
 
-import re
 import shlex
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -74,7 +73,7 @@ class HealthcheckConfig(BaseModel):
 
     @classmethod
     def from_compose(cls, value: ComposeHealthcheck) -> HealthcheckConfig | None:
-        if value.disable or value.test in (None, ["NONE"]):
+        if value.disabled:
             return None
         test = value.test
         assert test
@@ -84,30 +83,12 @@ class HealthcheckConfig(BaseModel):
             command = str(test[1])
         else:
             raise ValueError("Compose main healthcheck test must be CMD or CMD-SHELL")
-
-        def seconds(raw: str | None, default: float) -> float:
-            if raw is None:
-                return default
-            units = {
-                "ns": 1e-9,
-                "us": 1e-6,
-                "µs": 1e-6,
-                "ms": 1e-3,
-                "s": 1,
-                "m": 60,
-                "h": 3600,
-            }
-            parts = re.findall(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)", str(raw))
-            if not parts or "".join(number + unit for number, unit in parts) != raw:
-                raise ValueError(f"invalid Compose healthcheck duration {raw!r}")
-            return sum(float(number) * units[unit] for number, unit in parts)
-
         return cls(
             command=command,
-            interval_sec=seconds(value.interval, 30.0),
-            timeout_sec=seconds(value.timeout, 30.0),
-            start_period_sec=seconds(value.start_period, 0.0),
-            start_interval_sec=seconds(value.start_interval, 5.0),
+            interval_sec=value.interval_sec,
+            timeout_sec=value.timeout_sec,
+            start_period_sec=value.start_period_sec,
+            start_interval_sec=value.start_interval_sec,
             retries=value.retries if value.retries is not None else 3,
         )
 

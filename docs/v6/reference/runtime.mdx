@@ -183,7 +183,7 @@ daemon, and the security override are documented in
 ### `ModalRuntime`
 
 ```python
-ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=None, workdir=None, port=8765, runtime_config=None, env_vars=None, sandbox_secrets=None, registry_secret=None)
+ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=None, workdir=None, port=8765, runtime_config=None, env_vars=None, sandbox_secrets=None, registry_secret=None, region=None, tags=None, volumes=None)
 ```
 
 - **`image_name`** - published Modal image name (the preferred durable handle), e.g. `ModalRuntime("hud-libero-env")`.
@@ -193,8 +193,11 @@ ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=No
 - **`app`** - an already-running, caller-owned Modal app. `ModalRuntime` does not manage its lifecycle.
 - **`app_name`** - a Modal app to look up. Defaults to `hud-envs` when `app` is not supplied; `app` and `app_name` are mutually exclusive.
 - **`port`** / **`env_vars`** - in-sandbox serving port and extra environment variables.
-- **`sandbox_secrets`** - Modal `Secret` objects to attach to the sandbox. Resolve named secrets with `modal.Secret.from_name(...)`; their values never pass through the local process. Sandbox secrets require an image runtime and are rejected for Docker-in-Docker Compose because attaching them to the outer sandbox would not expose them to `main`.
-- **`registry_secret`** - optional Modal `Secret` for pulling a private registry image (`REGISTRY_USERNAME` / `REGISTRY_PASSWORD`). Unused for `modal://` images and Compose.
+- **`sandbox_secrets`** - Modal `Secret` objects to attach to the environment's container. Resolve named secrets with `modal.Secret.from_name(...)`; their values never pass through the local process.
+- **`registry_secret`** - optional Modal `Secret` for pulling private registry images (`REGISTRY_USERNAME` / `REGISTRY_PASSWORD`), for the environment and for Compose services. Unused for `modal://` images.
+- **`region`** - the Modal region every sandbox runs in. Defaults to `MODAL_REGION`, so a caller that itself runs on Modal keeps its environments beside it; unset elsewhere, Modal places them.
+- **`tags`** - Modal tags set on every sandbox, for `Sandbox.list(tags=...)`.
+- **`volumes`** - Modal `Volume`s mounted in the environment's container by path, e.g. `{"/agents": modal.Volume.from_name("agent-bundles").read_only()}`.
 
 <Accordion title="Running a private Docker image">
 
@@ -211,13 +214,27 @@ ModalRuntime(
 
 </Accordion>
 
-For Compose input, `ModalRuntime` runs the project in a Docker-in-Docker
-sandbox in your Modal account and merges `env_vars` into `main` at acquisition
-time. GPU requests require a plain or platform-materialized image; Modal Compose
-rejects them because its nested Docker daemon cannot receive the sandbox GPU.
-See [Compose environments](/v6/experimental/compose#runtime-behavior).
+The environment is the sandbox's main container, where a requested GPU attaches. Declared
+`cpu` and `memory_mb` are hard limits: an environment that exceeds its memory ends the sandbox
+with exit code 137, which the run's error reports. The control channel is reached through a
+connect-token WebSocket on the sandbox; a fresh token is minted for every connection.
 
-Requires the `modal` extra and a configured token.
+For Compose input, every service runs in the one sandbox: `main` is its main container and each
+other service a sidecar, reached by service name. The runtime starts every service, `main`
+included, once what it `depends_on` is up, honoring `service_started`, `service_healthy` and
+`service_completed_successfully` by running the declared healthchecks itself; like
+`docker compose up --wait`, every healthchecked service, `main`'s own included, is healthy before
+the environment is handed to the rollout. `restart` policies apply to sidecars. Service images
+must be pre-built: a registry reference or `modal://<image id>`; a service with only a `build` is
+refused, as are `network_mode`, `user`, a service waiting for `main` to complete, a GPU on any
+service but `main`, and a GPU together with `service_access`. With `service_access`, the sandbox
+runs on Modal's VM runtime with a Docker daemon sidecar at `DOCKER_HOST` (reserving 1 GiB); that
+runtime sizes every container, so `resources.memory_mb` and a `mem_limit` on every other service
+are required, it is CPU-only, and it is the one whose root checkpoints are faithful. Sidecar
+output is not streamed; `exec` reaches a sidecar by name. `env_vars` and `sandbox_secrets`
+apply to `main`.
+
+Requires the `modal` extra (pinned to one Modal client release) and a configured token.
 
 ### `DaytonaRuntime`
 

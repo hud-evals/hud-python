@@ -36,11 +36,14 @@ from hud.runtime import (
     RootScope,
     Runtime,
     RuntimeConfig,
+    RuntimeGPU,
+    RuntimeResources,
     RuntimeUnsupportedError,
     Shared,
     SubprocessRuntime,
     WorkspaceScope,
 )
+from hud.runtime.modal import ModalEndpoint
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
@@ -137,28 +140,32 @@ async def placed(
             labelled = ["--label", f"hud-test={label}"]
             yield DockerRuntime(image, run_args=labelled, runtime_config=limits), removed
         case "ModalRuntime":
-            import modal
-
             request.getfixturevalue("modal_account")
             image = request.getfixturevalue("modal_image")(fixture)
             limits = RuntimeConfig.model_validate({"limits": {"startup_timeout_s": startup}})
-            inner = ModalRuntime(image=image, workdir="/hud", runtime_config=limits)
-            sandboxes = []
+            yield modal_placement(ModalRuntime(image=image, workdir="/hud", runtime_config=limits))
 
-            @asynccontextmanager
-            async def recorded(task: Task) -> AsyncGenerator[Runtime]:
-                async with inner(task) as placed_runtime:
-                    sandboxes.append(placed_runtime.params["instance_id"])
-                    yield placed_runtime
 
-            async def terminated() -> bool:
-                for instance in sandboxes:
-                    sandbox = await modal.Sandbox.from_id.aio(instance)
-                    if await sandbox.poll.aio() is None:
-                        return False
-                return True
+def modal_placement(inner: ModalRuntime) -> tuple[Provider, Callable[[], Awaitable[bool]]]:
+    """``inner`` recording every sandbox it places, and whether all of them have exited."""
+    import modal
 
-            yield recorded, terminated
+    sandboxes = []
+
+    @asynccontextmanager
+    async def recorded(task: Task) -> AsyncGenerator[Runtime]:
+        async with inner(task) as placed_runtime:
+            sandboxes.append(placed_runtime.params["instance_id"])
+            yield placed_runtime
+
+    async def terminated() -> bool:
+        for instance in sandboxes:
+            sandbox = await modal.Sandbox.from_id.aio(instance)
+            if await sandbox.poll.aio() is None:
+                return False
+        return True
+
+    return recorded, terminated
 
 
 # Over a WebSocket's default 1 MiB message limit, and under the 16 MiB frame limit.
@@ -212,6 +219,9 @@ async def test_an_env_that_cannot_serve_fails_the_run_before_the_prompt_and_is_c
     assert (trace.status, trace.prompt_text, job.errors) == ("error", None, [trace])
     assert trace.error is not None
     assert trace.error.startswith(("[provisioning] ", "[starting task] "))
+    # A provider that starts a box of its own names the failure; the others cannot.
+    classified = ("container_start_failed", "user") if runtime in BOXED_NAMES else (None, None)
+    assert (trace.error_code, trace.error_source) == classified
 
 
 @pytest.mark.parametrize("runtime", EVERY_RUNTIME)
@@ -376,7 +386,7 @@ async def test_a_root_checkpoint_boots_a_new_box_with_the_files(
     assert graded.reward == 1.0
 
 
-@pytest.mark.parametrize("runtime", [CONTAINER])
+@pytest.mark.parametrize("runtime", BOXED)
 async def test_a_box_past_its_memory_limit_dies_and_the_run_names_the_reason(
     runtime: str, request: pytest.FixtureRequest
 ) -> None:
@@ -420,11 +430,14 @@ async def placed_compose(
                 return listed.split() == []
 
             yield DockerRuntime(runtime_config=limits), removed
+        case "ModalRuntime":
+            request.getfixturevalue("modal_account")
+            yield modal_placement(ModalRuntime(workdir="/hud", runtime_config=limits))
         case _:
             raise AssertionError(runtime)
 
 
-def compose_row(
+async def compose_row(
     runtime: str, request: pytest.FixtureRequest, services: str, *, docker: bool = False
 ) -> Task:
     """A ``box`` task whose environment is a Compose project of ``main`` and ``services``.
@@ -434,12 +447,24 @@ def compose_row(
     match runtime:
         case "DockerRuntime":
             main = request.getfixturevalue("fixture_image")("box")
+            source = "/hud/box.py"
+        case "ModalRuntime":
+            import modal
+
+            request.getfixturevalue("modal_account")
+            image = request.getfixturevalue("modal_image")("box")
+            await image.build.aio(
+                app=await modal.App.lookup.aio("hud-envs", create_if_missing=True)
+            )
+            main = f"modal://{image.object_id}"
+            source = "/hud/env.py"
         case _:
             raise AssertionError(runtime)
     path = request.getfixturevalue("tmp_path") / "compose.yaml"
     path.write_text(
         "services:\n"
         f"  main:\n    image: {main}\n"
+        f"    command: hud serve {source} --host 0.0.0.0 --port 8765\n"
         + "\n".join("  " + line for line in textwrap.dedent(services).strip("\n").splitlines())
         + "\n"
     )
@@ -448,22 +473,46 @@ def compose_row(
         id="write",
         args={"path": "/work/a.txt", "text": "composed"},
         runtime_config=RuntimeConfig(
-            compose=ComposeProject(document=path, service_access=docker or None)
+            compose=ComposeProject(document=path, service_access=docker or None),
+            resources=RuntimeResources(memory_mb=1024) if docker else None,
         ),
     )
 
 
-@pytest.mark.parametrize("runtime", [CONTAINER])
+@pytest.mark.parametrize("runtime", BOXED)
 async def test_sibling_services_are_reached_by_exec_and_collect(
     runtime: str, request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:
-    row = compose_row(
+    """``main`` starts once ``side`` is healthy, ``after`` once ``main`` is, and every
+    service is reachable by name."""
+    row = await compose_row(
         runtime,
         request,
         """
+          depends_on:
+            side:
+              condition: service_healthy
+          healthcheck:
+            test:
+              - CMD
+              - python3
+              - -c
+              - import socket; socket.create_connection(('127.0.0.1', 8765))
+            interval: 1s
+            retries: 60
         side:
           image: python:3.12-slim
+          command: sh -c "sleep 1; touch /tmp/ready; sleep infinity"
+          healthcheck:
+            test: ["CMD", "test", "-f", "/tmp/ready"]
+            interval: 1s
+            retries: 30
+        after:
+          image: python:3.12-slim
           command: sleep infinity
+          depends_on:
+            main:
+              condition: service_healthy
         """,
     )
 
@@ -471,6 +520,7 @@ async def test_sibling_services_are_reached_by_exec_and_collect(
         async with provider(row) as box:
             trace = await rollout(row, ScriptedAgent("composed"), runtime=box)
             noted = await box.exec(["sh", "-c", "hostname > /tmp/who; echo noted"], service="side")
+            later = await box.exec(["true"], service="after")
             with pytest.raises(ValueError, match="'nobody'"):
                 await box.exec(["true"], service="nobody")
             (who,) = await box.collect(["/tmp/who"], tmp_path / "side", service="side")
@@ -479,15 +529,46 @@ async def test_sibling_services_are_reached_by_exec_and_collect(
 
     assert trace.reward == 1.0
     assert noted.stdout == "noted\n"
+    assert later.returncode == 0
     assert who.read_text().strip() and who.read_text() != mine.read_text()
     assert mine.read_text() == "composed"
 
 
-@pytest.mark.parametrize("runtime", [CONTAINER])
+@pytest.mark.parametrize("runtime", BOXED)
+async def test_a_project_that_cannot_come_up_fails_the_run_as_a_compose_failure(
+    runtime: str, request: pytest.FixtureRequest
+) -> None:
+    row = await compose_row(
+        runtime,
+        request,
+        """
+          depends_on:
+            side:
+              condition: service_healthy
+        side:
+          image: python:3.12-slim
+          command: sleep infinity
+          healthcheck:
+            test: ["CMD", "false"]
+            interval: 1s
+            retries: 2
+        """,
+    )
+
+    async with placed_compose(runtime, request) as (provider, nothing_left):
+        job = await row.run(ScriptedAgent("composed"), runtime=provider)
+        await eventually(nothing_left)
+
+    (trace,) = job.traces
+    assert trace.status == "error"
+    assert (trace.error_code, trace.error_source) == ("compose_execution_failed", "user")
+
+
+@pytest.mark.parametrize("runtime", BOXED)
 async def test_main_gets_a_docker_daemon_of_its_own(
     runtime: str, request: pytest.FixtureRequest
 ) -> None:
-    row = compose_row(runtime, request, "", docker=True)
+    row = await compose_row(runtime, request, "", docker=True)
     probe = (
         "import json, os, urllib.request\n"
         "base = os.environ['DOCKER_HOST'].replace('tcp://', 'http://')\n"
@@ -496,13 +577,173 @@ async def test_main_gets_a_docker_daemon_of_its_own(
         "print(json.dumps([version['Version'], containers]))\n"
     )
 
+    reader = Task(env="box", id="read", args={"path": "/work/a.txt"})
+
     async with placed_compose(runtime, request) as (provider, nothing_left):
         async with provider(row) as box:
             trace = await rollout(row, ScriptedAgent("composed"), runtime=box)
             seen = await box.exec(["python3", "-c", probe])
+            # A box that hosts a daemon runs where root checkpoints are faithful.
+            async with box.checkpoint(RootScope()) as image:
+                restored = reader.model_copy(
+                    update={"runtime_config": RuntimeConfig(image=image.ref)}
+                )
+                read_job = await restored.run(ScriptedAgent("composed"), runtime=provider)
         await eventually(nothing_left)
 
     assert trace.reward == 1.0
     assert seen.returncode == 0, seen.stderr
     version, containers = json.loads(seen.stdout)
     assert version.startswith("28.") and containers == []
+    (graded,) = read_job.traces
+    assert graded.reward == 1.0
+
+
+@pytest.mark.parametrize("runtime", [MODAL])
+async def test_a_gpu_request_attaches_a_gpu_to_the_environment(
+    runtime: str, request: pytest.FixtureRequest
+) -> None:
+    """The Docker lane has no GPU; Docker's ``--gpus`` is the host's own capability."""
+    row = Task(
+        env="box",
+        id="write",
+        args={"path": "/work/a.txt", "text": "accelerated"},
+        runtime_config=RuntimeConfig.model_validate({"resources": {"gpu": {"type": "T4"}}}),
+    )
+
+    async with placed(runtime, "box", request) as (provider, nothing_left):
+        async with provider(row) as box:
+            trace = await rollout(row, ScriptedAgent("accelerated"), runtime=box)
+            listed = await box.exec(["nvidia-smi", "-L"])
+        await eventually(nothing_left)
+
+    assert trace.reward == 1.0
+    assert "T4" in listed.stdout, listed.stderr
+
+
+@pytest.mark.parametrize("runtime", [MODAL])
+async def test_a_sidecar_with_a_restart_policy_is_restarted(
+    runtime: str, request: pytest.FixtureRequest
+) -> None:
+    row = await compose_row(
+        runtime,
+        request,
+        """
+        side:
+          image: python:3.12-slim
+          command: sh -c "sleep 3; exit 1"
+          restart: always
+        """,
+    )
+
+    async with placed_compose(runtime, request) as (provider, nothing_left):
+        async with provider(row) as box:
+            assert isinstance(box, ModalEndpoint)
+            first = box.sidecars["side"].object_id
+
+            async def replaced() -> bool:
+                return box.sidecars["side"].object_id != first
+
+            await eventually(replaced, within=30)
+            alive = await box.exec(["true"], service="side")
+        await eventually(nothing_left)
+
+    assert alive.returncode == 0
+
+
+@pytest.mark.parametrize(
+    ("services", "docker", "gpu", "memory", "reason"),
+    [
+        pytest.param(
+            """
+            worker:
+              image: python:3.12-slim
+              deploy:
+                resources:
+                  reservations:
+                    devices: [{capabilities: [gpu]}]
+            """,
+            False,
+            False,
+            None,
+            "sidecars are CPU-only",
+            id="a-gpu-on-a-sidecar",
+        ),
+        pytest.param("", True, True, 1024, "has no GPUs", id="a-gpu-beside-a-docker-daemon"),
+        pytest.param(
+            "", True, False, None, "needs resources.memory_mb", id="a-docker-daemon-unsized"
+        ),
+        pytest.param(
+            """
+            worker:
+              image: python:3.12-slim
+            """,
+            True,
+            False,
+            1024,
+            "needs mem_limit on Compose service 'worker'",
+            id="a-sidecar-unsized-beside-a-docker-daemon",
+        ),
+        pytest.param(
+            """
+            worker:
+              build: ./worker
+            """,
+            False,
+            False,
+            None,
+            "pre-built images only",
+            id="a-service-to-build",
+        ),
+        pytest.param(
+            """
+            worker:
+              image: python:3.12-slim
+              network_mode: service:main
+            """,
+            False,
+            False,
+            None,
+            "network_mode",
+            id="a-shared-network-namespace",
+        ),
+        pytest.param(
+            """
+            worker:
+              image: python:3.12-slim
+              depends_on:
+                main:
+                  condition: service_completed_successfully
+            """,
+            False,
+            False,
+            None,
+            "serves for the whole rollout",
+            id="a-wait-for-main-to-complete",
+        ),
+    ],
+)
+async def test_modal_refuses_at_launch_what_a_sandbox_cannot_do(
+    services: str, docker: bool, gpu: bool, memory: int | None, reason: str, tmp_path: Path
+) -> None:
+    pytest.importorskip("modal")
+    path = tmp_path / "compose.yaml"
+    path.write_text(
+        "services:\n  main:\n    image: python:3.12-slim\n"
+        + "\n".join("  " + line for line in textwrap.dedent(services).strip("\n").splitlines())
+        + "\n"
+    )
+    row = Task(
+        env="box",
+        id="write",
+        runtime_config=RuntimeConfig(
+            compose=ComposeProject(document=path, service_access=docker or None),
+            resources=RuntimeResources(
+                gpu=RuntimeGPU(type="T4") if gpu else None, memory_mb=memory
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match=reason):
+        async with ModalRuntime()(row):
+            pytest.fail("the sandbox should not launch")
