@@ -43,8 +43,6 @@ class FakeBrowser:
 
     pages: list[str] = field(default_factory=lambda: ["page-1"])
     replies: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # Whether ``PUT /json/new`` creates a page; otherwise it answers ``{}``.
-    can_create: bool = True
     http: list[str] = field(default_factory=list)
     commands: list[Command] = field(default_factory=list)
     port: int = 0
@@ -67,8 +65,6 @@ class FakeBrowser:
 
     async def new_page(self, request: Request) -> JSONResponse:
         self.http.append(f"{request.method} {request.url.path}?{request.url.query}")
-        if not self.can_create:
-            return JSONResponse({})
         page = f"new-{len(self.pages) + 1}"
         self.pages.append(page)
         return JSONResponse(self.target(page))
@@ -95,13 +91,11 @@ async def fake_browser(
     *,
     pages: list[str] | None = None,
     replies: dict[str, dict[str, Any]] | None = None,
-    can_create: bool = True,
 ) -> AsyncGenerator[FakeBrowser]:
     """Serve a ``FakeBrowser`` on a loopback port for the duration of the block."""
     browser = FakeBrowser(
         pages=["page-1"] if pages is None else list(pages),
         replies=replies or {},
-        can_create=can_create,
     )
     app = Starlette(
         routes=[

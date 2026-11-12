@@ -101,7 +101,7 @@ async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: 
         completion_kwargs={"max_tokens": 1024, "extra_body": {"return_token_ids": True}},
     )
     trainer = TrainingClient(model)
-    # The deployed TASKSET (see common.py) on HUD boxes, or the bundled local env.
+    # The deployed TASKSET (see common.py) against HUD-hosted envs, or the bundled local env.
     taskset, runtime = load_taskset_and_runtime()
 
     session = await Job.start("arith-rl-ppo", group=group)

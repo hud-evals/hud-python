@@ -1,39 +1,20 @@
-# Python
 __pycache__/
 *.py[cod]
 *.so
 .pytest_cache/
 .venv/
 *.egg-info/
-
-# Environment variables / secrets
 .env
 .env.*
 !.env.example
-
-# HUD generated files
 .hud/
-hud.lock.yaml
-remote_tasks.json
-
-# Ruff cache
 .ruff_cache/
-
-# Log files
 *.log
-
-# Editor directories
 .vscode/
 .idea/
 *.sw?
 .claude/
-
-# OS generated files
 .DS_Store
-
-# Build artifacts
 /build/
 /dist/
-
-# Database
 *.sqlite

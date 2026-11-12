@@ -328,9 +328,9 @@ def serving(handler: type[BaseHTTPRequestHandler]) -> Generator[int]:
 
 
 @contextmanager
-def raw_upstream(answer: bytes, listener: socket.socket | None = None) -> Generator[int]:
+def raw_upstream(answer: bytes) -> Generator[int]:
     """A server that reads one request to its blank line and answers ``answer``."""
-    server = listener or socket.create_server(("127.0.0.1", 0))
+    server = socket.create_server(("127.0.0.1", 0))
     server.settimeout(5)
 
     def serve() -> None:
@@ -343,7 +343,7 @@ def raw_upstream(answer: bytes, listener: socket.socket | None = None) -> Genera
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
     try:
-        yield server.getsockname()[1] if server.family == socket.AF_INET else 0
+        yield server.getsockname()[1]
     finally:
         thread.join(5)
 

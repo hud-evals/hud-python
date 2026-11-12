@@ -1,7 +1,7 @@
 """``SSHClient`` against a real ``env.workspace`` served on loopback.
 
 Most tests connect to the workspace's ``ssh`` binding through
-``relayed`` (``tests/clients/conftest.py``), which can sever the connection
+``relayed`` (``tests/capabilities/conftest.py``), which can sever the connection
 mid-command, refuse reconnects, or stall a handshake.
 """
 
@@ -19,7 +19,8 @@ from hud import Environment, Task
 from hud.capabilities import SSHClient
 from hud.clients import connect
 from hud.runtime import LocalRuntime, Runtime
-from tests.clients.conftest import Action, control_peer, relayed
+from tests.capabilities.conftest import relayed
+from tests.clients.conftest import Action, control_peer
 from tests.conftest import eventually
 from tests.fixtures.relay import FlakyRelay, relay
 

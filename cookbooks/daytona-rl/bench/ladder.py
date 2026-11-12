@@ -1,8 +1,8 @@
 """Concurrency ladder for Daytona sandboxes: N in {1, 8, 32, 128}.
 
-    uv run ladder.py                      # infra mode, no LLM spend
-    uv run ladder.py --mode rollout       # real Claude rollouts (costs tokens)
-    uv run ladder.py --levels 1,8         # override the ladder
+    PYTHONPATH=. uv run bench/ladder.py                 # infra mode, no LLM spend
+    PYTHONPATH=. uv run bench/ladder.py --mode rollout  # real Claude rollouts (costs tokens)
+    PYTHONPATH=. uv run bench/ladder.py --levels 1,8    # override the ladder
 
 Infra mode measures how sandbox spin-up and the one-SSH-connection-per-sandbox
 transport behave under fan-out. Each worker acquires a sandbox, opens a fresh

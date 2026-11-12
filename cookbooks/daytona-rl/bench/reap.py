@@ -1,8 +1,8 @@
 """Delete leftover Daytona sandboxes and stale snapshots.
 
-    uv run reap.py                        # list what would be deleted
-    uv run reap.py --delete               # delete stranded sandboxes
-    uv run reap.py --snapshots --delete   # also delete snapshots except the current hash
+    PYTHONPATH=. uv run bench/reap.py                       # list what would be deleted
+    PYTHONPATH=. uv run bench/reap.py --delete              # delete stranded sandboxes
+    PYTHONPATH=. uv run bench/reap.py --snapshots --delete  # also delete snapshots except the current hash
 
 Sandboxes: DaytonaRuntime sets ``auto_stop_interval=0`` (never auto-stop) and
 deletes each sandbox on exit. A killed client or a failed delete leaves it running

@@ -15,10 +15,6 @@ from pathlib import Path
 import pytest
 from hud.environment import Workspace
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 SANDBOXED = (
     sys.platform == "linux"
     and os.geteuid() == 0

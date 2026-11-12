@@ -419,4 +419,5 @@ async def test_a_tick_limit_must_be_a_positive_integer(max_ticks: float) -> None
     _, trace = await drive(Arm(REACH, done=reached), DirectControl(), look(), max_ticks=max_ticks)
 
     assert trace.status == "error"
-    assert "max_ticks must be a positive integer" in (trace.error or "")
+    assert trace.error is not None
+    assert "max_ticks must be a positive integer" in trace.error

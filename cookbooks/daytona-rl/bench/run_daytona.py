@@ -1,6 +1,6 @@
 """One rollout of the smoke task on a Daytona sandbox, with timings.
 
-    uv run run_daytona.py
+    PYTHONPATH=. uv run bench/run_daytona.py
 
 Separates the two costs the guide needs to quote: sandbox spin-up (snapshot
 resolve + create + serve + ssh forward) and agent time.

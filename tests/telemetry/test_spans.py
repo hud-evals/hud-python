@@ -6,7 +6,6 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -17,12 +16,14 @@ from hud.agents.types import OpenAIChatConfig
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime
 from hud.telemetry import flush
-from tests.conftest import spans
+from tests.conftest import ROOT, spans
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.models import Turn, call
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from hud import Trace
     from tests.conftest import HudEnv
     from tests.fixtures.models import Models
@@ -75,9 +76,6 @@ async def test_spans_are_written_where_the_configuration_says(
     assert written == {name: name == written_to for name in directories}
     assert flush(timeout=10)
     assert bool(reporting.requests("telemetry", "POST", UPLOAD)) is uploaded
-
-
-ROOT = Path(__file__).parents[2]
 
 
 def upload_env() -> Environment:

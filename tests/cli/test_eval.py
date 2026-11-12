@@ -188,11 +188,7 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     signed_in.route("api", "GET", "/v2/models", json={"items": [GLM], "total": 1})
     (hud.cwd / ".hud_eval.toml").write_text(config)
     # Provider SDKs read their own ``*_BASE_URL``; point them at the scripted model.
-    hud_env.set(
-        OPENAI_BASE_URL=gateway.url,
-        ANTHROPIC_BASE_URL=gateway.url,
-        MY_EVAL_MODEL="z-ai/glm-5.2-from-env",
-    )
+    hud_env.set(OPENAI_BASE_URL=gateway.url, ANTHROPIC_BASE_URL=gateway.url)
 
     # The same scripted model under another host name, so it is not the HUD gateway.
     custom = gateway.url.replace("127.0.0.1", "localhost")

@@ -33,9 +33,9 @@ from hud.runtime import (
     SubprocessRuntime,
 )
 from tests.conftest import eventually
-from tests.eval.conftest import SESSION, SESSIONS, gone, host_on_runtime
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
+from tests.runtime.conftest import SESSION, SESSIONS, gone, host_on_runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -200,7 +200,8 @@ async def test_an_env_that_cannot_serve_fails_the_run_before_the_prompt_and_is_c
 
     (trace,) = job.traces
     assert (trace.status, trace.prompt_text, job.errors) == ("error", None, [trace])
-    assert (trace.error or "").startswith(("[provisioning] ", "[starting task] "))
+    assert trace.error is not None
+    assert trace.error.startswith(("[provisioning] ", "[starting task] "))
 
 
 @pytest.mark.parametrize("runtime", EVERY_RUNTIME)

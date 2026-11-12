@@ -20,8 +20,6 @@ from tests.environment.conftest import FRAME_LIMIT, encode, wire
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-INVALID, NOT_FOUND, BAD_STATE, FAILED = -32602, -32601, -32600, -32000
-
 
 class Point(BaseModel):
     x: int

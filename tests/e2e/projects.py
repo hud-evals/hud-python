@@ -6,14 +6,15 @@ import json
 import shutil
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from tests.conftest import Hud, Uv
+from tests.conftest import ROOT, Hud, Uv
 
 from .lifecycle import assert_clean_lifecycle
 
-ROOT = Path(__file__).resolve().parents[2]
+if TYPE_CHECKING:
+    from pathlib import Path
+
 TEMPLATES = sorted(
     path.name for path in (ROOT / "environments").iterdir() if (path / "env.py").is_file()
 )

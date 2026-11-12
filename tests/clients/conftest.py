@@ -1,5 +1,4 @@
-"""What several client tests share: a scripted control-channel peer, a port with nothing
-listening, and a binding reached through a relay that can drop it."""
+"""A scripted control-channel peer."""
 
 from __future__ import annotations
 
@@ -7,17 +6,11 @@ import asyncio
 import contextlib
 import json
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
-from urllib.parse import urlsplit, urlunsplit
-
-from tests.fixtures.relay import relay
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
-
-    from hud.capabilities import Capability
-    from tests.fixtures.relay import FlakyRelay
 
 
 _DEFAULT_ID = object()
@@ -56,7 +49,6 @@ class ControlPeer:
     accepted: int = 0
     tunnels: int = 0
     frames: list[Frame] = field(default_factory=list)
-    server: asyncio.Server | None = None
     handlers: set[asyncio.Task[None]] = field(default_factory=set)
 
     @property
@@ -70,11 +62,6 @@ class ControlPeer:
             for frame in self.frames
             if method is None or frame.message.get("method") == method
         ]
-
-    def stop_accepting(self) -> None:
-        """Close the listening socket; open connections stay up."""
-        assert self.server is not None
-        self.server.close()
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
@@ -167,7 +154,6 @@ async def control_peer(
     """Serve a ``ControlPeer`` answering connections from ``scripts`` for the block."""
     peer = ControlPeer(scripts=scripts or ([],), upstreams=upstreams or {})
     server = await asyncio.start_server(peer.handle, "127.0.0.1", 0)
-    peer.server = server
     peer.port = server.sockets[0].getsockname()[1]
     try:
         yield peer
@@ -178,15 +164,3 @@ async def control_peer(
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(*peer.handlers, return_exceptions=True)
         await server.wait_closed()
-
-
-@asynccontextmanager
-async def relayed(binding: Capability) -> AsyncGenerator[tuple[Capability, FlakyRelay]]:
-    """``binding``, reached through a relay that can sever, refuse, and stall its connections."""
-    parts = urlsplit(binding.url)
-    assert parts.hostname is not None and parts.port is not None
-    async with relay(parts.hostname, parts.port) as flaky:
-        user = f"{parts.username}@" if parts.username else ""
-        netloc = f"{user}127.0.0.1:{flaky.port}"
-        url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
-        yield replace(binding, url=url), flaky

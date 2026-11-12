@@ -240,7 +240,6 @@ async def test_without_a_sandbox_the_cli_holds_its_model_key(
 async def test_in_a_sandbox_the_cli_is_handed_the_relay_and_never_the_hud_key(
     agent_type: str, cli: str, tmp_path: Path
 ) -> None:
-    # Inside the workspace, the only host path the sandbox shows besides /usr and /etc.
     stub = clis.Stub(tmp_path / "ws" / ".stub", cli, stdout=clis.answer(cli, "done"))
     stub.install()
     env = Environment("ws")
@@ -310,7 +309,8 @@ async def test_in_a_sandbox_an_agent_on_its_provider_key_is_refused_rather_than_
 
     trace = await rollout(task(), ClaudeCLIAgent(), runtime=LocalRuntime(task.env))
 
-    assert "isn't given the agent's model key" in (trace.error or "")
+    assert trace.error is not None
+    assert "isn't given the agent's model key" in trace.error
     assert stub.captures() == []
 
 
@@ -348,7 +348,8 @@ async def test_a_sandboxed_workspace_that_cannot_relay_is_refused_the_model_key(
 
     trace = await rollout(task(), ClaudeCLIAgent(), runtime=LocalRuntime(env))
 
-    assert "isn't given the agent's model key" in (trace.error or "")
+    assert trace.error is not None
+    assert "isn't given the agent's model key" in trace.error
 
 
 async def test_claude_code_runs_with_the_variables_its_config_adds(tmp_path: Path) -> None:
@@ -379,7 +380,8 @@ async def test_claude_code_refuses_config_variables_the_agent_sets(
 
     (trace,) = (await task().run(agent)).traces
 
-    assert variable in (trace.error or "")
+    assert trace.error is not None
+    assert variable in trace.error
     assert stub.captures() == []
 
 

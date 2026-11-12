@@ -3,7 +3,7 @@
 Each records what the agent handed it (argv, the variables it set, stdin, ``.hud_*``
 files), prints the JSONL stream the real CLI would, and exits as told. Like the real
 CLIs, each is a native executable: a compiled launcher that runs the stub script in its
-own process. ``answer``, ``shell``, ``fault`` and ``prompt`` speak either CLI's stream
+own process. ``answer`` and ``prompt`` speak either CLI's stream
 by its executable name.
 """
 
@@ -124,7 +124,9 @@ sys.exit(behavior.get("exit", 0))
 class Stub:
     """A stub CLI installed in ``bin``; ``captures()`` reads what each invocation recorded.
 
-    ``shebang`` installs the stub script itself, as an npm package's launcher script is.
+    For an agent in a sandbox, ``root`` goes inside the workspace: besides /usr and /etc,
+    the workspace is the only host path a sandbox shows. ``shebang`` installs the stub
+    script itself, as an npm package's launcher script is.
     """
 
     root: Path
@@ -167,7 +169,6 @@ class Stub:
         script.write_text(
             STUB.format(
                 behavior=str(behavior),
-                name=self.name,
                 prefixes=AGENT_VARIABLES,
                 captures=str(self.captures_dir),
             )
@@ -272,46 +273,6 @@ def answer(cli: str, text: str) -> str:
     return jsonl(
         CODEX_STARTED, codex_item("agent_message", "message-1", text=text), CODEX_COMPLETED
     )
-
-
-def shell(cli: str, command: str, then: str) -> str:
-    """The stream ``cli`` prints when it runs ``command`` and then answers ``then``."""
-    if cli == "claude":
-        return jsonl(
-            claude_assistant(
-                {"type": "tool_use", "id": "tool-1", "name": "Bash", "input": {"command": command}},
-                stop="tool_use",
-            ),
-            {
-                "type": "user",
-                "message": {
-                    "role": "user",
-                    "content": [{"type": "tool_result", "tool_use_id": "tool-1", "content": "ran"}],
-                },
-            },
-            claude_assistant({"type": "text", "text": then}),
-            claude_result(then),
-        )
-    return jsonl(
-        CODEX_STARTED,
-        codex_item(
-            "command_execution",
-            "command-1",
-            command=command,
-            aggregated_output="ran",
-            exit_code=0,
-            status="completed",
-        ),
-        codex_item("agent_message", "message-1", text=then),
-        CODEX_COMPLETED,
-    )
-
-
-def fault(cli: str, message: str) -> str:
-    """The stream ``cli`` prints when its turn fails with ``message``."""
-    if cli == "claude":
-        return jsonl(claude_result(message, is_error=True))
-    return jsonl({"type": "turn.started"}, {"type": "turn.failed", "error": {"message": message}})
 
 
 def prompt(cli: str, stdin: str) -> str:

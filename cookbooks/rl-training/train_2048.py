@@ -1,9 +1,9 @@
 """On-policy RL on a multi-turn game: train a model to play 2048.
 
-Same five-line loop as ``simple_train.py`` — the training code is identical; only
-the rollout source changes. Here each rollout is a whole *game*: the agent calls
-the ``move`` tool many times (up to ``--moves`` turns), so one run is a multi-turn
-trajectory and every turn contributes token-level data to ``forward_backward``.
+It trains like ``simple_train.py``; what changes is the rollout source. Here each
+rollout is a whole *game*: the agent calls the ``move`` tool many times (up to
+``--moves`` turns), so one run is a multi-turn trajectory and every turn contributes
+token-level data to ``forward_backward``.
 
 GRPO grouping: 2048 spawns tiles randomly, so the ``group`` replays of the single
 play task are genuinely different games — their reward spread (how high a tile

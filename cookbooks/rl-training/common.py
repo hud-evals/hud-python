@@ -9,8 +9,8 @@ local quickstart differ only in *which taskset* and *which runtime* you hand to
 
 - ``TASKSET`` set — the real flow: load a taskset you already built and
   pushed (``hud deploy`` + ``hud sync``) from the platform with
-  ``Taskset.from_api``, and run every rollout on a leased HUD box with
-  ``HUDRuntime`` (the agent runs remotely, next to the env). Nothing local.
+  ``Taskset.from_api``, and run every rollout with ``HUDRuntime``: the agent loop
+  runs here, against the environment on a leased HUD box.
 - empty — a self-contained quickstart: a tiny arithmetic taskset driven against
   the bundled ``env.py`` locally.
 """
@@ -29,7 +29,7 @@ from env import multiply
 TASKSET = ""
 
 
-def load_taskset_and_runtime() -> tuple[Taskset, Provider | HUDRuntime]:
+def load_taskset_and_runtime() -> tuple[Taskset, Provider]:
     """Resolve the rollout source from the ``TASKSET`` constant (see module docstring)."""
     if TASKSET:
         return Taskset.from_api(TASKSET), HUDRuntime()

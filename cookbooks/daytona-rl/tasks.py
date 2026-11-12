@@ -1,4 +1,4 @@
-"""Tasks for smoke — run with: hud eval tasks.py claude-sonnet-5."""
+"""Tasks for `hud eval tasks.py claude`."""
 
 from env import fix_calc
 

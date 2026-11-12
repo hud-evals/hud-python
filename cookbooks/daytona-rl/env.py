@@ -1,7 +1,6 @@
-"""smoke - HUD environment with a real coding task graded by its tests.
+"""A coding task graded by its tests: fix the seeded bugs in calc.py.
 
-Spine of the HUD x Daytona guide: one shell capability, one buggy repo, one
-grader. Runs identically under LocalRuntime and DaytonaRuntime.
+Runs the same under LocalRuntime and DaytonaRuntime.
 
 Reward is binary — every test passes or the rollout scores zero.
 """

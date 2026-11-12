@@ -1,4 +1,6 @@
-"""Direct A2A Python SDK client for HUD chat servers.
+"""An A2A client with an LLM in front, which decides when to call a HUD chat server as a tool.
+
+``client.py`` is the plain version.
 
 Usage:
     # Terminal 1: run A2A server
@@ -6,9 +8,6 @@ Usage:
 
     # Terminal 2: run this client
     uv run llm_client.py
-
-An LLM sits in front of the A2A server and decides when to call it as a tool;
-``client.py`` is the plain version.
 """
 
 from __future__ import annotations

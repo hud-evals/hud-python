@@ -23,7 +23,7 @@ async def multiply(a: int, b: int):
         "integer on its own and nothing after it."
     )
 
-    text = answer if isinstance(answer, str) else str(answer)
+    text = answer or ""
     expected = a * b
 
     integers = re.findall(r"-?\d+", text)

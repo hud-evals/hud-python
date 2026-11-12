@@ -40,7 +40,6 @@ FILES_DIRNAME = "files"
 _TIMEOUT = httpx.Timeout(30.0, read=300.0)
 _CHUNK = 1 << 20
 
-# The workspace serves the agent a shell and streams its file diffs.
 env.workspace(WORKSPACE_ROOT)
 
 

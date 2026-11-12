@@ -16,8 +16,8 @@ from hud.agents.base import Agent
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime, SubprocessRuntime
 from tests.conftest import eventually
-from tests.eval.conftest import gone
 from tests.fixtures.agents import ScriptedAgent
+from tests.runtime.conftest import gone
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -189,7 +189,9 @@ async def test_an_env_whose_initialize_raises_is_still_shut_down() -> None:
 
     job = await solve().run(ScriptedAgent("x"))
 
-    assert "daemon failed to start" in (job.traces[0].error or "")
+    (trace,) = job.traces
+    assert trace.error is not None
+    assert "daemon failed to start" in trace.error
     assert events == ["shut down"]
 
 
@@ -221,9 +223,10 @@ async def test_a_child_that_exits_before_serving_reports_its_output_and_takes_it
         Task(env="leaky", id="solve"), ScriptedAgent("x"), runtime=SubprocessRuntime(source)
     )
 
-    assert (trace.error or "").startswith("[provisioning] ")
-    assert "exited with code 3" in (trace.error or "")
-    assert "daemon starting" in (trace.error or "")
+    assert trace.error is not None
+    assert trace.error.startswith("[provisioning] ")
+    assert "exited with code 3" in trace.error
+    assert "daemon starting" in trace.error
     pid = int((tmp_path / "child.pid").read_text())
     try:
         await eventually(lambda: gone(pid), within=5)

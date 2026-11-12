@@ -62,35 +62,31 @@ def test_a_task_spawned_from_its_source_starts_and_grades(
     assert (result.exit_code, result.stdout) == (0, stdout), result
 
 
-def counting_env(starts: list[str], *, failing: bool = False) -> Environment:
+def counting_env(starts: list[str]) -> Environment:
     env = Environment("example")
 
     @env.template(id="solve")
     async def solve(target: str = "answer"):
         starts.append(target)
         answer = yield f"Say {target}."
-        if failing:
-            raise ValueError("grader failed")
         yield 1.0 if answer == target else 0.0
 
     return env
 
 
 @pytest.mark.parametrize(
-    ("parked", "failing", "starts", "outcome"),
+    ("parked", "starts", "outcome"),
     [
-        pytest.param(0, False, 1, {"score": 1.0}, id="starts-when-nothing-is-parked"),
-        pytest.param(1, False, 1, {"score": 1.0}, id="resumes-a-parked-session"),
-        pytest.param(2, False, 2, {"error": "failure"}, id="ambiguous-parked-sessions"),
+        pytest.param(0, 1, {"score": 1.0}, id="starts-when-nothing-is-parked"),
+        pytest.param(1, 1, {"score": 1.0}, id="resumes-a-parked-session"),
+        pytest.param(2, 2, {"error": "failure"}, id="ambiguous-parked-sessions"),
     ],
 )
 async def test_grade_resumes_a_started_task_on_a_served_env(
-    hud: Hud, parked: int, failing: bool, starts: int, outcome: dict[str, Any]
+    hud: Hud, parked: int, starts: int, outcome: dict[str, Any]
 ) -> None:
     started: list[str] = []
-    async with LocalRuntime(counting_env(started, failing=failing))(
-        Task(env="example", id="solve")
-    ) as runtime:
+    async with LocalRuntime(counting_env(started))(Task(env="example", id="solve")) as runtime:
         for _ in range(parked):
             async with connect(runtime) as client:
                 await client.start_task("solve", {})

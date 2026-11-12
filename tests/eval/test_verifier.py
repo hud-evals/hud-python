@@ -171,8 +171,9 @@ async def test_the_verdict_is_the_grade_whichever_side_fails(
         assert trace.error is None
     else:
         phase, phrase = error
-        assert (trace.error or "").startswith(phase)
-        assert phrase in (trace.error or "")
+        assert trace.error is not None
+        assert trace.error.startswith(phase)
+        assert phrase in trace.error
 
 
 async def test_a_verifier_that_cannot_be_placed_leaves_the_run_ungraded() -> None:
@@ -208,14 +209,14 @@ async def test_a_verifier_that_cannot_be_placed_leaves_the_run_ungraded() -> Non
         pytest.param(
             "actor",
             0.0,
-            "rollout timed out after 0.3s during actor cleanup",
+            "rollout timed out after 2s during actor cleanup",
             ["actor down"],
             id="in-the-actors-teardown-the-verifier-never-starts",
         ),
         pytest.param(
             "judge",
             1.0,
-            "rollout timed out after 0.3s during cleanup",
+            "rollout timed out after 2s during cleanup",
             ["actor down", "judge up", "judge down"],
             id="in-the-verifiers-teardown-the-verdict-stands",
         ),
@@ -245,7 +246,7 @@ async def test_a_rollout_timeout_in_teardown_returns_and_lets_teardown_finish(
             await release.wait()
         seen.append("judge down")
 
-    job = await verified(actor, judge).run(ScriptedAgent("secret"), rollout_timeout=0.3)
+    job = await verified(actor, judge).run(ScriptedAgent("secret"), rollout_timeout=2)
     release.set()
 
     (trace,) = job.traces

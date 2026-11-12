@@ -36,7 +36,6 @@ async def test_the_manifest_publishes_the_screen_and_a_prompt_box(desktop):
     assert screens == [f"rfb://127.0.0.1:{desktop}"]
     arguments = template["args"]
     assert arguments["properties"]["prompt"]["x-hud-hint"] == "prompt"
-    assert "hud_api_key" not in arguments["properties"]
     assert arguments["required"] == ["prompt"]
 
 

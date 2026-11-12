@@ -258,8 +258,7 @@ async def _down() -> None:
 @env.template()
 async def play_self(model: str = _INNER_MODEL, seed: int = 0) -> None:
     """Self-play game. seed % 2 decides who drops first: even → outer is X, odd → outer is O."""
-    global _INNER_MODEL, _INNER_MODEL_NAME, _OUTER_MARK, _inner_samples, _inner_error
-    _INNER_MODEL = model
+    global _INNER_MODEL_NAME, _OUTER_MARK, _inner_samples, _inner_error
     # The gateway's token-id extensions need the resolved model name, not a slug or id.
     _INNER_MODEL_NAME = resolve_gateway_model(model).model_name
     _OUTER_MARK = "X" if seed % 2 == 0 else "O"
@@ -298,7 +297,7 @@ async def play_self(model: str = _INNER_MODEL, seed: int = 0) -> None:
             "outer_mark": _OUTER_MARK,
             "board": game.board,
             "model": model,
-            "inner_samples": _inner_samples,  # token data for symmetric training
+            "inner_samples": _inner_samples,
         },
     )
 

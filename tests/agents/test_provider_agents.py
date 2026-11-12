@@ -89,7 +89,8 @@ async def test_a_provider_fault_ends_the_run_with_its_error(
     (trace,) = (await task().run(kind(kind.config_cls(model=model)))).traces
 
     assert trace.status == "error"
-    assert "model unavailable" in (trace.error or "")
+    assert trace.error is not None
+    assert "model unavailable" in trace.error
 
 
 @EVERY_PROVIDER
@@ -111,6 +112,7 @@ async def test_an_overloaded_provider_is_asked_again(
 
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
+GEMINI_MODEL = "gemini-3.1-pro-preview"
 
 
 @pytest.mark.parametrize(
@@ -212,9 +214,6 @@ async def test_a_computer_toolset_member_lands_on_the_screen_and_answers_as_the_
     ]
 
 
-GEMINI_MODEL = "gemini-3.1-pro-preview"
-
-
 async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
     models: Models, tmp_path: Path
 ) -> None:
@@ -250,7 +249,8 @@ async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
     (trace,) = (await task().run(GeminiAgent(GeminiConfig(model=GEMINI_MODEL)))).traces
 
     assert (trace.status, len(models.requests())) == ("error", 1)
-    assert error in (trace.error or "")
+    assert trace.error is not None
+    assert error in trace.error
 
 
 # Strict mode offers each position's type; the Chat Completions subset has no unions,

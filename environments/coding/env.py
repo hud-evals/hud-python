@@ -14,7 +14,6 @@ from typing import Annotated
 from hud import Environment
 from hud.environment import Workspace
 from hud.graders import EvaluationResult, combine
-from hud.settings import settings
 from pydantic import Field
 
 from grader import check_selection, grade_tests
@@ -63,13 +62,11 @@ async def _shutdown() -> None:
         shutil.rmtree(_LOCAL_ROOT, ignore_errors=True)
 
 
-# Attached through the env so controller connections (e.g. hosted CLI inference) can bind to it.
 workspace: Workspace = env.workspace(
     REPO_DIR,
     guest_path=str(REPO_DIR),
     network=False,
     env=AGENT_ENV,
-    track_files=settings.file_tracking_enabled,
     shell_uid=AGENT_UID,
     require_isolation=True,
 )
