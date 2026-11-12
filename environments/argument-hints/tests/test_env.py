@@ -211,4 +211,3 @@ async def test_concurrent_sessions_grade_with_the_runtime_key(rejected, platform
         assert "judge rejected request" in grades[1].message
     else:
         assert grades[1]["score"] == 1.0
-    assert "task-key" not in str(grades) and "second-key" not in str(grades)

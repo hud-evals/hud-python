@@ -1,7 +1,6 @@
 """Example computer-use tasks."""
 
 from env import cua_task
-from env import env as env
 
 _open_website = cua_task(
     prompt=(

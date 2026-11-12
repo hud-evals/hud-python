@@ -14,7 +14,6 @@ from typing import Annotated
 from hud import Environment
 from hud.environment import Workspace
 from hud.graders import EvaluationResult, combine
-from hud.settings import settings
 from pydantic import Field
 
 from grader import check_selection, grade_tests
@@ -69,7 +68,6 @@ workspace: Workspace = env.workspace(
     guest_path=str(REPO_DIR),
     network=False,
     env=AGENT_ENV,
-    track_files=settings.file_tracking_enabled,
     shell_uid=AGENT_UID,
     require_isolation=True,
 )
