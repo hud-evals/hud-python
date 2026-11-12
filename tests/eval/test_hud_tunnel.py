@@ -80,8 +80,9 @@ async def test_a_refused_session_fails_the_run_with_the_platform_reason(
 
     (trace,) = job.traces
     assert trace.grade.is_error
-    assert reason in (trace.error or "")
-    assert "'checked'" in (trace.error or "")
+    assert trace.error is not None
+    assert reason in trace.error
+    assert "'checked'" in trace.error
 
 
 async def dropped(websocket: WebSocket, params: dict[str, str]) -> None:
@@ -101,6 +102,8 @@ async def test_a_tunnel_that_keeps_dropping_ends_at_the_deadline_and_releases_th
         ScriptedAgent("yes"), runtime=HUDRuntime(), rollout_timeout=0.5
     )
 
-    assert job.traces[0].stop_reason == "timeout"
-    assert "during starting task" in (job.traces[0].error or "")
+    (trace,) = job.traces
+    assert trace.stop_reason == "timeout"
+    assert trace.error is not None
+    assert "during starting task" in trace.error
     await eventually(lambda: len(services.requests("runtime", "DELETE", SESSION)) == 1)

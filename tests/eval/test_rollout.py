@@ -182,7 +182,8 @@ async def test_what_the_task_grades_with_is_the_runs_reward_or_its_error(
     if error is None:
         assert trace.error is None
     else:
-        assert error in (trace.error or "")
+        assert trace.error is not None
+        assert error in trace.error
     assert (trace.error or "").startswith("[grading] ") is (status == "error")
 
 
@@ -195,8 +196,9 @@ async def test_an_agent_that_raises_before_answering_is_graded_on_no_answer() ->
 
     (trace,) = job.traces
     assert (trace.reward, trace.status, job.errors) == (0.0, "error", [])
-    assert (trace.error or "").startswith("[agent loop] ")
-    assert "agent exploded" in (trace.error or "")
+    assert trace.error is not None
+    assert trace.error.startswith("[agent loop] ")
+    assert "agent exploded" in trace.error
 
 
 async def test_an_agent_that_raises_after_answering_keeps_its_grade() -> None:
@@ -209,8 +211,9 @@ async def test_an_agent_that_raises_after_answering_keeps_its_grade() -> None:
 
     (trace,) = job.traces
     assert (trace.reward, trace.status, job.reward) == (1.0, "error", 1.0)
-    assert (trace.error or "").startswith("[agent loop] ")
-    assert "agent exploded" in (trace.error or "")
+    assert trace.error is not None
+    assert trace.error.startswith("[agent loop] ")
+    assert "agent exploded" in trace.error
 
 
 @pytest.mark.parametrize(
@@ -234,7 +237,8 @@ async def test_the_agent_timeout_stops_the_agent_and_still_grades(
 
     (trace,) = job.traces
     assert (trace.reward, trace.status, trace.stop_reason) == (1.0, "error", "timeout")
-    assert "agent timed out" in (trace.error or "")
+    assert trace.error is not None
+    assert "agent timed out" in trace.error
 
 
 async def test_a_grader_that_raises_leaves_the_run_ungraded() -> None:
@@ -250,8 +254,9 @@ async def test_a_grader_that_raises_leaves_the_run_ungraded() -> None:
 
     (trace,) = job.traces
     assert (trace.reward, trace.status, job.errors) == (0.0, "error", [trace])
-    assert (trace.error or "").startswith("[grading] ")
-    assert "grader exploded" in (trace.error or "")
+    assert trace.error is not None
+    assert trace.error.startswith("[grading] ")
+    assert "grader exploded" in trace.error
 
 
 @pytest.mark.parametrize(
@@ -385,7 +390,8 @@ async def test_the_rollout_timeout_ends_a_run_still_being_provisioned() -> None:
 
     (trace,) = job.traces
     assert (trace.status, trace.stop_reason, trace.runtime) == ("error", "timeout", None)
-    assert "during provisioning" in (trace.error or "")
+    assert trace.error is not None
+    assert "during provisioning" in trace.error
 
 
 async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_finish() -> None:
@@ -406,5 +412,6 @@ async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_f
 
     (trace,) = job.traces
     assert (trace.reward, trace.stop_reason) == (1.0, "timeout")
-    assert "during actor cleanup" in (trace.error or "")
+    assert trace.error is not None
+    assert "during actor cleanup" in trace.error
     await eventually(lambda: events == ["torn down"])

@@ -167,7 +167,8 @@ async def test_the_trace_the_platform_ends_with_is_the_runs_outcome(
     if error is None:
         assert trace.error is None
     else:
-        assert error in (trace.error or "")
+        assert trace.error is not None
+        assert error in trace.error
 
 
 @pytest.mark.parametrize(

@@ -171,8 +171,9 @@ async def test_the_verdict_is_the_grade_whichever_side_fails(
         assert trace.error is None
     else:
         phase, phrase = error
-        assert (trace.error or "").startswith(phase)
-        assert phrase in (trace.error or "")
+        assert trace.error is not None
+        assert trace.error.startswith(phase)
+        assert phrase in trace.error
 
 
 async def test_a_verifier_that_cannot_be_placed_leaves_the_run_ungraded() -> None:

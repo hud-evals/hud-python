@@ -200,7 +200,8 @@ async def test_an_env_that_cannot_serve_fails_the_run_before_the_prompt_and_is_c
 
     (trace,) = job.traces
     assert (trace.status, trace.prompt_text, job.errors) == ("error", None, [trace])
-    assert (trace.error or "").startswith(("[provisioning] ", "[starting task] "))
+    assert trace.error is not None
+    assert trace.error.startswith(("[provisioning] ", "[starting task] "))
 
 
 @pytest.mark.parametrize("runtime", EVERY_RUNTIME)

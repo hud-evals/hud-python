@@ -89,7 +89,8 @@ async def test_a_provider_fault_ends_the_run_with_its_error(
     (trace,) = (await task().run(kind(kind.config_cls(model=model)))).traces
 
     assert trace.status == "error"
-    assert "model unavailable" in (trace.error or "")
+    assert trace.error is not None
+    assert "model unavailable" in trace.error
 
 
 @EVERY_PROVIDER
@@ -250,7 +251,8 @@ async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
     (trace,) = (await task().run(GeminiAgent(GeminiConfig(model=GEMINI_MODEL)))).traces
 
     assert (trace.status, len(models.requests())) == ("error", 1)
-    assert error in (trace.error or "")
+    assert trace.error is not None
+    assert error in trace.error
 
 
 # Strict mode offers each position's type; the Chat Completions subset has no unions,
