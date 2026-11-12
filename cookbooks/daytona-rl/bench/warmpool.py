@@ -1,6 +1,6 @@
 """A/B the Daytona warm-pool effect on sandbox spin-up.
 
-    uv run warmpool.py --n 8
+    PYTHONPATH=. uv run bench/warmpool.py --n 8
 
 Warm pools are absent from the high-level ``daytona`` SDK; they live in the
 generated client (``WarmPoolsApi``). This measures one concurrent wave of N

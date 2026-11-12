@@ -1,8 +1,8 @@
 """Warm pool A/B: sequential vs concurrent sandbox creation.
 
     export DAYTONA_API_KEY=...
-    uv run --with daytona python warmpool_repro.py
-    uv run --with daytona python warmpool_repro.py --snapshot my-snapshot --n 8
+    uv run bench/warmpool_repro.py
+    uv run bench/warmpool_repro.py --snapshot my-snapshot --n 8
 
 Measures how long ``daytona.create`` takes from an existing snapshot, four ways:
 one-at-a-time and N-at-once, each with and without a warm pool of size N.

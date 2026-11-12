@@ -3,9 +3,6 @@
 A2A (and any other wire protocol) is a frontend over ``hud.Chat``: the
 executor below translates A2A requests into ``chat.send()`` calls, keeping an
 independent ``Chat`` (and so an independent conversation) per A2A context.
-
-This is reference code, not part of the SDK — copy and adapt it. See the
-README in this directory for setup and usage.
 """
 
 from __future__ import annotations

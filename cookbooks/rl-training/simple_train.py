@@ -1,10 +1,10 @@
 """Simple on-policy RL: roll out a taskset, train with a built-in loss, repeat.
 
-The whole loop is five lines: run the taskset under one long-lived job, take the
-batch of fresh runs, and hand them to ``trainer.step``. ``step`` does one
-``forward_backward`` with a server-side loss (importance sampling here) followed
-by one ``optim_step`` — which checkpoints and promotes the new weights behind the
-*same* model string, so the next rollout samples the updated policy.
+Each step runs the taskset under one long-lived job, takes the batch of fresh
+runs, and trains on it: one ``forward_backward`` with a server-side loss
+(importance sampling here), then one ``optim_step``, which checkpoints and
+promotes the new weights behind the *same* model string, so the next rollout
+samples the updated policy.
 
 Traces are passed directly: ``TrainingClient`` reads each trace's samples and
 reward. (Pass ``trace.trace_id`` strings instead to train on trajectories the
@@ -56,7 +56,7 @@ async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: 
         completion_kwargs={"max_tokens": 1024, "extra_body": {"return_token_ids": True}},
     )
     trainer = TrainingClient(model)
-    # The deployed TASKSET (see common.py) on HUD boxes, or the bundled local env.
+    # The deployed TASKSET (see common.py) against HUD-hosted envs, or the bundled local env.
     taskset, runtime = load_taskset_and_runtime()
 
     # One job spans the whole session; each iteration appends its batch of runs.
