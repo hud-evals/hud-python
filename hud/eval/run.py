@@ -6,20 +6,34 @@ import asyncio
 import contextlib
 import logging
 import math
+import tempfile
 import traceback
 import uuid
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
+
+from pydantic import TypeAdapter
 
 from hud.agents.cli import CLIAgent
 from hud.agents.types import AgentConfig
 from hud.capabilities.connection import Connection
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients.client import HudProtocolError, connect
-from hud.runtime.core import resolve_runtime_config
+from hud.runtime.core import RuntimeUnsupportedError, SessionScope, resolve_runtime_config
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
-from hud.types import Grade, PromptMessage, Step, TaskCall, TextContent, Trace
+from hud.types import (
+    ClassifiedError,
+    CollectCommand,
+    CollectFiles,
+    Grade,
+    PromptMessage,
+    Step,
+    TaskCall,
+    TextContent,
+    Trace,
+)
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -27,13 +41,13 @@ from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncGenerator, Sequence
     from types import TracebackType
 
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
     from hud.environment.egress import WorkspaceRoute
-    from hud.runtime.core import Provider, RuntimeConfig
+    from hud.runtime.core import Provider, Runtime, RuntimeConfig
 
     from .task import Task
 
@@ -426,13 +440,18 @@ async def rollout(
                 actor = contextlib.AsyncExitStack()
                 await actor.__aenter__()
 
-                async def close_actor() -> None:
-                    cleanup = asyncio.create_task(actor.aclose())
+                async def close_actor(
+                    exc_type: type[BaseException] | None,
+                    exc: BaseException | None,
+                    tb: TracebackType | None,
+                ) -> None:
+                    cleanup = asyncio.create_task(actor.__aexit__(exc_type, exc, tb))
                     cleanup.add_done_callback(_consume_task_result)
                     await asyncio.shield(cleanup)
 
-                scope.push_async_callback(close_actor)
+                scope.push_async_exit(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
+                await actor.enter_async_context(_explained(addr))
                 if (
                     verifier is not None
                     and not shared_verifier
@@ -484,9 +503,11 @@ async def rollout(
                             except Exception as exc:
                                 if task.verifier is None:
                                     raise
+                                await _explain(addr, exc)
                                 detail = "".join(traceback.format_exception_only(exc)).strip()
                                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                                 run.trace.status = "error"
+                                _classify(run.trace, exc)
                                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         finally:
                             run.connections.clear()
@@ -500,6 +521,11 @@ async def rollout(
                         live.trace.grade = Grade.ungraded()
                     if shared_verifier:
                         assert verifier is not None
+                        assert actor_session_id is not None
+                        _phase = "collecting"
+                        with tempfile.TemporaryDirectory(prefix="hud-") as collected:
+                            gathered = await _collect(addr, actor_result, Path(collected))
+                            await _deliver(addr, gathered, SessionScope(actor_session_id).path)
                         _phase = "verifying"
                         await _verify(live, actor_client, verifier, actor_result)
                         _phase = "cleanup"
@@ -514,8 +540,22 @@ async def rollout(
                     return
 
                 assert actor_session_id is not None
-                _phase = "snapshotting actor"
-                async with addr.snapshot_session(actor_session_id) as archive:
+                # The actor's session moves to the verifier's box only where the
+                # runtime transports sessions; elsewhere a verifier in another
+                # env starts from nothing.
+                async with contextlib.AsyncExitStack() as moved:
+                    _phase = "collecting"
+                    gathered = await _collect(
+                        addr,
+                        actor_result,
+                        Path(moved.enter_context(tempfile.TemporaryDirectory(prefix="hud-"))),
+                    )
+                    session = None
+                    if addr.transports_sessions:
+                        _phase = "snapshotting actor"
+                        session = await moved.enter_async_context(
+                            addr.checkpoint(SessionScope(actor_session_id))
+                        )
                     _phase = "actor cleanup"
                     await actor.aclose()
                     client = None
@@ -523,13 +563,13 @@ async def rollout(
                         return
                     _phase = "provisioning verifier"
                     verifier_addr = await scope.enter_async_context(runtime(verifier))
+                    await scope.enter_async_context(_explained(verifier_addr))
                     verifier_client = await scope.enter_async_context(connect(verifier_addr))
-                    if archive is not None:
-                        assert verifier_client.manifest is not None
-                        await verifier_addr.restore_session(
-                            verifier_client.manifest.session_id,
-                            archive,
-                        )
+                    assert verifier_client.manifest is not None
+                    verifier_session = SessionScope(verifier_client.manifest.session_id)
+                    if session is not None:
+                        await verifier_addr.restore(session, verifier_session)
+                    await _deliver(verifier_addr, gathered, verifier_session.path)
                     client = verifier_client
                     _phase = "verifying"
                     await _verify(live, verifier_client, verifier, actor_result)
@@ -580,10 +620,12 @@ async def rollout(
                     "rollout failed before launch (%s): %s", _phase, detail, exc_info=True
                 )
                 failed = Trace.failed(f"[{_phase}] {detail}")
+                _classify(failed, exc)
             else:
                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                 run.trace.status = "error"
                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                _classify(run.trace, exc)
         if run is not None:
             run.connections.clear()
             trace = run.trace
@@ -601,6 +643,96 @@ async def rollout(
             raise cancellation
         await trace_exit(trace)
     return trace
+
+
+def _classify(trace: Trace, exc: BaseException) -> None:
+    """Record the classification of the error that ended ``trace``, when it carries one."""
+    if isinstance(exc, ClassifiedError):
+        trace.error_code = exc.code
+        trace.error_source = exc.source
+
+
+async def _collect(
+    addr: Runtime, actor_result: dict[str, Any], into: Path
+) -> list[tuple[str, Path]]:
+    """Carry out the actor's ``collect`` requests while its box is still up.
+
+    Commands run in the named service and files land under ``into``. Returns each
+    file's session-relative destination with its local copy.
+    """
+    requests = TypeAdapter(list[CollectCommand | CollectFiles]).validate_python(
+        actor_result.get("collect") or []
+    )
+    gathered: list[tuple[str, Path]] = []
+    for index, request in enumerate(requests):
+        if isinstance(request, CollectCommand):
+            try:
+                result = await addr.exec(
+                    ["sh", "-c", request.command],
+                    service=request.service,
+                    max_wait=request.timeout_sec,
+                )
+            except TimeoutError:
+                raise TimeoutError(
+                    f"collect hook on {request.service!r} timed out after {request.timeout_sec:g}s"
+                ) from None
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"collect hook on {request.service!r} failed: {result.stderr.strip()}"
+                )
+            continue
+        if request.missing_ok:
+            present = await addr.exec(
+                ["sh", "-c", 'test -e "$1" || test -L "$1"', "hud-collect", request.path],
+                service=request.service,
+            )
+            if present.returncode != 0:
+                continue
+        (local,) = await addr.collect([request.path], into / str(index), service=request.service)
+        gathered.append((request.into, local))
+    return gathered
+
+
+async def _deliver(addr: Runtime, gathered: list[tuple[str, Path]], session: PurePosixPath) -> None:
+    """Place what was collected into the verifier's session, where it grades."""
+    for into, local in gathered:
+        await addr.put(local, session / into)
+
+
+async def _explain(addr: Runtime, exc: Exception) -> None:
+    """Add why the box stopped to ``exc``, an error raised while the box was held.
+
+    A box that died under the rollout (an OOM kill, a crash) explains the failure
+    better than the dropped connection does. The box is asked once, except after a
+    dropped connection, which gets a moment: a provider registers the exit just after
+    the drop.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + (3 if isinstance(exc, (EOFError, OSError)) else 0)
+    while True:
+        try:
+            reason = await addr.terminated()
+        except RuntimeUnsupportedError:
+            return
+        except Exception as failure:  # the run's own error stays the error
+            exc.add_note(f"the box's state could not be read: {failure}")
+            return
+        if reason is not None:
+            exc.add_note(reason)
+            return
+        if loop.time() >= deadline:
+            return
+        await asyncio.sleep(0.2)
+
+
+@contextlib.asynccontextmanager
+async def _explained(addr: Runtime) -> AsyncGenerator[None]:
+    """Explain, by the box ``addr`` names, an error that leaves the scope while it is held."""
+    try:
+        yield
+    except Exception as exc:
+        await _explain(addr, exc)
+        raise
 
 
 def _consume_task_result(task: asyncio.Future[Any]) -> None:

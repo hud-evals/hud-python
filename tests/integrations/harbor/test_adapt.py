@@ -11,7 +11,7 @@ keys are all optional:
   contain (the second exactly when the Docker daemon is not amd64);
 - ``projects``: the tasks that share one project, by environment;
 - ``task.<slug>``: dotted paths into the row's observed fields (``placement``,
-  ``agent_config``, ``task``, ``service_access``, ``services``,
+  ``agent_config``, ``task``, ``services``,
   ``verifier.runtime_config``, ``links``), each equal to its value;
 - ``base``: another case this one starts from (``assemble_case``).
 
@@ -77,7 +77,6 @@ def observed(row: Task) -> dict[str, Any]:
         "placement": placement(config),
         "agent_config": row.agent_config,
         "task": row.args["task"],
-        "service_access": config.compose.service_access,
         "services": sorted(services),
         "verifier": verifier is not None
         and {

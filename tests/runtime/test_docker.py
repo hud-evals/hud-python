@@ -9,6 +9,7 @@ rollout tables; this module holds what only Docker does.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import subprocess
@@ -21,8 +22,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud import Task
+from hud.agents.base import Agent
 from hud.eval.run import rollout
 from hud.runtime import (
+    Checkpoint,
     ComposeProject,
     DockerBindMount,
     DockerEndpoint,
@@ -30,7 +33,9 @@ from hud.runtime import (
     RuntimeConfig,
     RuntimeLimits,
     RuntimeResources,
+    SessionScope,
 )
+from hud.types import ClassifiedError
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 
@@ -38,6 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from hud import Run
     from tests.conftest import HudEnv
 
 ECHO = Task(env="echo", id="echo", args={"word": "tangerine"})
@@ -151,6 +157,28 @@ async def test_a_container_past_its_run_limit_is_removed_while_held(
 
 @pytest.mark.e2e
 @pytest.mark.docker
+async def test_a_run_past_its_limit_keeps_the_agents_error_and_names_the_teardown(
+    fixture_image: Callable[[str], str],
+) -> None:
+    class GivesUp(Agent):
+        async def __call__(self, run: Run) -> None:
+            await asyncio.sleep(4)
+            raise ClassifiedError("the agent gave up", code="agent_gave_up", source="user")
+
+    row = ECHO.model_copy(
+        update={"runtime_config": RuntimeConfig(limits=RuntimeLimits(run_timeout_s=2))}
+    )
+
+    trace = await rollout(row, GivesUp(), runtime=DockerRuntime(fixture_image("echo")))
+
+    assert trace.status == "error"
+    assert (trace.error_code, trace.error_source) == ("agent_gave_up", "user")
+    assert "the agent gave up" in (trace.error or "")
+    assert "run limit of 2s expired" in (trace.error or "")
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
 async def test_a_restored_session_archive_may_hold_only_files_and_directories(
     fixture_image: Callable[[str], str], tmp_path: Path
 ) -> None:
@@ -162,10 +190,11 @@ async def test_a_restored_session_archive_may_hold_only_files_and_directories(
         tar.addfile(link, io.BytesIO())
 
     async with DockerRuntime(fixture_image("echo"))(ECHO) as runtime:
-        with pytest.raises(
-            ValueError, match="runtime session archive contains an unsupported entry"
-        ):
-            await runtime.restore_session("sess-12345678", archive)
+        with pytest.raises(ValueError, match="runtime archive contains an unsupported entry"):
+            await runtime.restore(
+                Checkpoint(SessionScope("sess-00000000"), str(archive)),
+                SessionScope("sess-12345678"),
+            )
 
 
 @pytest.mark.e2e
@@ -182,11 +211,12 @@ async def test_a_container_that_exits_before_serving_fails_at_once_with_its_outp
     image = fixture_image("broken")
     started = time.monotonic()
 
-    with pytest.raises(RuntimeError, match="exited with code 1") as raised:
+    with pytest.raises(ClassifiedError, match="exited with code 1") as raised:
         async with DockerRuntime(image, run_args=flags)(row):
             pytest.fail("the container should not serve")
 
     assert "no module named bugs" in str(raised.value)
+    assert (raised.value.code, raised.value.source) == ("container_start_failed", "user")
     assert time.monotonic() - started < 30
     assert containers(**{"hud-test": label}) == []
 
@@ -255,9 +285,10 @@ async def test_a_compose_project_whose_network_owner_dies_is_taken_down(
     )
     row = ECHO.model_copy(update={"runtime_config": RuntimeConfig(compose=project)})
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ClassifiedError) as raised:
         async with DockerRuntime()(row):
             pytest.fail("the project should not serve")
+    assert raised.value.code == "compose_execution_failed"
 
     working_dir = {"com.docker.compose.project.working_dir": str(tmp_path)}
     assert containers(**working_dir) == []
@@ -283,7 +314,7 @@ async def test_a_compose_project_whose_main_exits_before_serving_fails_at_once_w
     )
     started = time.monotonic()
 
-    with pytest.raises(RuntimeError, match="exited with code 1") as raised:
+    with pytest.raises(ClassifiedError, match="exited with code 1") as raised:
         async with DockerRuntime()(row):
             pytest.fail("the project should not serve")
 

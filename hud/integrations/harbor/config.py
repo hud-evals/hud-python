@@ -6,7 +6,6 @@ task row's ``task`` argument as a ``TaskSpec``; ``env.py`` reads both back.
 
 from __future__ import annotations
 
-import re
 import shlex
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -15,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from hud.environment.egress import Peer
 from hud.environment.workspace import Mount
+from hud.types import absolute_path_below_root
 
 if TYPE_CHECKING:
     from hud.runtime.compose import ComposeHealthcheck
@@ -23,23 +23,17 @@ if TYPE_CHECKING:
 class Artifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source: str = Field(pattern=r"^/")
+    source: str
     destination: str | None = None
     exclude: list[str] = Field(default_factory=list)
     service: str = Field(default="main", min_length=1)
+
+    _source_below_root = field_validator("source")(absolute_path_below_root)
 
     @model_validator(mode="before")
     @classmethod
     def expand_path(cls, value: Any) -> Any:
         return {"source": value} if isinstance(value, str) else value
-
-    @field_validator("source")
-    @classmethod
-    def normalize_source(cls, value: str) -> str:
-        path = PurePosixPath(value)
-        if len(path.parts) == 1 or ".." in path.parts:
-            raise ValueError("artifact source must name a path beneath /")
-        return str(path)
 
     @field_validator("destination")
     @classmethod
@@ -74,7 +68,7 @@ class HealthcheckConfig(BaseModel):
 
     @classmethod
     def from_compose(cls, value: ComposeHealthcheck) -> HealthcheckConfig | None:
-        if value.disable or value.test in (None, ["NONE"]):
+        if value.disabled:
             return None
         test = value.test
         assert test
@@ -84,30 +78,12 @@ class HealthcheckConfig(BaseModel):
             command = str(test[1])
         else:
             raise ValueError("Compose main healthcheck test must be CMD or CMD-SHELL")
-
-        def seconds(raw: str | None, default: float) -> float:
-            if raw is None:
-                return default
-            units = {
-                "ns": 1e-9,
-                "us": 1e-6,
-                "µs": 1e-6,
-                "ms": 1e-3,
-                "s": 1,
-                "m": 60,
-                "h": 3600,
-            }
-            parts = re.findall(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)", str(raw))
-            if not parts or "".join(number + unit for number, unit in parts) != raw:
-                raise ValueError(f"invalid Compose healthcheck duration {raw!r}")
-            return sum(float(number) * units[unit] for number, unit in parts)
-
         return cls(
             command=command,
-            interval_sec=seconds(value.interval, 30.0),
-            timeout_sec=seconds(value.timeout, 30.0),
-            start_period_sec=seconds(value.start_period, 0.0),
-            start_interval_sec=seconds(value.start_interval, 5.0),
+            interval_sec=value.interval_sec,
+            timeout_sec=value.timeout_sec,
+            start_period_sec=value.start_period_sec,
+            start_interval_sec=value.start_interval_sec,
             retries=value.retries if value.retries is not None else 3,
         )
 

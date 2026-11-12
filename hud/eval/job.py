@@ -99,6 +99,8 @@ async def trace_exit(trace: Trace) -> None:
             "reward": trace.reward,
             # A step error the agent recovered from isn't a trace error.
             "error": trace.error if trace.is_error else None,
+            "error_code": trace.error_code,
+            "error_source": trace.error_source,
             "evaluation_result": trace.evaluation or None,
             "stop_reason": trace.stop_reason,
             "metadata": trace.extra or None,

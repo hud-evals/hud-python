@@ -2,6 +2,8 @@
 
 from .compose import ComposeProject, DockerBindMount
 from .core import (
+    Checkpoint,
+    ExecResult,
     Provider,
     Runtime,
     RuntimeConfig,
@@ -9,6 +11,8 @@ from .core import (
     RuntimeLimits,
     RuntimeResources,
     RuntimeTPU,
+    RuntimeUnsupportedError,
+    SessionScope,
     Shared,
 )
 from .daytona import DaytonaRuntime
@@ -19,11 +23,13 @@ from .local import LocalRuntime, SubprocessRuntime
 from .modal import ModalEndpoint, ModalRuntime
 
 __all__ = [
+    "Checkpoint",
     "ComposeProject",
     "DaytonaRuntime",
     "DockerBindMount",
     "DockerEndpoint",
     "DockerRuntime",
+    "ExecResult",
     "HUDRuntime",
     "HostedRuntime",
     "LocalRuntime",
@@ -36,6 +42,8 @@ __all__ = [
     "RuntimeLimits",
     "RuntimeResources",
     "RuntimeTPU",
+    "RuntimeUnsupportedError",
+    "SessionScope",
     "Shared",
     "SubprocessRuntime",
 ]

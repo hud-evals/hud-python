@@ -85,7 +85,7 @@ robot = [
 ]
 
 modal = [
-    "modal>=1.0,<2",
+    "modal==1.6.3",
 ]
 
 daytona = [

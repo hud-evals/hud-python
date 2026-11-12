@@ -12,7 +12,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from dotenv import dotenv_values
@@ -36,6 +36,13 @@ _COMPOSE_VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # Applied to every HUD environment, and default-allow on purpose: Workspace's bwrap
 # sessions need the namespace and mount syscalls; unrelated kernel interfaces stay denied.
 SECCOMP_PROFILE = Path(__file__).parent / "docker-seccomp.json"
+
+# The Docker Engine that serves ``main`` when a project asks for Docker: a
+# daemon private to the environment, reached over ``DOCKER_HOST``.
+DOCKER_DAEMON_IMAGE = "docker:28.3.3-dind"
+DOCKER_DAEMON_SERVICE = "hud-docker"
+DOCKER_DAEMON_PORT = 2375
+DOCKER_HOST = f"tcp://{DOCKER_DAEMON_SERVICE}:{DOCKER_DAEMON_PORT}"
 
 
 class ComposeUnboundVariableError(ValueError):
@@ -162,7 +169,21 @@ def _interpolate_compose_node(
         )
 
 
+_DURATION = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)")
+_DURATION_UNITS = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
+
+
+def duration_seconds(text: str) -> float:
+    """A Compose duration (``1m30s``, ``500ms``) in seconds."""
+    parts = _DURATION.findall(text)
+    if not parts or "".join(number + unit for number, unit in parts) != text:
+        raise ValueError(f"invalid Compose duration {text!r}")
+    return sum(float(number) * _DURATION_UNITS[unit] for number, unit in parts)
+
+
 class ComposeHealthcheck(BaseModel):
+    """A service's healthcheck; the ``_sec`` properties apply Compose's defaults."""
+
     model_config = ConfigDict(extra="allow")
 
     disable: bool | None = None
@@ -172,6 +193,36 @@ class ComposeHealthcheck(BaseModel):
     start_period: str | None = None
     start_interval: str | None = None
     retries: int | None = None
+
+    @property
+    def disabled(self) -> bool:
+        return bool(self.disable) or self.test in (None, ["NONE"])
+
+    @property
+    def interval_sec(self) -> float:
+        return duration_seconds(self.interval) if self.interval is not None else 30.0
+
+    @property
+    def timeout_sec(self) -> float:
+        return duration_seconds(self.timeout) if self.timeout is not None else 30.0
+
+    @property
+    def start_period_sec(self) -> float:
+        return duration_seconds(self.start_period) if self.start_period is not None else 0.0
+
+    @property
+    def start_interval_sec(self) -> float:
+        return duration_seconds(self.start_interval) if self.start_interval is not None else 5.0
+
+
+class ComposeDependency(BaseModel):
+    """One ``depends_on`` entry: the condition the dependent service's start waits for."""
+
+    model_config = ConfigDict(extra="allow")
+
+    condition: Literal["service_started", "service_healthy", "service_completed_successfully"] = (
+        "service_started"
+    )
 
 
 class ComposePort(BaseModel):
@@ -198,6 +249,15 @@ class ComposeService(BaseModel):
     expose: list[str] = Field(default_factory=list)
     ports: list[ComposePort] = Field(default_factory=list)
     volumes: list[str | dict[str, Any]] = Field(default_factory=list)
+    depends_on: dict[str, ComposeDependency] = Field(default_factory=dict)
+    restart: str | None = Field(
+        default=None, pattern=r"^(no|always|unless-stopped|on-failure(:\d+)?)$"
+    )
+
+    @field_validator("depends_on", mode="before")
+    @classmethod
+    def normalize_depends_on(cls, value: Any) -> Any:
+        return {name: {} for name in value} if isinstance(value, list) else value
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -313,20 +373,24 @@ class ComposeConfig(BaseModel):
                 return current
             current = mode.removeprefix("service:")
 
-    def healthchecked_services(self) -> list[str]:
-        """Services startup waits on: started by default and declaring a live healthcheck.
+    def started_services(self) -> dict[str, ComposeService]:
+        """The services ``up`` starts by default: those without a profile or a zero scale."""
+        return {
+            name: service
+            for name, service in self.services.items()
+            if not (service.model_extra or {}).get("profiles")
+            and (service.model_extra or {}).get("scale") != 0
+        }
 
-        Naming a profiled or zero-scale service in ``up`` would start it, and
+    def healthchecked_services(self) -> list[str]:
+        """Started services declaring a live healthcheck, which startup waits on.
+
         ``up --wait`` fails on a service that exits, so only these are awaited.
         """
         return [
             name
-            for name, service in self.services.items()
-            if service.healthcheck is not None
-            and service.healthcheck.disable is not True
-            and service.healthcheck.test != ["NONE"]
-            and not (service.model_extra or {}).get("profiles")
-            and (service.model_extra or {}).get("scale") != 0
+            for name, service in self.started_services().items()
+            if service.healthcheck is not None and not service.healthcheck.disabled
         ]
 
     @classmethod
@@ -520,6 +584,9 @@ class ComposeProject(BaseModel):
 
     document: Path | ComposeConfig
     root: Path | ComposeProjectRef | None = None
+    # Give ``main`` a Docker daemon of its own, reachable at ``DOCKER_HOST``.
+    # The daemon sees only what ``main`` runs on it, never the project's other
+    # services or the host's containers.
     service_access: bool | None = None
 
     @field_validator("document", "root", mode="before")
@@ -581,7 +648,7 @@ class ComposeProject(BaseModel):
         *,
         port_service: str = "main",
         seccomp: str | Path,
-        service_socket: str | None = None,
+        docker: bool = False,
         bind_mounts: Sequence[DockerBindMount] = (),
         env_vars: Mapping[str, str] | None = None,
         cpu: float | None = None,
@@ -601,15 +668,6 @@ class ComposeProject(BaseModel):
             for target in ("/runtime/sessions", "/media/hud/sessions")
         ]
         volumes.extend(mount.compose_volume() for mount in bind_mounts)
-        if service_socket is not None:
-            volumes.extend(
-                {
-                    "type": "bind",
-                    "source": service_socket,
-                    "target": target,
-                }
-                for target in ("/var/run/docker.sock", "/media/hud/docker.sock")
-            )
         main: dict[str, Any] = {
             "security_opt": [
                 f"seccomp={seccomp}",
@@ -618,8 +676,24 @@ class ComposeProject(BaseModel):
             ],
             "volumes": volumes,
         }
-        if env_vars:
-            main["environment"] = dict(env_vars)
+        services: dict[str, Any] = {"main": main}
+        environment = dict(env_vars or {})
+        if docker:
+            environment["DOCKER_HOST"] = DOCKER_HOST
+            main["depends_on"] = {DOCKER_DAEMON_SERVICE: {"condition": "service_healthy"}}
+            services[DOCKER_DAEMON_SERVICE] = {
+                "image": DOCKER_DAEMON_IMAGE,
+                "privileged": True,
+                "environment": {"DOCKER_TLS_CERTDIR": ""},
+                "healthcheck": {
+                    "test": ["CMD", "docker", "info"],
+                    "interval": "2s",
+                    "timeout": "5s",
+                    "retries": 30,
+                },
+            }
+        if environment:
+            main["environment"] = environment
         if cpu is not None:
             main["cpus"] = cpu
         if memory_mb is not None:
@@ -638,12 +712,7 @@ class ComposeProject(BaseModel):
             )
             override = root / "override.json"
             override.write_text(
-                json.dumps(
-                    {
-                        "services": {"main": main},
-                        "volumes": {"hud-runtime-sessions": {}},
-                    }
-                ),
+                json.dumps({"services": services, "volumes": {"hud-runtime-sessions": {}}}),
                 encoding="utf-8",
             )
             ports = root / "ports.yaml"

@@ -6,13 +6,13 @@ from __future__ import annotations
 import asyncio
 import json
 import signal
-import socket
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from hud import Environment, Task
 from hud.clients import connect
+from hud.environment.server import PORT_ANNOUNCEMENT
 from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
@@ -102,11 +102,14 @@ async def test_grade_resumes_a_started_task_on_a_served_env(
 def test_a_task_starts_on_the_env_hud_serve_serves_until_interrupted(
     hud: Hud, project: Any
 ) -> None:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    server = hud.start("serve", "env.py", "--port", str(port))
+    server = hud.start("serve", "env.py", "--port", "0")
     try:
+        assert server.stdout is not None
+        port = next(
+            line.removeprefix(PORT_ANNOUNCEMENT)
+            for line in server.stdout
+            if line.startswith(PORT_ANNOUNCEMENT)
+        ).strip()
         url = f"tcp://127.0.0.1:{port}"
         result = hud("task", "start", "say-hello", "--source", "tasks.json", "--url", url)
     finally:
