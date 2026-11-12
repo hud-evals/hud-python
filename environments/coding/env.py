@@ -62,7 +62,6 @@ async def _shutdown() -> None:
         shutil.rmtree(_LOCAL_ROOT, ignore_errors=True)
 
 
-# Attached through the env so controller connections (e.g. hosted CLI inference) can bind to it.
 workspace: Workspace = env.workspace(
     REPO_DIR,
     guest_path=str(REPO_DIR),
