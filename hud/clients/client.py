@@ -18,6 +18,7 @@ from hud.capabilities.cdp import CDPClient
 from hud.capabilities.mcp import MCPClient
 from hud.capabilities.rfb import RFBClient
 from hud.capabilities.ssh import SSHClient
+from hud.clients.dial import dialer
 from hud.environment.utils import (
     CONTROL_FRAME_LIMIT_BYTES,
     encode_frame,
@@ -27,9 +28,10 @@ from hud.environment.utils import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Sequence
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
     from hud.capabilities.connection import Connection
+    from hud.clients.dial import Streams
     from hud.environment.egress import WorkspaceRoute
     from hud.runtime.core import Runtime
 
@@ -93,12 +95,12 @@ class HudClient:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
         *,
-        endpoint: tuple[str, int] | None = None,
+        dial: Callable[[], Awaitable[Streams]] | None = None,
     ) -> None:
         self._reader = reader
         self._writer = writer
-        # Dialed for capability tunnels; without one, bindings pass through unrouted.
-        self._endpoint = endpoint
+        # Opens connections for capability tunnels; without one, bindings pass through unrouted.
+        self._dial = dial
         self._ids = itertools.count(1)
         self._call_lock = asyncio.Lock()
         self._closed = False
@@ -158,8 +160,8 @@ class HudClient:
         bindings = [Capability.from_manifest(binding) for binding in result["bindings"]]
         self.manifest = Manifest(session_id=result["session_id"], bindings=bindings)
         self._routes.clear()
-        if self._endpoint is not None:
-            host, port = self._endpoint
+        if self._dial is not None:
+            dial = self._dial
 
             async def forward(
                 capability: Capability,
@@ -171,14 +173,9 @@ class HudClient:
                 self._tunnels.add(task)
                 try:
                     try:
-                        up_reader, up_writer = await asyncio.open_connection(host, port)
+                        up_reader, up_writer = await dial()
                     except OSError as exc:
-                        LOGGER.warning(
-                            "tunnel peer %s:%d connection failed: %s",
-                            host,
-                            port,
-                            exc,
-                        )
+                        LOGGER.warning("tunnel to the control channel failed: %s", exc)
                         writer.close()
                         return
                     await send_frame(
@@ -368,8 +365,7 @@ class HudClient:
 
 
 async def _connect_ready(
-    host: str,
-    port: int,
+    dial: Callable[[], Awaitable[Streams]],
     *,
     ready_timeout: float,
     workspace_routes: Sequence[WorkspaceRoute],
@@ -384,14 +380,14 @@ async def _connect_ready(
     deadline = loop.time() + ready_timeout
     while True:
         try:
-            reader, writer = await asyncio.open_connection(host, port)
+            reader, writer = await dial()
         except OSError:
             if loop.time() >= deadline:
                 raise
             await asyncio.sleep(interval)
             continue
 
-        client = HudClient(reader, writer, endpoint=(host, port))
+        client = HudClient(reader, writer, dial=dial)
         try:
             await client.hello(workspace_routes=workspace_routes)
         except asyncio.CancelledError:
@@ -437,14 +433,8 @@ async def connect(
     The host's teardown stays with its provider. While open, a periodic heartbeat
     probes the transport; a transport failure cancels the body and raises that error.
     """
-    parts = urlsplit(runtime.url)
-    if parts.scheme not in ("", "tcp"):
-        raise NotImplementedError(
-            f"control transport {parts.scheme!r} not supported yet (only tcp://)",
-        )
     client = await _connect_ready(
-        parts.hostname or "127.0.0.1",
-        parts.port or 0,
+        dialer(runtime.url, runtime.params),
         ready_timeout=_runtime_ready_timeout(runtime, ready_timeout),
         workspace_routes=workspace_routes,
     )

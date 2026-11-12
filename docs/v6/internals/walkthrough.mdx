@@ -383,7 +383,8 @@ The pointer follows `stack.enter_async_context` in order. First stop: `runtime(t
 step is the **env side** of the protocol, the provider and the environment together, which the
 [agent side](#connecting) then connects to. Two pieces make it up: the environment's serving code,
 which runs identically inside whatever host holds it, and the provider, which brings that
-host up and hands back a `tcp://` url reaching its control port.
+host up and hands back a url reaching its control port: `tcp://` for a plain socket, `tls://` for one inside
+TLS, `ws://` or `wss://` for a WebSocket that carries the stream.
 
 ### The serving code
 
@@ -455,7 +456,7 @@ port a different way:
 | `DockerRuntime` | a `docker run` container | publishing the port, reading the `docker port` mapping |
 | `ModalRuntime` | a Modal sandbox | a raw-TCP tunnel (`unencrypted_ports`) |
 | `DaytonaRuntime` | a Daytona sandbox | an SSH local-forward to a local port |
-| `HUDRuntime` | a HUD-hosted env | a WebSocket tunnel behind a local TCP listener |
+| `HUDRuntime` | a HUD-hosted env | the gateway's WebSocket tunnel (`wss://`), dialed directly |
 | `Runtime(url)` | one already served elsewhere | nothing - the url passes straight through |
 
 Whichever provider ran, the result is a `Runtime(url)` whose server is listening. The pointer
