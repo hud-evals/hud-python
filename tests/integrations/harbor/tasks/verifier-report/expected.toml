@@ -1,4 +1,4 @@
-# The first failure of a long verifier report stays on the evaluation.
+# A long verifier report stays on the evaluation whole, its middle included.
 base = "agent-answer"
 reward = 0.0
-error = "FAILED tests/test_outputs.py::test_answer"
+error = "PASSED tests/test_outputs.py::test_case_250\n"

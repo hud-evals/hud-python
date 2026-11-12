@@ -140,14 +140,13 @@ def adapted(case: Case, sdk_wheel: Path, tmp_path: Path) -> harbor.AdaptResult:
 
 def report(trace: Trace) -> str:
     """Everything a failed trace says about why, for assertions and their messages."""
-    evaluation = trace.evaluation
-    info = evaluation.get("info") or {}
+    info = trace.grade.info
     return "\n".join(
         str(part)
         for part in (
             trace.content,
             trace.error,
-            evaluation.get("content"),
+            trace.grade.content,
             info.get("stdout"),
             info.get("stderr"),
         )

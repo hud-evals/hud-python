@@ -19,6 +19,7 @@ from hud.agents.types import AgentConfig
 from hud.capabilities import MCPClient
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime, Runtime
+from hud.telemetry import flush
 from hud.telemetry.context import set_trace_context
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.asgi import mcp_server
@@ -100,12 +101,14 @@ async def test_a_graded_rollout_reports_its_reward_evaluation_and_metadata(
     reporting: FakeServices,
 ) -> None:
     env = Environment("graded")
+    stdout = "PASS\n" * 20_000
 
     @env.template()
     async def check():
         yield "go"
         yield {
             "score": 0.5,
+            "info": {"stdout": stdout},
             "subscores": [{"name": "format", "weight": 1.0, "value": 0.5, "info": {"seen": True}}],
         }
 
@@ -124,7 +127,20 @@ async def test_a_graded_rollout_reports_its_reward_evaluation_and_metadata(
     )
     evaluation = exited["evaluation_result"]
     assert evaluation["score"] == 0.5
-    assert [(s["name"], s["value"]) for s in evaluation["subscores"]] == [("format", 0.5)]
+    assert "info" not in evaluation
+    (subscore,) = evaluation["subscores"]
+    assert (subscore["name"], subscore["value"], "info" in subscore) == ("format", 0.5, False)
+
+    assert flush(timeout=10)
+    (graded,) = [
+        span["attributes"]["hud.payload"]["task_call"]["result"]
+        for request in reporting.requests("telemetry", "POST", "/trace/{id}/telemetry-upload")
+        for span in request.json["telemetry"]
+        if span["attributes"].get("hud.schema") == "hud.step.v1"
+        and span["attributes"]["hud.payload"].get("task_call", {}).get("phase") == "evaluate"
+    ]
+    assert graded["info"] == {"stdout": stdout}
+    assert graded["subscores"][0]["info"] == {"seen": True}
 
 
 async def test_a_rollout_whose_agent_raised_reports_its_error_beside_its_grade(
