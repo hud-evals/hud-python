@@ -1,10 +1,4 @@
-"""``LLMJudgeGrader`` — per-criterion LLM evaluation.
-
-A self-contained implementation of weighted per-criterion judging: each criterion
-is graded ``MET``/``UNMET`` by an LLM in parallel, and the verdicts are combined
-by weight into a 0-1 score. No third-party dependency — it talks to the HUD
-inference gateway directly.
-"""
+"""``LLMJudgeGrader``: per-criterion LLM evaluation through the HUD inference gateway."""
 
 from __future__ import annotations
 
@@ -15,8 +9,10 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from hud.types import SubScore
+from hud.utils.gateway import build_gateway_client
+
 from .base import Grader
-from .results import SubScore
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -56,21 +52,10 @@ class _Criterion:
 
 
 class LLMJudgeGrader(Grader):
-    """Grade an answer against weighted criteria using an LLM judge.
+    """Grade an answer against weighted criteria with an LLM judge on the HUD gateway.
 
-    Uses the HUD inference gateway by default.
-
-    Example::
-
-        yield await combine(
-            BashGrader.grade(weight=0.4, command="pytest -q"),
-            LLMJudgeGrader.grade(
-                weight=0.6,
-                answer=answer,
-                criteria=["Correct", ("Well-reasoned", 2.0)],
-                question=prompt,
-            ),
-        )
+    Criteria are judged concurrently, one call each. A negative weight marks an error the
+    answer must not make, and counts as a penalty when the judge finds it.
     """
 
     name = "LLMJudgeGrader"
@@ -89,8 +74,6 @@ class LLMJudgeGrader(Grader):
         parsed = _parse_criteria(criteria)
         if not parsed:
             return SubScore(name=cls.name, value=0.0, info={"error": "no criteria provided"})
-
-        from hud.utils.gateway import build_gateway_client
 
         client = cast("AsyncOpenAI", build_gateway_client("openai"))
         answer_text = str(answer)
@@ -166,7 +149,10 @@ def _parse_verdict(content: str) -> tuple[bool, str]:
 
 
 def _rubric_value(subscores: list[SubScore]) -> float:
-    """Aggregate criterion verdicts into a rubric score."""
+    """Met positive weight minus met penalty weight, over total positive weight, in ``[0, 1]``.
+
+    With only penalties, ``1.0`` minus the met share of penalty weight.
+    """
     total_positive = sum(max(0.0, subscore.weight) for subscore in subscores)
     total_negative = sum(abs(subscore.weight) for subscore in subscores if subscore.weight < 0)
     weighted_sum = sum(subscore.value * subscore.weight for subscore in subscores)
@@ -175,6 +161,3 @@ def _rubric_value(subscores: list[SubScore]) -> float:
     if total_negative > 0:
         return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative))
     return 0.0
-
-
-__all__ = ["LLMJudgeGrader"]

@@ -1,7 +1,4 @@
-"""MCP server that exposes computer-use over VNC.
-
-Single tool ``computer`` backed by ``ClaudeComputerTool`` / ``RFBTool``.
-"""
+"""MCP server that exposes computer-use over VNC."""
 
 from __future__ import annotations
 
@@ -25,13 +22,13 @@ from pydantic import TypeAdapter
 from hud.agents.claude.tools.computer import ClaudeComputerTool
 from hud.agents.cli import WINDOWS_SHELLS
 from hud.agents.tools.base import AgentToolSpec
-from hud.capabilities import Capability
+from hud.capabilities.base import Capability
 from hud.capabilities.rfb import RFBClient, ScreenshotEncoding
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping
 
-    from hud.capabilities import SSHClient
+    from hud.capabilities.ssh import SSHClient
 
 RFB_CAPABILITY_ENV = "HUD_RFB_CAPABILITY"
 SCREENSHOT_ENCODING_ENV = "HUD_SCREENSHOT_ENCODING"
@@ -151,7 +148,7 @@ async def bridge_computer_mcp(
         local = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
-            "hud.agents.claude.sdk.computer_mcp",
+            "hud.agents.claude.cli.computer_mcp",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -213,12 +210,3 @@ async def _log_stream(
 
 if __name__ == "__main__":
     asyncio.run(run_computer_mcp())
-
-
-__all__ = [
-    "RFB_CAPABILITY_ENV",
-    "SCREENSHOT_ENCODING_ENV",
-    "bridge_computer_mcp",
-    "create_computer_mcp",
-    "run_computer_mcp",
-]

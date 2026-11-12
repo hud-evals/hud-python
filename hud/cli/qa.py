@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Any, cast
-from uuid import UUID  # noqa: TC003 - typer resolves argument annotations at runtime
+from typing import Any
+from uuid import UUID
 
 import typer
 from pydantic import ConfigDict, with_config
@@ -33,17 +32,6 @@ hud_console = HUDConsole()
 
 _POLL_INTERVAL_SECONDS = 2.0
 _TERMINAL_STATUSES = frozenset({"completed", "error", "cancelled"})
-_BOOLEAN_KEYS = (
-    ("is_false_negative", "False Negative"),
-    ("is_false_positive", "False Positive"),
-    ("is_reward_hacking", "Reward Hacking"),
-    ("is_prompt_misaligned", "Prompt Misaligned"),
-)
-_CAUSE = {
-    "agent": "Agent failure",
-    "eval": "Evaluation failure",
-    "platform": "Platform failure",
-}
 _VERDICT_STYLES = {"passed": "green", "failed": "red", "unknown": "yellow", "error": "magenta"}
 _SEVERITY_STYLES = {"error": "red", "warning": "yellow"}
 
@@ -76,192 +64,73 @@ _IDS_FIELD = {Level.trace: "trace_ids", Level.task: "task_ids"}
 
 
 @dataclass(frozen=True)
-class QaFinding:
-    title: str
-    description: str
-    fault: str | None = None
-    severity: str | None = None
+class _Finding:
+    summary: str
+    finding_type: str
+    severity: str
     action: str | None = None
     evidence: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
-class QaPresentation:
-    """How one QA result reads: ``kind`` is the schema it matched, ``tag`` the verdict."""
+class _Presentation:
+    """How one QA result reads: ``kind`` is ``pending``, ``result`` or ``unknown``; ``tag``
+    the verdict."""
 
     kind: str
     tag: str
-    label: str = "QA Result"
-    answer: str | None = None
     summary: str | None = None
     confidence: str | None = None
-    findings: tuple[QaFinding, ...] = ()
+    findings: tuple[_Finding, ...] = ()
 
 
-def _loads(raw: str) -> dict[str, Any] | None:
-    try:
-        loaded = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    return loaded if isinstance(loaded, dict) else None
+def _confidence(metadata: dict[str, Any]) -> str | None:
+    raw = metadata.get("confidence")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    if isinstance(raw, int | float):
+        return f"{round((raw / 100 if raw > 1 else raw) * 100)}%"
+    return None
 
 
-def _findings(items: list[Any], *title_keys: str) -> tuple[QaFinding, ...]:
-    findings: list[QaFinding] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        title = next(
-            (
-                item[key].strip()
-                for key in title_keys
-                if isinstance(item.get(key), str) and item[key].strip()
-            ),
-            "",
-        )
-        if not title:
-            continue
-        description = item.get("description")
-        fault = item.get("fault")
-        severity = item.get("severity")
-        action = item.get("recommended_action")
-        evidence = item.get("evidence_refs")
-        findings.append(
-            QaFinding(
-                title=title,
-                description=description.strip() if isinstance(description, str) else "",
-                fault=fault if isinstance(fault, str) else None,
-                severity=severity if isinstance(severity, str) else None,
-                action=action.strip() if isinstance(action, str) and action.strip() else None,
-                evidence=tuple(ref for ref in evidence if isinstance(ref, str))
-                if isinstance(evidence, list)
-                else (),
+def _from_result(result: dict[str, Any]) -> _Presentation:
+    """Read a ``qa_agent_result.v1`` result, the one shape the QA API returns."""
+    summary = result.get("summary")
+    return _Presentation(
+        "result",
+        str(result["verdict"]),
+        summary=summary.strip() or None if isinstance(summary, str) else None,
+        confidence=_confidence(result.get("metadata") or {}),
+        findings=tuple(
+            _Finding(
+                summary=finding["summary"],
+                finding_type=finding["finding_type"],
+                severity=finding["severity"],
+                action=finding.get("recommended_action") or None,
+                evidence=tuple(finding.get("evidence_refs") or ()),
             )
-        )
-    return tuple(findings)
+            for finding in result.get("findings") or ()
+        ),
+    )
 
 
-def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
-    """Read a QA result blob in any of the shapes agents emit."""
-    parts = [
-        value.strip()
-        for value in (parsed.get("summary"), parsed.get("reasoning"))
-        if isinstance(value, str) and value.strip()
-    ]
-    summary = "\n\n".join(dict.fromkeys(parts)) or None
-
-    confidence: str | None = None
-    metadata = parsed.get("metadata")
-    raw_confidence = parsed.get("confidence")
-    if raw_confidence is None and isinstance(metadata, dict):
-        raw_confidence = cast("dict[str, Any]", metadata).get("confidence")
-    if isinstance(raw_confidence, str) and raw_confidence.strip():
-        lowered = raw_confidence.strip().lower()
-        confidence = (
-            lowered
-            if lowered in {"high", "medium", "low", "very high", "very low"}
-            else raw_confidence.strip()
-        )
-    elif isinstance(raw_confidence, int | float):
-        share = raw_confidence / 100 if raw_confidence > 1 else raw_confidence
-        confidence = f"{round(share * 100)}%"
-
-    # qa_agent_result.v1: an explicit verdict plus findings.
-    verdict = parsed.get("verdict")
-    findings_raw = parsed.get("findings")
-    if verdict in ("passed", "failed", "unknown") and (
-        parsed.get("schema_version") == "qa_agent_result.v1" or isinstance(findings_raw, list)
-    ):
-        return QaPresentation(
-            "qa_result",
-            verdict,
-            summary=summary,
-            confidence=confidence,
-            findings=_findings(findings_raw if isinstance(findings_raw, list) else [], "summary"),
-        )
-
-    # Boolean agents: one is_* flag answers a yes/no question.
-    for key, label in _BOOLEAN_KEYS:
-        if key not in parsed:
-            continue
-        value = parsed[key]
-        if not isinstance(value, bool):
-            return QaPresentation(
-                "unknown", "unknown", label=label, summary=summary, confidence=confidence
-            )
-        return QaPresentation(
-            "boolean",
-            "failed" if value else "passed",
-            label=label,
-            answer="yes" if value else "no",
-            summary=summary,
-            confidence=confidence,
-        )
-
-    # Failure analysis: a list of problems, each attributed to a fault owner.
-    if isinstance(parsed.get("problems"), list):
-        findings = _findings(parsed["problems"], "problem", "title")
-        owners = {
-            (item.fault or "").strip().lower()
-            if (item.fault or "").strip().lower() in _CAUSE
-            else "unclear"
-            for item in findings
-        }
-        if not findings:
-            cause, tag = "No failure", "passed"
-        elif len(owners) != 1:
-            cause, tag = "Mixed failure", "failed"
-        elif "unclear" in owners:
-            cause, tag = "Unclear", "failed"
-        else:
-            cause, tag = _CAUSE[next(iter(owners))], "failed"
-        return QaPresentation(
-            "problems",
-            tag,
-            label="Failure Analysis",
-            answer=cause,
-            summary=summary,
-            confidence=confidence,
-            findings=findings,
-        )
-
-    return QaPresentation("unknown", "unknown", summary=summary, confidence=confidence)
-
-
-def _legacy_output(raw: dict[str, Any]) -> dict[str, Any]:
-    """A pre-backfill QA agent output, unwrapped from its ``output`` and ``content`` strings."""
-    parsed = raw
-    for key in ("output", "content"):
-        inner = parsed.get(key)
-        unwrapped = _loads(inner) if isinstance(inner, str) else None
-        if unwrapped is not None:
-            parsed = unwrapped
-    return parsed
-
-
-def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
+def _presentation(row: dict[str, Any]) -> _Presentation:
     """How a ``/v2/qa/results`` row reads; the row's own verdict wins over its output's."""
     status = str(row["status"])
     if status == "error":
         error = row.get("error")
-        return QaPresentation(
+        return _Presentation(
             "unknown", "error", summary=str(error) if error else "QA did not judge this subject."
         )
     if status != "completed":
-        return QaPresentation("pending", "unknown", label=status)
+        return _Presentation("pending", "unknown")
     result = row.get("result")
-    legacy = row.get("legacy_result")
-    if isinstance(result, dict):
-        view = _from_blob(cast("dict[str, Any]", result))
-    elif isinstance(legacy, dict):
-        view = _from_blob(_legacy_output(cast("dict[str, Any]", legacy)))
-    else:
-        view = QaPresentation("unknown", "unknown")
+    view = _from_result(result) if result is not None else _Presentation("unknown", "unknown")
     verdict = row.get("verdict")
     return replace(view, tag=str(verdict)) if verdict else view
 
 
-def _verdict(result: dict[str, Any], view: QaPresentation) -> Text:
+def _verdict(result: dict[str, Any], view: _Presentation) -> Text:
     if view.kind == "pending":
         return Text(str(result["status"]), style="dim")
     return Text(view.tag, style=_VERDICT_STYLES.get(view.tag, "yellow"))
@@ -296,7 +165,7 @@ def _print_results(results: list[dict[str, Any]], level: Level) -> None:
     table.add_column("Verdict", no_wrap=True)
     table.add_column("Summary")
     for result in results:
-        view = presentation_for_result(result)
+        view = _presentation(result)
         table.add_row(
             _subject_id(result),
             str(result["check_key"]),
@@ -312,26 +181,19 @@ def _print_results(results: list[dict[str, Any]], level: Level) -> None:
     hud_console.stdout.print(f"\n[dim]Tip: {results_command} for summaries and findings[/dim]")
 
 
-def _finding_panel(index: int, finding: QaFinding) -> Panel:
+def _finding_panel(index: int, finding: _Finding) -> Panel:
     body: list[RenderableType] = []
-    if finding.description:
-        body.append(Markdown(finding.description))
     if finding.action:
         body.append(Text.assemble(("Action: ", "bold"), finding.action))
-    details = [
-        f"{label}: {value}"
-        for label, value in (("severity", finding.severity), ("fault", finding.fault))
-        if value
-    ]
+    details = [f"type: {finding.finding_type}", f"severity: {finding.severity}"]
     if finding.evidence:
         details.append(f"evidence: {', '.join(finding.evidence)}")
-    if details:
-        body.append(Text("\n".join(details), style="dim"))
+    body.append(Text("\n".join(details), style="dim"))
     return Panel(
-        Group(*body) if body else Text("-", style="dim"),
-        title=Text(f"{index}. {finding.title}", style="bold"),
+        Group(*body),
+        title=Text(f"{index}. {finding.summary}", style="bold"),
         title_align="left",
-        border_style=_SEVERITY_STYLES.get(finding.severity or "", "dim"),
+        border_style=_SEVERITY_STYLES.get(finding.severity, "dim"),
         padding=(0, 1),
     )
 
@@ -340,7 +202,7 @@ def _print_result(result: dict[str, Any], web_url: str) -> None:
     """One result in full: verdict, details, markdown summary, findings, and links."""
     level = _level(result)
     subject_id = _subject_id(result)
-    view = presentation_for_result(result)
+    view = _presentation(result)
     hud_console.stdout.print(
         Panel.fit(
             Text.assemble((str(result["check_key"]), "bold cyan"), " ", (subject_id, "dim")),
@@ -353,8 +215,6 @@ def _print_result(result: dict[str, Any], web_url: str) -> None:
     details: list[tuple[str, str]] = []
     if level is Level.task:
         details.append(("Task version", str(result["subject_task_version_id"])))
-    if view.answer:
-        details.append((view.label if view.kind == "boolean" else "Cause", view.answer))
     if result["source"] != "analysis":
         details.append(("Source", str(result["source"])))
     if view.confidence:
@@ -444,7 +304,7 @@ def list_command(
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one check key per line, with no headers (for piping)."
     ),
-    level: Level | None = typer.Option(  # noqa: B008
+    level: Level | None = typer.Option(
         None, "--level", case_sensitive=False, help="Only the checks that run at this level."
     ),
 ) -> Any:
@@ -490,13 +350,11 @@ def qa_command(
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one check key per line, with no headers (for piping)."
     ),
-    level: Level | None = typer.Option(  # noqa: B008
+    level: Level | None = typer.Option(
         None, "--level", case_sensitive=False, help="Only the checks that run at this level."
     ),
 ) -> Any:
-    """List QA checks, or run and inspect them.
-
-    Without a verb, lists the checks. ``hud qa`` is an alias for ``hud qa list``.
+    """List QA checks (same as hud qa list), or run and inspect them with a subcommand.
 
     [not dim]Examples:
         hud qa
@@ -515,7 +373,7 @@ def run_checks(
         ...,
         help="QA check key from `hud qa list`, or several separated by commas.",
     ),
-    ids: list[UUID] = typer.Argument(  # noqa: B008
+    ids: list[UUID] = typer.Argument(
         ...,
         help=(
             "Completed evaluation trace UUIDs for trace-level checks, or task UUIDs for "
@@ -615,17 +473,17 @@ def run_checks(
         ]
 
     _print_results(results, level)
-    failed = any(presentation_for_result(result).tag != "passed" for result in results)
+    failed = any(_presentation(result).tag != "passed" for result in results)
     return Result(results) if failed else results
 
 
 @qa_app.command("results")
 def list_results(
-    ids: list[UUID] = typer.Argument(  # noqa: B008
+    ids: list[UUID] = typer.Argument(
         ...,
         help="Evaluation trace UUIDs, or task UUIDs with --level task (at most 100).",
     ),
-    level: Level = typer.Option(  # noqa: B008
+    level: Level = typer.Option(
         Level.trace, "--level", case_sensitive=False, help="Whether the IDs are traces or tasks."
     ),
     history: bool = typer.Option(

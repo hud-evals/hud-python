@@ -118,8 +118,9 @@ is the same eval `hud eval` runs, written out in Python.
 
 ```python run.py
 import asyncio
-from hud import Taskset, LocalRuntime
+from hud import Taskset
 from hud.agents import create_agent
+from hud.runtime import LocalRuntime
 
 agent = create_agent("claude-sonnet-4-5")
 ts = Taskset.from_file("tasks.py")
@@ -141,7 +142,7 @@ change to `env.py` or the tasks:
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com) sandbox per rollout |
 | `DaytonaRuntime("my-env")` | A fresh [Daytona](https://daytona.io) sandbox per rollout |
 | `HUDRuntime()` | Hosted infra, after `hud deploy` |
-| `Runtime("tcp://host:port")` | A substrate you started yourself |
+| `Runtime("tcp://host:port")` | A host you started yourself |
 
 The [runtime reference](/v6/reference/runtime) covers each constructor and how to bring your own.
 

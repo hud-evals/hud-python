@@ -1,12 +1,11 @@
 """Simple A2A client — send messages to a HUD chat server and print replies.
 
-Unlike example 04 (which puts an LLM in front of the A2A server), this
+Unlike ``llm_client.py``, which puts an LLM in front of the A2A server, this
 client forwards user input directly and streams the agent's response.
 
 Usage:
     # Terminal 1: start the A2A server
-    HUD_ENV=my-assistant HUD_TASK=assist HUD_MODEL=claude-haiku-4-5 \
-        uv run server.py
+    HUD_MODEL=claude-haiku-4-5 uv run server.py
 
     # Terminal 2: run this client
     uv run client.py

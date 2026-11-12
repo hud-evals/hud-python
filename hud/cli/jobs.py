@@ -1,13 +1,4 @@
-"""``hud jobs`` — list jobs, inspect traces, and cancel rollouts.
-
-Noun-verb surface:
-
-    hud jobs list              # recent jobs
-    hud jobs get <id>          # traces for one job
-    hud jobs cancel <id>       # cancel a job
-
-``hud jobs`` is an alias for ``hud jobs list``.
-"""
+"""``hud jobs`` — list jobs, inspect traces, and cancel rollouts."""
 
 from __future__ import annotations
 
@@ -195,7 +186,7 @@ def cancel_job_command(
         None, "--trace-id", "-t", help="Specific trace ID within the job to cancel."
     ),
     all_jobs: bool = typer.Option(
-        False, "--all", "-a", help="Cancel ALL active jobs for your account (panic button)."
+        False, "--all", "-a", help="Cancel every active job on your account."
     ),
     yes: bool = typer.Option(
         False,
@@ -296,10 +287,7 @@ def jobs_command(
     ),
     limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
 ) -> Any:
-    """List recent jobs.
-
-    Without a verb, lists the most recent jobs. ``hud jobs`` is an alias for
-    ``hud jobs list``.
+    """List recent jobs (same as hud jobs list).
 
     [not dim]Examples:
         hud jobs

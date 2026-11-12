@@ -21,7 +21,7 @@ from hud.types import Step, TextContent, ToolCall, ToolResult
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
-    from hud.capabilities import SSHClient
+    from hud.capabilities.ssh import SSHClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
@@ -321,6 +321,3 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
         )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))
         events.finish(returncode=returncode, stderr=stderr)
-
-
-__all__ = ["CodexCLIAgent"]

@@ -1,42 +1,42 @@
-"""Client for the HUD training (RL) service.
-
-A thin, async HTTP wrapper over the model-id-keyed training endpoints. One client
-instance targets one model string (the same string used for inference through the
-HUD gateway); training advances the weights behind that string in place.
-
-Every training call takes a sequence of trajectories, each either a ``trace_id``
-string (the service resolves recorded tokens + reward) or a :class:`hud.Run`
-(its trajectory + reward are extracted and sent inline). The two can be mixed.
-"""
+"""Client for the HUD training (RL) service."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import Counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar
+from uuid import UUID
+
+from pydantic import BaseModel
 
 from hud.agents.types import AgentStep
-from hud.train.base import BaseTrainingClient
+from hud.settings import settings
 from hud.train.types import (
     BackwardRequest,
+    CheckpointResponse,
     DatumTensors,
     ForwardBackwardRequest,
     ForwardBackwardResult,
     ForwardRequest,
     ForwardResult,
     LossFn,
+    OptimStepRequest,
     OptimStepResult,
     TrainInput,
     TrajectoryPayload,
-    TrajectorySample,
 )
+from hud.utils.exceptions import HudAuthenticationError
+from hud.utils.gateway import resolve_gateway_model
+from hud.utils.platform import PlatformClient
+from hud.utils.requests import make_request
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     import torch
 
-    from hud.eval.run import Run
+    from hud.types import Trace
 
     # A custom loss over a forward pass: given the per-datum tensors and the
     # current-policy logprobs as differentiable leaves, return (loss, metrics).
@@ -45,63 +45,53 @@ if TYPE_CHECKING:
         tuple["torch.Tensor", dict[str, float]],
     ]
 
+T = TypeVar("T")
+
+
+class _Losses(BaseModel):
+    losses: list[str]
+
+
 logger = logging.getLogger("hud.train.client")
 
 
-def _run_to_input(run: Run) -> TrainInput:
-    """Turn a graded :class:`hud.Run` into a training input: inline payload when
-    the run carries token-level samples (local rollout), else its ``trace_id``
-    (remote rollout, resolved server-side)."""
-    if run.trace.stop_reason == "timeout":
+def _trace_to_input(trace: Trace) -> TrainInput:
+    if trace.stop_reason == "timeout":
         raise ValueError("timed-out runs require an explicit training reward")
-    if run.grade.is_error:
+    if trace.grade.is_error:
         raise ValueError(
-            f"run {run.trace_id} has no valid grade, so its reward is not a training signal; "
+            f"trace {trace.trace_id} has no valid grade, so its reward is not a training signal; "
             "leave out its GRPO group or pass a TrajectoryPayload with an explicit reward"
         )
-    samples = run.trace.collect(lambda step: step.sample if isinstance(step, AgentStep) else None)
-    turns = [
-        TrajectorySample(
-            prompt_token_ids=sample.prompt_token_ids or None,
-            prompt_chunks=sample.prompt_chunks,
-            output_token_ids=sample.output_token_ids,
-            output_logprobs=sample.output_logprobs,
-        )
-        for sample in samples
-        if sample.output_token_ids
-    ]
+    samples = trace.collect(lambda step: step.sample if isinstance(step, AgentStep) else None)
+    turns = [sample for sample in samples if sample.output_token_ids]
     if turns:
-        return TrajectoryPayload(samples=turns, reward=run.reward, trace_id=run.trace_id)
-    if run.trace_id is not None:
-        return run.trace_id
+        return TrajectoryPayload(samples=turns, reward=trace.reward, trace_id=trace.trace_id)
+    if trace.trace_id is not None:
+        return trace.trace_id
     raise ValueError(
-        "run carries neither token-level samples nor a trace_id to train on; "
+        "trace carries neither token-level samples nor a trace_id to train on; "
         "it must come from a trainable-model rollout (local) or a reported trace (remote)"
     )
 
 
-def _to_inputs(trajectories: Sequence[str | Run | TrajectoryPayload]) -> list[TrainInput]:
-    """Normalize a mix of ``trace_id`` strings, inline ``TrajectoryPayload``s, and
-    ``Run``s to wire inputs. The first two pass through; a ``Run`` is converted."""
+def _to_inputs(trajectories: Sequence[str | Trace | TrajectoryPayload]) -> list[TrainInput]:
     return [
-        item if isinstance(item, str | TrajectoryPayload) else _run_to_input(item)
+        item if isinstance(item, str | TrajectoryPayload) else _trace_to_input(item)
         for item in trajectories
     ]
 
 
 def _check_groups(
-    trajectories: Sequence[str | Run | TrajectoryPayload],
+    trajectories: Sequence[str | Trace | TrajectoryPayload],
     group_size: int | None,
 ) -> None:
-    """Validate the batch's GRPO group structure client-side, before the round
-    trip. The service groups contiguous slices of ``group_size`` (the whole batch
-    when ``None``); when every item is a ``Run`` carrying a ``group_id``, each
-    slice must be exactly one of those groups. An incomplete or interleaved group
-    is an error: its advantage baseline is skewed. A batch where no group has any
-    reward spread only warns: every advantage normalizes to zero, which is a
-    legitimate sampling outcome for one batch but makes a later ``optim_step``
-    fail confusingly when it is the whole accumulation. Rewards are only visible
-    inline, so the spread check skips batches carrying ``trace_id`` strings."""
+    """Raise on incomplete or interleaved GRPO groups; warn when none has reward spread.
+
+    The service groups contiguous slices of ``group_size`` (the whole batch when ``None``),
+    so when every item is a trace carrying a ``group_id``, each slice must be one of those
+    groups. No spread zeroes every advantage, a legitimate outcome for one batch.
+    """
     n = len(trajectories)
     if group_size is not None and n % group_size != 0:
         raise ValueError(
@@ -140,19 +130,109 @@ def _check_groups(
         )
 
 
-class TrainingClient(BaseTrainingClient):
-    """Train an LLM model through the HUD training service.
+class TrainingClient:
+    """Train a model through the HUD training service.
 
-    The LLM modality client. Mirrors the Tinker split between gradient
-    accumulation (:meth:`forward_backward`) and the optimizer update
-    (:meth:`optim_step`, inherited from :class:`BaseTrainingClient`). :meth:`step`
-    chains both for the common case; :meth:`forward_backward_custom` runs a
-    caller-authored loss over per-token logprobs (:class:`DatumTensors`).
+    One handle on a model (a gateway slug or id) whose weights training advances in
+    place. As in Tinker, ``forward_backward`` accumulates gradients and ``optim_step``
+    applies them; ``step`` chains the two.
     """
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        api_url: str | None = None,
+    ) -> None:
+        self.model = model
+        self._api_key = api_key or settings.api_key
+        self._rl_url = (base_url or settings.hud_rl_url).rstrip("/")
+        self._api_url = (api_url or settings.hud_api_url).rstrip("/")
+        self._model_id: str | None = None
+
+    async def _resolve_model_id(self) -> str:
+        """The id the service keys on: a uuid as-is, else the catalog entry's, cached."""
+        if self._model_id is None:
+            try:
+                self._model_id = str(UUID(self.model))
+            except ValueError:
+                if not self._api_key:
+                    raise HudAuthenticationError(
+                        "HUD_API_KEY is required to resolve a model slug"
+                    ) from None
+                platform = PlatformClient(self._api_url, self._api_key)
+                entry = await asyncio.to_thread(resolve_gateway_model, self.model, platform)
+                self._model_id = entry.id
+        return self._model_id
+
+    async def _train_url(self, suffix: str) -> str:
+        model_id = await self._resolve_model_id()
+        return f"{self._rl_url}/v1/models/{model_id}/train/{suffix}"
+
+    async def _post(self, suffix: str, payload: dict[str, Any], reply: type[T]) -> T:
+        url = await self._train_url(suffix)
+        # Never auto-retry: gradients accumulate in place (a retry double-counts a batch)
+        # and optim_step checkpoints (a retry can save a step twice). The server owns
+        # recovery.
+        return await make_request(
+            "POST", url, json=payload, api_key=self._api_key, max_retries=0, reply=reply
+        )
+
+    async def _get(self, suffix: str, reply: type[T]) -> T:
+        url = await self._train_url(suffix)
+        return await make_request("GET", url, api_key=self._api_key, reply=reply)
+
+    async def available_losses(self) -> list[str]:
+        """The built-in ``loss_fn`` names this model's provider supports.
+
+        ``BuiltinLoss`` lists common ones; this list is authoritative.
+        """
+        return (await self._get("losses", _Losses)).losses
+
+    async def optim_step(
+        self,
+        *,
+        learning_rate: float,
+        beta1: float = 0.9,
+        beta2: float = 0.95,
+        eps: float = 1e-8,
+        weight_decay: float = 0.0,
+    ) -> OptimStepResult:
+        """Apply accumulated gradients and checkpoint; the gateway then serves the new weights.
+
+        Never retried automatically, since a duplicate submit would save a step twice.
+        """
+        request = OptimStepRequest(
+            learning_rate=learning_rate,
+            beta1=beta1,
+            beta2=beta2,
+            eps=eps,
+            weight_decay=weight_decay,
+        )
+        return await self._post("optim-step", request.model_dump(), OptimStepResult)
+
+    async def checkpoints(self) -> list[CheckpointResponse]:
+        """The model's checkpoint tree, oldest first, with each node's rewards and metrics."""
+        model_id = await self._resolve_model_id()
+        # The checkpoints endpoint lives on the catalog API.
+        url = f"{self._api_url}/v2/models/{model_id}/checkpoints"
+        return await make_request("GET", url, api_key=self._api_key, reply=list[CheckpointResponse])
+
+    async def head(self) -> CheckpointResponse | None:
+        """The checkpoint the gateway serves, or ``None`` while it serves the base weights."""
+        return next((c for c in await self.checkpoints() if c.is_active), None)
+
+    async def set_head(self, checkpoint_id: str) -> None:
+        """Promote a checkpoint to head; the next ``optim_step`` extends the tree from there."""
+        model_id = await self._resolve_model_id()
+        url = f"{self._api_url}/v2/models/{model_id}/head"
+        await make_request("PUT", url, json={"checkpoint_id": checkpoint_id}, api_key=self._api_key)
 
     async def forward_backward(
         self,
-        trajectories: Sequence[str | Run | TrajectoryPayload],
+        trajectories: Sequence[str | Trace | TrajectoryPayload],
         *,
         loss_fn: LossFn = "importance_sampling",
         loss_fn_config: dict[str, float] | None = None,
@@ -162,13 +242,10 @@ class TrainingClient(BaseTrainingClient):
     ) -> ForwardBackwardResult:
         """Accumulate gradients for a batch of trajectories with a built-in loss.
 
-        Each trajectory is a ``trace_id`` (resolved server-side), a ``Run`` (its
-        tokens + reward sent inline), or an inline :class:`TrajectoryPayload`
-        (hand-built tokens + reward — e.g. the opponent side of a self-play game).
-        Advantages are normalized within contiguous groups of ``group_size`` (all
-        trajectories as one group when ``None``). ``loss_fn_config`` forwards
-        provider-specific hyperparameters to the loss; ``None`` uses provider
-        defaults (the supported keys are provider-defined, so prefer defaults).
+        Each trajectory is a ``trace_id`` (resolved server-side), a graded trace, or a
+        hand-built ``TrajectoryPayload``. Advantages normalize within contiguous groups
+        of ``group_size``, or across the batch when ``None``. ``loss_fn_config`` keys
+        are provider-defined.
         """
         inputs = _to_inputs(trajectories)
         _check_groups(trajectories, group_size)
@@ -180,25 +257,19 @@ class TrainingClient(BaseTrainingClient):
             reward_scale=reward_scale,
             num_substeps=num_substeps,
         )
-        # exclude_none so optional fields a (possibly older) server doesn't know
-        # yet — e.g. a null prompt_chunks/trace_id — aren't sent and rejected.
-        return await self._post(
-            "forward-backward", request.model_dump(exclude_none=True), ForwardBackwardResult
-        )
+        return await self._post("forward-backward", request.model_dump(), ForwardBackwardResult)
 
     async def forward(
         self,
-        trajectories: Sequence[str | Run | TrajectoryPayload],
+        trajectories: Sequence[str | Trace | TrajectoryPayload],
         *,
         group_size: int | None = None,
         reward_scale: float = 1.0,
     ) -> ForwardResult:
         """Run a current-policy forward pass and return per-token tensors.
 
-        The first half of the custom-loss path: compute a loss over the returned
-        :class:`DatumTensors` (current-policy logprobs as differentiable leaves),
-        then send the gradients through :meth:`backward`. For the common case use
-        :meth:`forward_backward_custom`, which wires both halves together.
+        The first half of a custom loss, finished by ``backward``;
+        ``forward_backward_custom`` runs both.
         """
         inputs = _to_inputs(trajectories)
         _check_groups(trajectories, group_size)
@@ -207,7 +278,7 @@ class TrainingClient(BaseTrainingClient):
             group_size=group_size,
             reward_scale=reward_scale,
         )
-        return await self._post("forward", request.model_dump(exclude_none=True), ForwardResult)
+        return await self._post("forward", request.model_dump(), ForwardResult)
 
     async def backward(
         self,
@@ -220,14 +291,14 @@ class TrainingClient(BaseTrainingClient):
 
         ``weights[d][t]`` is ``-dC/dlogprobs`` for datum ``d``, token ``t`` (the
         Tinker cross-entropy backward convention), aligned with the
-        :attr:`ForwardResult.data` from the matching :meth:`forward`.
+        ``ForwardResult.data`` from the matching ``forward``.
         """
         request = BackwardRequest(forward_id=forward_id, weights=weights, metrics=metrics or {})
         return await self._post("backward", request.model_dump(), ForwardBackwardResult)
 
     async def forward_backward_custom(
         self,
-        trajectories: Sequence[str | Run | TrajectoryPayload],
+        trajectories: Sequence[str | Trace | TrajectoryPayload],
         loss_fn: CustomLossFn,
         *,
         group_size: int | None = None,
@@ -235,10 +306,8 @@ class TrainingClient(BaseTrainingClient):
     ) -> ForwardBackwardResult:
         """Accumulate gradients with a caller-authored, client-side loss.
 
-        ``forward`` → run ``loss_fn`` locally (torch autograd) → ship per-token
-        gradients to ``backward``. Any differentiable loss over π_θ and the
-        :class:`DatumTensors` scalars works (e.g. GLM double-sided IS). Requires
-        torch (``pip install 'hud[train]'``).
+        ``loss_fn`` runs under torch autograd over the forward pass's ``DatumTensors``
+        and current-policy logprobs. Requires the ``train`` extra.
         """
         try:
             import torch
@@ -265,7 +334,7 @@ class TrainingClient(BaseTrainingClient):
 
     async def step(
         self,
-        trajectories: Sequence[str | Run | TrajectoryPayload],
+        trajectories: Sequence[str | Trace | TrajectoryPayload],
         *,
         learning_rate: float,
         loss_fn: LossFn = "importance_sampling",
@@ -275,7 +344,10 @@ class TrainingClient(BaseTrainingClient):
         num_substeps: int = 1,
         weight_decay: float = 0.0,
     ) -> OptimStepResult:
-        """Convenience: one ``forward_backward`` followed by one ``optim_step``."""
+        """Run one ``forward_backward`` then one ``optim_step``.
+
+        The ``forward_backward`` metrics are discarded.
+        """
         await self.forward_backward(
             trajectories,
             loss_fn=loss_fn,

@@ -1,15 +1,4 @@
-"""``@instrument``: OTel-shaped debug spans for any function.
-
-Records one span per call — name, timing, status, args/result as span events —
-and queues it for export. Spans from this decorator are diagnostics: they carry
-no domain schema tag, so the platform surfaces them in debug tooling only. The
-canonical run record is the ``Step`` stream (``hud.types``), not this.
-
-Usage:
-    @hud.instrument
-    async def my_function(arg1, arg2):
-        ...
-"""
+"""``@instrument``: OTel-shaped debug spans for any function."""
 
 from __future__ import annotations
 
@@ -17,7 +6,8 @@ import functools
 import inspect
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast, overload
+import weakref
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
@@ -29,12 +19,14 @@ from hud.telemetry.span import (
     new_span_id,
     normalize_trace_id,
 )
-from hud.utils.serialization import JsonObject, JsonValue, json_safe_value
+from hud.utils.serialization import JsonObject, json_safe_value
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from typing import ParamSpec
+
+    from pydantic import JsonValue
 
     P = ParamSpec("P")
     R = TypeVar("R")
@@ -42,15 +34,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class _InstrumentedCallable(Protocol):
-    _hud_instrumented: bool
-    _hud_original: Callable[..., Any]
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+# The wrappers ``instrument`` made, so instrumenting one again returns it unchanged.
+_INSTRUMENTED: weakref.WeakSet[Callable[..., Any]] = weakref.WeakSet()
 
 
 def _serialize_value(value: Any, max_items: int = 10) -> JsonValue:
-    """Serialize a value for recording (domain-agnostic; pydantic models dump)."""
+    """JSON-safe form of ``value`` for a span event, with containers cut to ``max_items``."""
     if isinstance(value, str | int | float | bool | type(None)):
         return value
 
@@ -104,17 +93,14 @@ def instrument(
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[..., Any]:
-    """Record each call of ``func`` as an OTel-shaped debug span.
+    """Record each call of ``func`` as a debug span; calls outside a trace record nothing.
 
-    Args:
-        func: The function to instrument.
-        name: Custom span name (defaults to ``module.qualname``).
-        record_args: Record bound call arguments as a ``hud.request`` event.
-        record_result: Record the return value as a ``hud.result`` event.
+    The span is named ``module.qualname`` unless ``name`` is given, and carries the
+    arguments and result as ``hud.request`` and ``hud.result`` events.
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        if hasattr(func, "_hud_instrumented"):
+        if func in _INSTRUMENTED:
             return func
 
         func_module = getattr(func, "__module__", "unknown")
@@ -246,17 +232,10 @@ def instrument(
                 _emit_span(task_run_id, args, kwargs, start_time, start_perf, result, error)
 
         wrapper = async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
-        wrapper_state = cast("_InstrumentedCallable", wrapper)
-        wrapper_state._hud_instrumented = True
-        wrapper_state._hud_original = func
+        _INSTRUMENTED.add(wrapper)
 
         return wrapper
 
     if func is None:
         return decorator
     return decorator(func)
-
-
-__all__ = [
-    "instrument",
-]

@@ -1,10 +1,4 @@
-"""``hud harbor`` — import Harbor tasks and job runs into HUD tasksets.
-
-hud harbor import <folders...>   # import into a taskset and show the report
-hud harbor imports               # recent imports
-hud harbor report <import-id>    # one import's report
-hud harbor cancel <import-id>    # cancel an import
-"""
+"""``hud harbor`` — import Harbor tasks and job runs into HUD tasksets."""
 
 from __future__ import annotations
 
@@ -99,7 +93,7 @@ class _Target:
 
 @harbor_app.command("import")
 def import_command(
-    paths: list[Path] = typer.Argument(  # noqa: B008
+    paths: list[Path] = typer.Argument(
         ...,
         help="Harbor task, dataset, or job folders, or one .zip of them",
     ),

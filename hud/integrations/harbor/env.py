@@ -11,20 +11,21 @@ import shlex
 import shutil
 import socket
 import tempfile
-from collections.abc import AsyncGenerator, Generator  # noqa: TC003
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from hud.capabilities import Capability
-from hud.environment import Environment, Mount, Workspace
+from hud.capabilities.base import Capability
 from hud.environment.egress import ANY_HOST
-from hud.environment.env import current_session_id
-from hud.graders import EvaluationResult
+from hud.environment.env import Environment, current_session_id
+from hud.environment.workspace import Mount, Workspace
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
+from hud.types import EvaluationResult
 from hud.utils.process import ProcessResult, bound_shell_output, create_process_group_exec
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Generator
+
     from hud.environment.namespace import NamespaceProcess
 
 CONTROLLER_ROOT = Path("/controller")
@@ -100,10 +101,10 @@ GPU_DRIVER_MOUNTS = tuple(
 class Account:
     """A Docker ``USER`` spec resolved against an image's ``/etc/passwd`` and ``/etc/group``."""
 
-    #: The uid and gid to drop to; ``None`` keeps root.
+    # The uid and gid to drop to; ``None`` keeps root.
     identity: tuple[int, int] | None
-    #: ``HOME`` from the passwd entry of a non-root account; like Docker, it is only a
-    #: default beneath an explicit ``ENV HOME`` of the image.
+    # ``HOME`` from the passwd entry of a non-root account; like Docker, it is only a
+    # default beneath an explicit ``ENV HOME`` of the image.
     env: dict[str, str]
 
 

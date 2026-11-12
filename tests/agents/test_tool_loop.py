@@ -1,9 +1,9 @@
-"""What the provider agents' shared tool loop decides: how long a tool may take, when a
-lost workspace ends the run, and that colliding MCP tool names fail it.
+"""What the provider agents' shared tool loop decides: that a call cut off mid-arguments
+is refused, how long a tool may take, when a lost workspace ends the run, and that
+colliding MCP tool names fail it.
 
-The loop is one implementation every provider agent runs, so each rule is checked once,
-on the chat completions agent; what each provider does differently is
-``test_provider_agents``."""
+The loop is one implementation every provider agent runs, so each rule is checked on
+one agent; what each provider does differently is ``test_provider_agents``."""
 
 from __future__ import annotations
 
@@ -29,16 +29,16 @@ from tests.fixtures.relay import relay
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from hud.eval import Run
+    from hud import Trace
     from tests.conftest import HudEnv
     from tests.fixtures.models import ModelRequest, Models
     from tests.fixtures.relay import FlakyRelay
 
 
-def tool_results(run: Run) -> list[tuple[bool, str]]:
-    """Each tool step on ``run``'s trace, in order, as (whether it failed, its text)."""
+def tool_results(trace: Trace) -> list[tuple[bool, str]]:
+    """Each tool step on ``trace``, in order, as (whether it failed, its text)."""
     results = []
-    for step in run.trace.steps:
+    for step in trace.steps:
         if isinstance(step, ToolStep):
             assert step.result is not None
             text = "".join(b.text for b in step.result.content if isinstance(b, TextContent))
@@ -63,10 +63,10 @@ async def test_a_call_cut_off_mid_arguments_is_refused_and_the_model_can_reissue
     models.script([Turn(native=(cut_off,)), call("bash", command="touch fixed"), Turn(text="done")])
 
     task = workspace_task(root)
-    (run,) = (await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))).runs
+    (trace,) = (await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))).traces
 
-    (cut_failed, _), (reissued_failed, _) = tool_results(run)
-    assert (run.trace.status, run.trace.stop_reason) == ("completed", "done")
+    (cut_failed, _), (reissued_failed, _) = tool_results(trace)
+    assert (trace.status, trace.stop_reason) == ("completed", "done")
     assert (cut_failed, reissued_failed, sorted(path.name for path in root.iterdir())) == (
         True,
         False,
@@ -93,10 +93,10 @@ async def test_a_claude_call_cut_off_by_max_tokens_is_refused_and_the_model_can_
     )
 
     task = workspace_task(root)
-    (run,) = (await task().run(ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")))).runs
+    (trace,) = (await task().run(ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")))).traces
 
-    (cut_failed, _), (reissued_failed, _) = tool_results(run)
-    assert (run.trace.status, run.trace.stop_reason) == ("completed", "done")
+    (cut_failed, _), (reissued_failed, _) = tool_results(trace)
+    assert (trace.status, trace.stop_reason) == ("completed", "done")
     assert (cut_failed, reissued_failed, sorted(path.name for path in root.iterdir())) == (
         True,
         False,
@@ -141,16 +141,13 @@ async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
             return turns[request.turn] if request.turn < len(turns) else Turn(text="done")
 
         models.respond(answer)
-        (run,) = (
+        (trace,) = (
             await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", max_steps=10)))
-        ).runs
+        ).traces
 
-    assert run.trace.status == status
+    assert trace.status == status
     if status == "error":
-        assert run.trace.error == "SSH tool failure limit reached after 3 consecutive errors"
-
-
-# ─── the tool timeout ──────────────────────────────────────────────────
+        assert trace.error == "SSH tool failure limit reached after 3 consecutive errors"
 
 
 async def test_a_shell_call_past_the_tool_timeout_is_cut_off_and_the_run_goes_on(
@@ -166,15 +163,15 @@ async def test_a_shell_call_past_the_tool_timeout_is_cut_off_and_the_run_goes_on
     )
 
     task = workspace_task(root)
-    (run,) = (
+    (trace,) = (
         await task().run(
             OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", tool_timeout_seconds=1))
         )
-    ).runs
+    ).traces
     await asyncio.sleep(3)
 
-    (cut_failed, text), (quick_failed, _) = tool_results(run)
-    assert (run.trace.status, cut_failed, quick_failed) == ("completed", True, False)
+    (cut_failed, text), (quick_failed, _) = tool_results(trace)
+    assert (trace.status, cut_failed, quick_failed) == ("completed", True, False)
     assert "timed out after 1s" in text
     assert ((root / "late").exists(), (root / "quick").exists()) == (False, True)
 
@@ -185,7 +182,6 @@ async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeo
     """Claude's editor reads the file itself, so a fifo blocks it rather than the shell."""
     root = tmp_path / "ws"
     root.mkdir()
-    # Made here, not by a tool call: a sandbox's first command also pays for starting it.
     os.mkfifo(root / "pipe")
     edit = call(
         "str_replace_based_edit_tool",
@@ -197,18 +193,15 @@ async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeo
     models.script([edit, Turn(text="done")])
 
     task = workspace_task(root)
-    (run,) = (
+    (trace,) = (
         await task().run(
             ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", tool_timeout_seconds=1))
         )
-    ).runs
+    ).traces
 
-    *_, (failed, text) = tool_results(run)
-    assert (run.trace.status, failed) == ("completed", True)
+    *_, (failed, text) = tool_results(trace)
+    assert (trace.status, failed) == ("completed", True)
     assert "str_replace_based_edit_tool timed out after 1s" in text
-
-
-# ─── MCP tool names ────────────────────────────────────────────────────
 
 
 def named(name: str, *tools: str) -> FastMCP:
@@ -228,9 +221,11 @@ async def test_two_mcp_tools_qualified_to_one_name_fail_the_run(
         mcp_server(named("a__b", "c"), name="a__b") as second,
     ):
         task = workspace_task(tmp_path / "ws", capabilities=(first, second))
-        (run,) = (await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))).runs
+        (trace,) = (
+            await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))
+        ).traces
 
-    assert run.trace.error == (
+    assert trace.error == (
         "[agent loop] ValueError: MCP tool name collision after qualification: 'a__b__c'"
     )
     assert models.requests() == []

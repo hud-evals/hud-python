@@ -1,16 +1,4 @@
-"""Batching span exporter for the HUD telemetry backend.
-
-``queue_span`` hands each span to one background intake worker that batches by
-count *and* serialized byte-size, then dispatches each per-trace batch to a small
-pool of upload workers over a pooled HTTP connection — so the large image frames
-a robot rollout emits every tick upload in parallel instead of serially behind
-one connection. ``flush`` drains the queue and waits for the in-flight uploads to
-*finish* (not a fixed sleep); it also runs at interpreter exit.
-
-The upload workers are this module's own daemon threads rather than a
-``ThreadPoolExecutor``: the standard library shuts executors down before
-``atexit`` handlers run, which would leave the exit flush nothing to upload with.
-"""
+"""Batching span exporter for the HUD telemetry backend."""
 
 from __future__ import annotations
 
@@ -26,13 +14,13 @@ from typing import Any
 
 import httpx2
 
+from hud.settings import settings
 from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE
-from hud.utils import make_request_sync
+from hud.utils.requests import make_request_sync
 
 logger = logging.getLogger(__name__)
 
-# 8 parallel uploads with 4 MiB / 100-span batches drains a rollout's image
-# frames fastest without oversized POSTs.
+# Upload parallelism and batch caps sized for image-heavy rollouts without oversized POSTs.
 _UPLOAD_WORKERS = 8
 _MAX_BATCH_SPANS = 100
 _MAX_BATCH_BYTES = 4 * 1024 * 1024
@@ -42,21 +30,13 @@ _UPLOAD_RETRY_DELAY = 0.5
 _HTTP_TIMEOUT = httpx2.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0)
 
 
-class _Marker(threading.Event):
-    """An in-band flush (or stop) marker the intake worker honors in queue order."""
-
-    def __init__(self, *, stop: bool = False) -> None:
-        super().__init__()
-        self.stop = stop
-
-
 _Upload = tuple[str, list[dict[str, Any]], str, str]
 
 # The intake worker owns all batching state; it and the upload workers are
 # daemons that run for the process's life. ``_lock`` guards the thread/client
 # handles and ``_pending``, the count of uploads queued but not yet finished.
-_queue: queue.Queue[dict[str, Any] | _Marker] = queue.Queue()
-_uploads: queue.Queue[_Upload | None] = queue.Queue()
+_queue: queue.Queue[dict[str, Any] | threading.Event] = queue.Queue()
+_uploads: queue.Queue[_Upload] = queue.Queue()
 _pending = 0
 _worker: threading.Thread | None = None
 _uploaders: list[threading.Thread] = []
@@ -64,17 +44,11 @@ _client: httpx2.Client | None = None
 _lock = threading.Lock()
 _idle = threading.Condition(_lock)
 
-# Local file exporter — the second export target, independent of the backend.
 _local_lock = threading.Lock()
 
 
 def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
-    """Append one span as a JSON line to ``<local_dir>/<trace_id>.jsonl``.
-
-    Runs regardless of ``telemetry_enabled`` / ``api_key``. Set
-    ``HUD_TELEMETRY_LOCAL_DIR`` to choose a directory, or leave it unset while
-    uploads are off to write under ``~/.hud/spans``. Best-effort.
-    """
+    """Best-effort append of one span to ``<local_dir>/<trace_id>.jsonl``."""
     if not local_dir:
         return
     # Only I/O is best-effort: a config-shape error (e.g. a mock or wrong type
@@ -93,13 +67,15 @@ def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
 
 
 def queue_span(span: dict[str, Any]) -> None:
-    """Export a span: to the local file exporter (if set) and the HUD backend."""
-    from hud.settings import settings
+    """Write a span to the local span dir (if set) and queue it for the HUD backend.
 
+    Spans without a ``hud.task_run_id`` attribute are dropped. The backend upload needs
+    telemetry enabled and an API key.
+    """
     if not span.get("attributes", {}).get(TASK_RUN_ID_ATTRIBUTE):
         return
     _export_local(span, settings.span_dir)
-    if not settings.telemetry_enabled or not settings.api_key:
+    if not settings.reporting_enabled:
         return
     _ensure_worker()
     _queue.put(span)
@@ -108,9 +84,7 @@ def queue_span(span: dict[str, Any]) -> None:
 def flush(timeout: float = 10.0) -> bool:
     """Drain queued spans and wait for their uploads to finish.
 
-    Puts a marker behind everything queued so far, waits for the worker to reach
-    it, then waits for the dispatched uploads to complete. Returns ``False`` if it
-    did not fully drain within ``timeout``.
+    Returns ``False`` if it did not fully drain within ``timeout``.
     """
     with _lock:
         worker = _worker
@@ -118,35 +92,12 @@ def flush(timeout: float = 10.0) -> bool:
         return True
 
     deadline = time.monotonic() + timeout
-    marker = _Marker()
+    marker = threading.Event()
     _queue.put(marker)
     if not marker.wait(max(0.0, deadline - time.monotonic())):
         return False
     with _idle:
         return _idle.wait_for(lambda: _pending == 0, max(0.0, deadline - time.monotonic()))
-
-
-def reset(timeout: float = 30.0) -> None:
-    """Flush, stop the workers, and close the HTTP client (tests/benchmarks)."""
-    global _worker, _client, _pending
-    with _lock:
-        worker, uploaders, client = _worker, list(_uploaders), _client
-    if worker is not None and worker.is_alive():
-        flush(timeout)
-        stop = _Marker(stop=True)
-        _queue.put(stop)
-        stop.wait(timeout)
-        worker.join(timeout)
-    for _ in uploaders:
-        _uploads.put(None)
-    for uploader in uploaders:
-        uploader.join(timeout)
-    if client is not None:
-        client.close()
-    with _lock:
-        _worker = _client = None
-        _uploaders.clear()
-        _pending = 0
 
 
 def _ensure_worker() -> None:
@@ -162,6 +113,8 @@ def _ensure_worker() -> None:
                 keepalive_expiry=30.0,
             ),
         )
+        # Plain daemon threads, not a ThreadPoolExecutor: executors shut down before
+        # atexit handlers run, which would leave the exit flush nothing to upload with.
         _uploaders[:] = [
             threading.Thread(target=_upload_loop, name=f"hud-telemetry-upload-{i}", daemon=True)
             for i in range(_UPLOAD_WORKERS)
@@ -181,11 +134,9 @@ def _run() -> None:
         except queue.Empty:
             batch, nbytes = _dispatch(batch)
             continue
-        if isinstance(item, _Marker):
+        if isinstance(item, threading.Event):
             batch, nbytes = _dispatch(batch)
             item.set()
-            if item.stop:
-                return
             continue
         batch.append(item)
         nbytes += _span_bytes(item)
@@ -196,8 +147,6 @@ def _run() -> None:
 def _dispatch(batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     """Queue one upload per trace in the batch; return an empty batch."""
     global _pending
-    from hud.settings import settings
-
     api_key = settings.api_key
     if not batch or not api_key:
         return [], 0
@@ -213,7 +162,8 @@ def _dispatch(batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
 
 def _upload_loop() -> None:
     global _pending
-    while (upload := _uploads.get()) is not None:
+    while True:
+        upload = _uploads.get()
         try:
             _do_upload(*upload)
         finally:
@@ -253,6 +203,3 @@ def _span_bytes(span: dict[str, Any]) -> int:
 
 
 atexit.register(lambda: flush(timeout=30.0))
-
-
-__all__ = ["flush", "queue_span", "reset"]

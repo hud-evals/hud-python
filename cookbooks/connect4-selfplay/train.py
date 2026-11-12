@@ -14,8 +14,8 @@ Setup:
     hud models fork Qwen/Qwen3.5-4B --name c4-selfplay
 
 Run:
-    python train.py --model c4-selfplay
-    python train.py --model c4-selfplay --steps 20 --lr 1e-5 --validate-every 5
+    uv run python cookbooks/connect4-selfplay/train.py --model c4-selfplay
+    uv run python cookbooks/connect4-selfplay/train.py --model c4-selfplay --steps 20 --lr 1e-5 --validate-every 5
 """
 
 from __future__ import annotations
@@ -24,16 +24,15 @@ import argparse
 import asyncio
 import time
 
-from hud import Run, TrainingClient
+from hud import Job, Taskset, Trace
 from hud.agents import create_agent
-from hud.eval import Job, Taskset
-from hud.train import TrajectoryPayload, TrajectorySample
+from hud.agents.types import Sample
+from hud.train import TrainingClient, TrajectoryPayload
 
 from env import play_self
 
 
 def make_tasks(model: str) -> Taskset:
-    # 8 seeds: even → outer=X, odd → outer=O (symmetric first-move coverage)
     return Taskset("c4-self-play", [play_self(model=model, seed=i) for i in range(8)])
 
 
@@ -41,11 +40,11 @@ async def _run_validation(trained: str, opponent: str, games: int, step: int) ->
     val_agent = create_agent(trained, max_steps=30)
     val_tasks = Taskset("c4-validate", [play_self(model=opponent, seed=s) for s in range(games)])
     job = await val_tasks.run(val_agent)
-    wins = sum(1 for r in job.runs if r.reward == 1.0)
-    draws = sum(1 for r in job.runs if r.reward == 0.5)
-    losses = sum(1 for r in job.runs if r.reward == 0.0)
-    x_wins = sum(1 for i, r in enumerate(job.runs) if r.reward == 1.0 and i % 2 == 0)
-    o_wins = sum(1 for i, r in enumerate(job.runs) if r.reward == 1.0 and i % 2 != 0)
+    wins = sum(1 for r in job.traces if r.reward == 1.0)
+    draws = sum(1 for r in job.traces if r.reward == 0.5)
+    losses = sum(1 for r in job.traces if r.reward == 0.0)
+    x_wins = sum(1 for i, r in enumerate(job.traces) if r.reward == 1.0 and i % 2 == 0)
+    o_wins = sum(1 for i, r in enumerate(job.traces) if r.reward == 1.0 and i % 2 != 0)
     print(
         f"  [val@{step}] vs {opponent}: {wins}W/{draws}D/{losses}L  "
         f"mean={job.reward:.3f}  X-wins={x_wins}/{games // 2}  O-wins={o_wins}/{games - games // 2}"
@@ -81,20 +80,21 @@ async def main(
     for step in range(steps):
         t_step = time.perf_counter()
 
-        batch_start = len(session.runs)
+        batch_start = len(session.traces)
         t0 = time.perf_counter()
         await tasks.run(agent, job=session)
         t_rollout = time.perf_counter() - t0
-        batch = session.runs[batch_start:]
+        batch = session.traces[batch_start:]
 
-        combined: list[Run | TrajectoryPayload] = []
+        combined: list[Trace | TrajectoryPayload] = []
         inner_count = 0
 
-        for run in batch:
-            combined.append(run)
-            inner_dicts = run.grade.info.get("inner_samples", [])
+        for trace in batch:
+            if trace.grade.is_error:
+                continue
+            inner_dicts = trace.grade.info.get("inner_samples", [])
             inner_turns = [
-                TrajectorySample(
+                Sample(
                     prompt_token_ids=s["prompt_token_ids"],
                     output_token_ids=s["output_token_ids"],
                     output_logprobs=s.get("output_logprobs", []),
@@ -102,20 +102,19 @@ async def main(
                 for s in inner_dicts
                 if s.get("output_token_ids")
             ]
+            # A game trains as a group of two, so one the inner side never moved in is left out.
             if inner_turns:
                 inner_count += 1
-                combined.append(TrajectoryPayload(samples=inner_turns, reward=1.0 - run.reward))
-
-        # group_size=2 pairs each outer with its inner per game. Fall back to
-        # None (single group) if any inner samples are missing.
-        effective_group = 2 if inner_count == len(batch) else None
-        if effective_group is None:
-            print(f"  warning: {len(batch) - inner_count}/{len(batch)} games missing inner samples")
+                combined.append(trace)
+                combined.append(TrajectoryPayload(samples=inner_turns, reward=1.0 - trace.reward))
 
         print(f"  rollout done: {t_rollout:.1f}s  {len(batch)} games  {len(combined)} trajectories")
+        if not combined:
+            raise RuntimeError(f"step {step + 1}: no game produced both sides to train on")
 
         t0 = time.perf_counter()
-        await trainer.forward_backward(combined, loss_fn="ppo", group_size=effective_group)
+        # Each game is one group of two: the outer side and its inner opponent.
+        await trainer.forward_backward(combined, loss_fn="ppo", group_size=2)
         t_fwdbwd = time.perf_counter() - t0
 
         t0 = time.perf_counter()

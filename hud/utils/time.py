@@ -6,8 +6,5 @@ from datetime import UTC, datetime
 
 
 def now_iso() -> str:
-    """Current time as an ISO-8601 string with a ``Z`` suffix.
-
-    The wire format for step and span timestamps.
-    """
+    """Current time as an ISO-8601 string with a ``Z`` suffix."""
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")

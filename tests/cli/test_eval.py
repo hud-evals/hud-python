@@ -1,4 +1,4 @@
-"""``hud eval``: run real rollouts of a taskset with a scripted model, where each row says."""
+"""``hud eval``: real rollouts of a taskset with a scripted model, placed where each row says."""
 
 from __future__ import annotations
 
@@ -61,9 +61,6 @@ def run(hud: Hud, *argv: str) -> Any:
     result = hud("eval", *argv, "--yes", "--json")
     assert result.exit_code == 0, result
     return result.json
-
-
-# ─── results ────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -137,9 +134,6 @@ def test_eval_runs_the_tasks_it_selects(
     assert sorted(request.prompt for request in gateway.requests()) == prompts
 
 
-# ─── how the agent reaches its model ────────────────────────────────────
-
-
 GLM = {
     "id": "z-ai/glm-5.2",
     "model_name": "z-ai/glm-5.2",
@@ -191,9 +185,9 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     config: str,
     expected: dict[str, Any],
 ) -> None:
-    """Provider SDKs read their own ``*_BASE_URL``, which here points at the scripted model."""
     signed_in.route("api", "GET", "/v2/models", json={"items": [GLM], "total": 1})
     (hud.cwd / ".hud_eval.toml").write_text(config)
+    # Provider SDKs read their own ``*_BASE_URL``; point them at the scripted model.
     hud_env.set(
         OPENAI_BASE_URL=gateway.url,
         ANTHROPIC_BASE_URL=gateway.url,
@@ -218,8 +212,6 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     }
     assert {name: observed[name] for name in expected} == expected
 
-
-# ─── project layouts ────────────────────────────────────────────────────
 
 ENV = 'from hud import Environment\nenv = Environment("local-test")\n'
 SOLVE = (
@@ -307,9 +299,6 @@ def test_eval_runs_a_projects_rows_in_the_environments_they_name(
     assert (document["run_count"], document["mean_reward"], document["error_count"]) == outcome
 
 
-# ─── planning and refusals ──────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     ("config", "argv", "hosted"),
     [
@@ -351,9 +340,6 @@ def test_eval_runs_each_row_where_its_placement_says(
     assert document["mean_reward"] == (0.5 if hosted else 1.0)
     assert len(signed_in.requests("api", "POST", "/v2/rollouts/submit")) == hosted
     assert [request.prompt for request in gateway.requests()] == ([] if hosted else ["solve 0"])
-
-
-# ─── interruption ───────────────────────────────────────────────────────
 
 
 def test_interrupting_a_hosted_eval_cancels_every_rollout_on_the_platform(

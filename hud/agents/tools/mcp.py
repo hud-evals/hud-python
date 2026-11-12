@@ -1,17 +1,11 @@
-"""MCPTool: capability base for tools that pipe one upstream MCP tool through an ``MCPClient``.
-
-``ToolAgent`` enumerates ``client.list_tools()`` after the MCP handshake and
-constructs one instance of every ``MCPTool`` subclass in its catalog per
-discovered upstream tool. ``execute`` forwards straight through
-``client.call_tool``.
-"""
+"""MCPTool: capability base for tools that proxy one upstream MCP tool."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 from hud.agents.tools.base import AgentTool, AgentToolSpec
-from hud.capabilities import MCPClient
+from hud.capabilities.mcp import MCPClient
 
 if TYPE_CHECKING:
     from hud.types import Tool, ToolResult
@@ -40,6 +34,3 @@ class MCPTool(AgentTool[MCPClient]):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         return await self.client.call_tool(self.mcp_tool.name, arguments)
-
-
-__all__ = ["MCPTool"]

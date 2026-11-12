@@ -236,7 +236,9 @@ class ProcessGroup:
         *,
         max_wait: float | None = None,
     ) -> ProcessResult:
-        """Capture output and teardown, reporting timeout as process data.
+        """Wait up to ``max_wait`` for the leader, tear the group down, and return its output.
+
+        A timeout sets ``timed_out`` instead of raising.
 
         The deadline follows the process leader rather than pipe EOF: a
         background child may inherit the pipes after the leader has finished.
@@ -278,9 +280,9 @@ class ProcessGroup:
                     for reader in pending:
                         reader.cancel()
                     if pending:
-                        # asyncio exposes no public way to close subprocess pipes
-                        # still held by a child which left the managed group.
-                        cast("Any", self.process)._transport.close()
+                        # A child that left the group still holds the pipes, and asyncio
+                        # has no public way to close a subprocess's pipes.
+                        cast("Any", self.process)._transport.close()  # noqa: SLF001
                     await asyncio.gather(*pending, return_exceptions=True)
                     for reader in done:
                         reader.result()
@@ -387,7 +389,7 @@ async def _wait_for_process_group_exit(process_group: int, max_wait: float) -> b
 
 
 def run_until_terminated(main: Coroutine[Any, Any, T]) -> T:
-    """``asyncio.run(main)``, where SIGTERM cancels *main* like Ctrl-C and exits 143.
+    """``asyncio.run(main)``, where SIGTERM cancels ``main`` like Ctrl-C and exits 143.
 
     Only entry points that own the process call this: the handler is process-wide.
     """

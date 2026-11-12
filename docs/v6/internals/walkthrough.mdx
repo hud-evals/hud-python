@@ -18,7 +18,7 @@ On this page: [What we start with](#what-we-start-with) · [Start point: the sch
 Before anything runs, we start with an `env.py` file with the **environment** declaration and **task
 templates** registered on it. 
 
-An `@env.template()` decorator turns an async generator into a `_TaskFactory` and stores it in
+An `@env.template()` decorator turns an async generator into a `TaskTemplate` and stores it in
 `env.tasks`. The generator body *is* the task: advancing the generator to first `yield` returns (yields) 
 the prompt, the value sent back is
 the answer, second `yield` is the score.
@@ -53,19 +53,22 @@ is exactly the `asend(...)` call.
 def decorate(func):
     if not inspect.isasyncgenfunction(func):
         raise TypeError(...)                 # must be `async def ... yield`
-    task = _TaskFactory(self, id or func.__name__, description, func, ...)
+    task = TaskTemplate(self, id or func.__name__, description, func, ...)
     self.tasks[task_id] = task               # registered on the env
     return task
 ```
 
-Calling the factory runs nothing. It binds the args and returns a `Task` row - the row's `env` is
-the environment's *name* (a string), not a live object.
+Calling the template runs nothing. It binds the args and returns a `Task` row - the row's `env` is
+the environment's *name* (a string). The live object rides along as `environment`, so a local run
+can serve it, and is never serialized.
 
-```python hud/environment/env.py · _TaskFactory.__call__
+```python hud/environment/env.py · TaskTemplate.__call__
 def __call__(self, *args, **kwargs) -> EvalTask:
     from hud.eval.task import Task
     bound = self.sig.bind(*args, **kwargs)
-    return Task(env=self.env.name, id=self.id, args=dict(bound.arguments))
+    return Task(
+        env=self.env.name, id=self.id, args=dict(bound.arguments), environment=self.env
+    )
 ```
 
 A `Taskset` is just a named collection of those rows, indexed by slug:
@@ -110,7 +113,7 @@ async def run(self, agent, *, runtime=None, group=None, max_concurrent=None, ...
             return await _run(task, group_id)
 
     waves = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-    job.runs.extend(run for wave in waves for run in wave)
+    job.traces.extend(trace for wave in waves for trace in wave)
     return job
 ```
 </Accordion>
@@ -147,7 +150,7 @@ async def run(self, agent, *, runtime=None,
 
 <div className="part-label">2 · Register the Job receipt</div>
 
-A `Job` is the accumulator this call fills in and returns - every run below lands in `job.runs`.
+A `Job` is the accumulator this call fills in and returns - every trace below lands in `job.traces`.
 `job_enter` registers it with the platform so a running batch shows up before any rollout finishes.
 
 </div>
@@ -198,8 +201,8 @@ becomes the semaphore's capacity, capping how many rollouts run at once.
 `rollout` - the next hop. `gather` starts every `_one` at once, but `async with sem:` blocks all
 but `max_concurrent` of them until a running rollout exits and frees a slot.
 
-Each `_one` returns a one-`Run` list, so the nested `waves` gets flattened into individual runs
-before `job.runs.extend` appends them.
+Each `_one` returns a one-trace list, so the nested `waves` gets flattened into individual traces
+before `job.traces.extend` appends them.
 
 </div>
 <div className="guide-aside">
@@ -221,7 +224,7 @@ before `job.runs.extend` appends them.
 
     waves = await asyncio.gather(
         *(_one(t, gid) for t, gid in expanded))
-    job.runs.extend(run for wave in waves for run in wave)
+    job.traces.extend(trace for wave in waves for trace in wave)
     return job
 ```
 
@@ -262,9 +265,9 @@ async def rollout(task, agent, *, runtime, job_id=None, group_id=None, ...):
                 _phase = "grading"
 
         await _drive()
-        # ... failure isolation sets run = Run.failed(...) or marks the trace errored ...
-        await trace_exit(run)
-    return run
+        # ... failure isolation returns Trace.failed(...) or marks the trace errored ...
+        await trace_exit(trace)
+    return trace
 ```
 </Accordion>
 
@@ -351,9 +354,9 @@ _phase = "grading"
 
 <div className="part-label">4 · Unwind and report</div>
 
-`_drive` runs the whole nested block above; if it raises, failure isolation still produces a `run`
-(failed, or with an errored trace) before `trace_exit` closes the trace and the graded - or
-failed - `Run` returns.
+`_drive` runs the whole nested block above; if it raises, failure isolation still produces a trace
+(`Trace.failed`, or the run's trace marked errored) before `trace_exit` closes it and the graded - or
+failed - trace returns.
 
 </div>
 <div className="guide-aside">
@@ -362,10 +365,10 @@ failed - `Run` returns.
 
 ```python
 await _drive()
-# ... failure isolation sets run = Run.failed(...)
+# ... failure isolation returns Trace.failed(...)
 # or marks the trace errored ...
-await trace_exit(run)
-return run
+await trace_exit(trace)
+return trace
 ```
 
 </div>
@@ -379,12 +382,12 @@ The pointer follows `stack.enter_async_context` in order. First stop: `runtime(t
 `(task) -> async context manager yielding a Runtime` (see [placement](/v6/internals/placement)). This whole
 step is the **env side** of the protocol, the provider and the environment together, which the
 [agent side](#connecting) then connects to. Two pieces make it up: the environment's serving code,
-which runs identically inside whatever substrate holds it, and the provider, which brings that
-substrate up and hands back a `tcp://` url reaching its control port.
+which runs identically inside whatever host holds it, and the provider, which brings that
+host up and hands back a `tcp://` url reaching its control port.
 
 ### The serving code
 
-Every substrate runs one entry point, `serve()` - the `python -m hud.environment.server` a
+Every host runs one entry point, `serve()` - the `python -m hud.environment.server` a
 `SubprocessRuntime` child runs, and the `hud serve` a container CMD runs both land here. It starts the
 env, binds the control channel, prints the bound port, and serves until torn down.
 
@@ -415,7 +418,7 @@ async def start(self):
 
 Then `bind` puts the env on one TCP port that carries both the control session and raw capability
 tunnels - the [control channel](/v6/internals/control-channel). The bound port is the only thing the provider
-needs back: child and container substrates announce it on stdout; the in-process provider reads it
+needs back: child and container hosts announce it on stdout; the in-process provider reads it
 straight off the socket.
 
 ### The provider
@@ -424,7 +427,7 @@ straight off the socket.
 On exit, it stops the server and calls `env.stop()`. The environment runs in the same
 Python process as the agent.
 
-```python hud/eval/runtime/local.py · LocalRuntime.__call__
+```python hud/runtime/local.py · LocalRuntime.__call__
 started = env.start()
 await asyncio.wait_for(started, ready_timeout)     # @env.initialize, bounded
 server = await bind(env, "127.0.0.1", 0)           # in-process control channel
@@ -442,10 +445,10 @@ Blocking environment code stalls other rollouts on the same event loop.
 `SubprocessRuntime` starts `python -m hud.environment.server <path> --env name` in a
 child process, reads `HUD_SERVE_PORT=` from its output, and stops the process on exit.
 
-Every other provider runs that same serve entry point inside a different substrate and reaches its
+Every other provider runs that same serve entry point inside a different host and reaches its
 port a different way:
 
-| Provider | Substrate | Reaches the control port by |
+| Provider | Host | Reaches the control port by |
 | --- | --- | --- |
 | `LocalRuntime` | this process | reading the bound socket directly (`_local`) |
 | `SubprocessRuntime` | a child process on this host | reading `HUD_SERVE_PORT=` from its stdout |
@@ -628,7 +631,7 @@ async def __aexit__(self, exc_type, exc, tb):
         await self.client.cancel(); return False
     answer = {"answer": self.trace.content}
     evaluation = await self.client.grade(answer)    # tasks.grade
-    self.grade = Grade.from_dict(evaluation)        # score -> run.grade.reward
+    self.trace.grade = parse_grade(evaluation)      # score -> trace.grade.reward
     self.record(Step(source="task", task_call=TaskCall(phase="evaluate", ...)))
     return False
 ```
@@ -660,8 +663,8 @@ async def grade(self, payload):
     return {"score": _score_value(evaluation)}
 ```
 
-The score travels back: `TaskRunner.grade` -> server reply -> `client.grade` -> `Grade.from_dict`
--> `run.grade.reward`.
+The score travels back: `TaskRunner.grade` -> server reply -> `client.grade` -> `parse_grade`
+-> `trace.grade.reward`.
 
 When `task.verifier` is present, the actor grade is provisional. A verifier in the same environment
 with no row-level runtime configuration starts on the existing client. Otherwise the actor client
@@ -671,11 +674,11 @@ replaces the actor grade. The full phase contract is documented in
 [verifier environments](/v6/experimental/verifier-environments#provisioning-order).
 
 The `AsyncExitStack` unwinds in reverse: `connect` closes the client (forwarders and socket),
-then the provider context exits and tears the substrate down - for `LocalRuntime` it cancels the
+then the provider context exits and tears the host down - for `LocalRuntime` it cancels the
 in-process server and runs `env.stop()` (`@env.shutdown`); for `SubprocessRuntime` it terminates
 the child, whose `serve` does the same on the way out. Back in `rollout`,
-`trace_exit(run)` reports the trace and the graded `Run` returns to `Taskset.run`, which collects it
-into `job.runs`.
+`trace_exit(trace)` reports the trace and the graded trace returns to `Taskset.run`, which collects it
+into `job.traces`.
 
 ## The whole chain
 
@@ -685,15 +688,15 @@ Every hop above, in order:
 
 1. `Taskset.run` - expand rows, register a `Job`, resolve placement, `gather` one `rollout` per (task, group).
 2. `rollout` - open an `AsyncExitStack`: provider, then connect, then `Run`.
-3. `runtime(task)` - bring the env up in its substrate: `LocalRuntime` serves it in-process via `_local`; `SubprocessRuntime` spawns the serve entry point and reads its announced port.
-4. `serve` (in the substrate) - `env.start()` (initialize hooks), `bind()` a TCP server, `serve_forever()`; the provider yields a `Runtime(url)`.
+3. `runtime(task)` - bring the env up in its host: `LocalRuntime` serves it in-process via `_local`; `SubprocessRuntime` spawns the serve entry point and reads its announced port.
+4. `serve` (in the host) - `env.start()` (initialize hooks), `bind()` a TCP server, `serve_forever()`; the provider yields a `Runtime(url)`.
 5. `connect(addr)` - retry until ready, `HudClient.hello()` -> server returns the `manifest`.
 6. `Run.__aenter__` - `client.start_task` -> `tasks.start` -> `TaskRunner.start` runs the generator to the first yield -> `prompt` back on `run.prompt`.
 7. **Checkpoint** - `run` holds a live client (manifest + suspended runner) and the prompt.
 8. `await agent(run)` - agent opens capabilities via `run.client`, loops, fills `run.trace` (answer on `trace.content`).
-9. `Run.__aexit__` - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `run.grade.reward`.
-10. Optional verifier - reuse the live substrate or finish actor cleanup and acquire the verifier substrate; start and grade the verifier with the actor result; replace the actor grade.
-11. Unwind - close the active client, stop the substrate (`serve` runs `env.stop()`), `trace_exit`, return the graded `Run` to `Taskset.run`.
+9. `Run.__aexit__` - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `trace.grade.reward`.
+10. Optional verifier - reuse the live host or finish actor cleanup and acquire the verifier host; start and grade the verifier with the actor result; replace the actor grade.
+11. Unwind - close the active client, stop the host (`serve` runs `env.stop()`), `trace_exit`, return the graded trace to `Taskset.run`.
 
 </div>
 
@@ -722,8 +725,8 @@ sequenceDiagram
     Roll->>Env: tasks.grade (Run.__aexit__)
     Env->>Env: TaskRunner.grade -> 2nd yield
     Env-->>Roll: score becomes Grade.reward
-    Prov->>Env: provider stops the substrate + env.stop()
-    Roll-->>Sched: graded Run
+    Prov->>Env: provider stops the host + env.stop()
+    Roll-->>Sched: graded trace
 ```
 
 ## Boundaries
@@ -741,10 +744,10 @@ This reading path exposes the boundaries encoded by the rollout engine.
   [control channel](/v6/internals/control-channel#the-suspended-task)). Vectorized robot sims reuse that
   shape: N sessions on one control port, each claiming a bridge slot by token.
 - **The agent loop runs in the caller's process.** Every provider except `HostedRuntime` is
-  *client-here*: the substrate can be anywhere, but `agent(run)` executes locally. With the
+  *client-here*: the host can be anywhere, but `agent(run)` executes locally. With the
   default `LocalRuntime` the env serves in this same process too, so its hooks share the caller's
   event loop and blocking env code stalls concurrent rollouts; `SubprocessRuntime` and
-  `DockerRuntime` move the env to its own substrate, where hooks run isolated from the caller.
+  `DockerRuntime` move the env to its own host, where hooks run isolated from the caller.
 - **Every capability is concrete by `hello` time.** `env.start()` runs all initialize hooks before
   serving, and the manifest is negotiated once. A capability published later will not appear in an
   already-connected client.

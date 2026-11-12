@@ -1,14 +1,11 @@
-"""HUD inference gateway: provider clients, and the model catalog they resolve against.
-
-Agent construction on top of the gateway lives in :func:`hud.agents.create_agent`.
-"""
+"""HUD inference gateway: provider clients, and the model catalog they resolve against."""
 
 from __future__ import annotations
 
 import difflib
 from datetime import UTC, datetime
-from functools import lru_cache
-from typing import TYPE_CHECKING
+from functools import cache
+from typing import TYPE_CHECKING, Literal, TypeAlias, get_args
 
 import httpx2
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
@@ -20,8 +17,8 @@ from hud.utils.exceptions import HudAuthenticationError, HudRequestError
 from hud.utils.platform import Page, PlatformClient
 
 if TYPE_CHECKING:
-    from typing import TypeAlias
-
+    # At runtime these load only where used: the SDKs are slow to import, and importing
+    # hud loads this module.
     from anthropic import AsyncAnthropic, AsyncAnthropicBedrock
     from google.genai import Client as GenaiClient
 
@@ -49,12 +46,22 @@ class GatewayModelInfo(BaseModel):
         return self.released_at or self.created_at or datetime.min.replace(tzinfo=UTC)
 
 
+# The provider APIs the gateway speaks and the SDK has keys and clients for.
+ModelProvider: TypeAlias = Literal["anthropic", "gemini", "openai"]
+
+
+def _require_provider(provider: str) -> None:
+    if provider not in get_args(ModelProvider):
+        expected = ", ".join(get_args(ModelProvider))
+        raise ValueError(f"unknown model provider {provider!r}; expected one of {expected}")
+
+
 async def _inject_trace_id(request: httpx2.Request) -> None:
-    """httpx2 request hook."""
+    """Attach the current trace headers to an outgoing request."""
     request.headers.update(get_trace_headers())
 
 
-def provider_api_key(provider: str) -> str | None:
+def provider_api_key(provider: ModelProvider) -> str | None:
     keys = {
         "anthropic": settings.anthropic_api_key,
         "gemini": settings.gemini_api_key,
@@ -63,20 +70,23 @@ def provider_api_key(provider: str) -> str | None:
     return keys[provider]
 
 
-def routes_to_gateway(provider: str, *, gateway: bool) -> bool:
-    """Whether *provider* traffic goes through the HUD gateway: when *gateway* forces it,
+def routes_to_gateway(provider: ModelProvider, *, gateway: bool) -> bool:
+    """Whether ``provider`` traffic goes through the HUD gateway: when ``gateway`` forces it,
     or when the provider has no key of its own and ``HUD_API_KEY`` is set.
     """
     return gateway or (not provider_api_key(provider) and bool(settings.api_key))
 
 
 def build_model_client(
-    provider: str, *, model: str | None = None, gateway: bool = False
+    provider: ModelProvider, *, model: str | None = None, gateway: bool = False
 ) -> GatewayClient:
-    """The provider's own key when set, otherwise the HUD gateway; *gateway* skips the
-    provider key. A Bedrock inference-profile ARN as the Anthropic *model* is only
-    reachable through Bedrock, so it cannot be combined with *gateway*.
+    """A ``provider`` SDK client using the provider's own key when set, otherwise the HUD
+    gateway; ``gateway`` forces the gateway.
+
+    A Bedrock inference-profile ARN as the Anthropic ``model`` needs the AWS credentials
+    and cannot use the gateway.
     """
+    _require_provider(provider)
     bedrock = provider == "anthropic" and model is not None and model.startswith("arn:aws:bedrock:")
     if bedrock and gateway:
         raise ValueError(f"{model} is a Bedrock inference profile; it cannot use the HUD gateway")
@@ -124,16 +134,12 @@ def build_model_client(
 GATEWAY_MAX_RETRIES = 6
 
 
-def build_gateway_client(provider: str) -> GatewayClient:
-    """A *provider* SDK client pointed at the HUD gateway, with trace headers attached."""
-    # Provider SDK clients bypass hud.utils.requests, so guard here.
+def build_gateway_client(provider: ModelProvider) -> GatewayClient:
+    """A ``provider`` SDK client pointed at the HUD gateway, with trace headers attached."""
+    _require_provider(provider)
     if not settings.api_key:
         raise HudAuthenticationError("HUD_API_KEY is required for HUD gateway clients")
 
-    provider = provider.lower()
-
-    # Anthropic and Gemini SDKs are optional extras; keep those imports on the
-    # provider branch so importing gateway utilities does not require both.
     if provider == "anthropic":
         from anthropic import AsyncAnthropic
         from anthropic import DefaultAsyncHttpxClient as AnthropicHttpClient
@@ -170,7 +176,6 @@ def build_gateway_client(provider: str) -> GatewayClient:
             ),
         )
 
-    # OpenAI-compatible (openai, azure, together, groq, fireworks, etc.)
     return AsyncOpenAI(
         api_key=settings.api_key,
         base_url=settings.hud_gateway_url,
@@ -181,12 +186,14 @@ def build_gateway_client(provider: str) -> GatewayClient:
     )
 
 
-@lru_cache(maxsize=1)
 def list_gateway_models(platform: PlatformClient | None = None) -> list[GatewayModelInfo]:
     """Models available through the HUD gateway (the whole platform model catalog),
-    as seen by *platform* (the settings' client when omitted)."""
-    if platform is None:
-        platform = PlatformClient.from_settings()
+    as seen by ``platform`` (the settings' client when omitted)."""
+    return _model_catalog(platform or PlatformClient.from_settings())
+
+
+@cache
+def _model_catalog(platform: PlatformClient) -> list[GatewayModelInfo]:
     models: list[GatewayModelInfo] = []
     while True:
         page = platform.get(

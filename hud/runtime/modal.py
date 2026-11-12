@@ -14,11 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from hud.environment.server import DEFAULT_PORT, default_serve_command
 from hud.utils.process import finish_output, stream_output
 
-from .compose import ComposeConfig
+from .compose import SECCOMP_PROFILE, ComposeConfig
 from .core import Runtime, RuntimeConfig, validate_session_id
-from .docker import _DOCKER_SECCOMP_PROFILE
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
     from hud.eval.task import Task
 
-logger = logging.getLogger("hud.eval.runtime")
+logger = logging.getLogger("hud.runtime")
 
 _MODAL_COMPOSE_CPU = 4.0
 _MODAL_COMPOSE_MEMORY_MB = 8192
@@ -37,6 +37,8 @@ _SESSION_ARCHIVE = "/runtime/session.tar.gz"
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ModalEndpoint(Runtime):
+    """The ``Runtime`` a ``ModalRuntime`` yields: its control channel and Modal ``sandbox``."""
+
     transports_sessions: ClassVar[bool] = True
 
     sandbox: modal.Sandbox
@@ -117,16 +119,10 @@ class ModalEndpoint(Runtime):
 class ModalRuntime:
     """The Modal provider: each acquisition ``Sandbox.create``s a fresh container.
 
-    The cloud :class:`DockerRuntime` — boots a sandbox from a pre-built image,
-    exposes the env's control channel as a raw-TCP tunnel (``unencrypted_ports``,
-    the only kind :func:`hud.clients.connect` dials), yields its :class:`Runtime`,
-    terminates on exit. Acquisitions are independent, so a batch fans out into
-    isolated containers (one ``sb-…`` id each).
-
-    The image resolves once (so concurrent rollouts can't race a build): pass a
-    published name — ``ModalRuntime("hud-libero-env")``, the preferred durable
-    handle — or, as an escape hatch, an ``Image`` to build lazily on first use.
-    Requires the ``modal`` extra and a configured token.
+    The control channel is exposed as a raw TCP tunnel, the only kind ``connect``
+    dials, and the sandbox terminates on exit. ``image_name`` names a published image;
+    an ``image`` is built once, on first use. Requires the ``modal`` extra and a
+    configured token.
     """
 
     def __init__(
@@ -138,7 +134,7 @@ class ModalRuntime:
         app: modal.App | None = None,
         app_name: str | None = None,
         workdir: str | None = None,
-        port: int = 8765,
+        port: int = DEFAULT_PORT,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
         env_vars: Mapping[str, str] | None = None,
         sandbox_secrets: Sequence[modal.Secret] | None = None,
@@ -152,20 +148,9 @@ class ModalRuntime:
         self.sandbox_secrets = tuple(sandbox_secrets or ())
         self.registry_secret = registry_secret
         self.workdir = workdir
-        # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint. Leave
-        # workdir unset by default so Modal preserves the image WORKDIR.
+        # An unset workdir keeps the image WORKDIR.
         self.command = (
-            tuple(command)
-            if command is not None
-            else (
-                "hud",
-                "serve",
-                "env.py",
-                "--host",
-                "0.0.0.0",  # noqa: S104 - serving inside the sandbox; the tunnel is the only ingress
-                "--port",
-                str(port),
-            )
+            tuple(command) if command is not None else ("sh", "-c", default_serve_command(port))
         )
         self.app = app
         self.app_name = "hud-envs" if app_name is None else app_name
@@ -173,8 +158,7 @@ class ModalRuntime:
         if runtime_config is not None:
             config = RuntimeConfig.model_validate(runtime_config)
         self.runtime_config = config
-        # Resolved (named) or built-once (from Dockerfile) image, behind a lock so
-        # concurrent first acquisitions build/look up exactly once.
+        # The lock makes concurrent first acquisitions build image exactly once.
         self._image = image
         self._resolved: modal.Image | None = None
         self._image_lock = asyncio.Lock()
@@ -186,7 +170,7 @@ class ModalRuntime:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         resources = config.resources
         if resources is not None:
-            resources._require_support("ModalRuntime", {"cpu", "memory_mb", "gpu"})
+            resources.require_support("ModalRuntime", {"cpu", "memory_mb", "gpu"})
             if resources.gpu is not None and len(resources.gpu.acceptable_types) > 1:
                 raise ValueError("ModalRuntime does not support alternative GPU types")
         project = config.compose
@@ -214,9 +198,7 @@ class ModalRuntime:
             image = (
                 modal.Image.from_id(config.image.removeprefix("modal://"))
                 if config.image.startswith("modal://")
-                else modal.Image.from_registry(
-                    config.image, secret=self.registry_secret
-                )  # pull auth
+                else modal.Image.from_registry(config.image, secret=self.registry_secret)
             )
         elif self.image_name is not None:
             image = modal.Image.from_name(self.image_name)
@@ -342,7 +324,7 @@ class ModalRuntime:
                     await sb.filesystem.copy_from_local.aio(files.override, "/hud/override.json")
                     await sb.filesystem.copy_from_local.aio(files.ports, "/hud/ports.yaml")
                     await sb.filesystem.copy_from_local.aio(
-                        _DOCKER_SECCOMP_PROFILE, "/hud/docker-seccomp.json"
+                        SECCOMP_PROFILE, "/hud/docker-seccomp.json"
                     )
                 compose_command = (
                     f"docker compose --project-directory {shlex.quote(project_directory)} "
@@ -405,7 +387,7 @@ class ModalRuntime:
                 compose=compose_path,
             )
         finally:
-            # check-free teardown: never shadow the run's own error.
+            # Best-effort teardown: never shadow the run's own error.
             if compose_path is not None:
                 with contextlib.suppress(Exception):
                     process = await sb.exec.aio(

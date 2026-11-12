@@ -29,11 +29,26 @@ if TYPE_CHECKING:
 
     from tests.conftest import Hud, HudEnv
     from tests.fixtures.models import Models
+    from tests.fixtures.services import FakeServices
 
 COOKBOOKS = ROOT / "cookbooks"
 MODULES = sorted(path for path in COOKBOOKS.rglob("*.py") if ".venv" not in path.parts)
 # The README commands that need no outside account: (cookbook, task source).
 LOCAL_RUNS = [("connect4-selfplay", "env.py"), ("daytona-rl", "tasks.py")]
+# The gateway catalog: connect4's self-play resolves its inner model through it.
+CATALOG = {
+    "items": [
+        {
+            "id": "cccccccc-0000-4000-8000-000000000201",
+            "name": "c4-selfplay",
+            "model_name": "team/c4-selfplay",
+            "sdk_agent_type": "openai_compatible",
+            "is_trainable": True,
+            "provider": {"name": "openai"},
+        }
+    ],
+    "total": 1,
+}
 
 pytestmark = pytest.mark.e2e
 
@@ -120,9 +135,10 @@ def test_a_cookbook_module_imports(path: Path) -> None:
 
 @pytest.mark.parametrize(("cookbook", "source"), LOCAL_RUNS, ids=[run[0] for run in LOCAL_RUNS])
 def test_a_cookbook_completes_its_local_run(
-    cookbook: str, source: str, models: Models, hud_env: HudEnv, hud: Hud
+    cookbook: str, source: str, models: Models, services: FakeServices, hud_env: HudEnv, hud: Hud
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
+    services.route("api", "GET", "/v2/models", json=CATALOG)
     models.respond(scripted)
 
     result = hud(

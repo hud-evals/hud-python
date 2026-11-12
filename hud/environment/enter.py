@@ -1,6 +1,6 @@
 """Enter a workspace sandbox and run a command there, dropping privileges on the way in.
 
-Started by :func:`hud.environment.namespace.entry_argv` from the server's
+Started by ``entry_argv`` from the server's
 interpreter: everything this process does before its final exec comes from the
 server's filesystem, so a view built from a task image needs to supply nothing
 but the command itself. A ``setpriv`` run inside the view would need util-linux
@@ -15,10 +15,10 @@ import os
 import signal
 import sys
 
-#: The namespaces a process can join, in the order util-linux nsenter joins them.
+# The namespaces a process can join, in the order util-linux nsenter joins them.
 _NAMESPACES = ("ipc", "uts", "net", "pid", "mnt")
-#: sys_admin, net_admin and net_raw: namespace root must not be able to inspect
-#: or redirect the authenticated verifier route while both briefly share its network.
+# sys_admin, net_admin and net_raw: namespace root must not be able to inspect
+# or redirect the authenticated verifier route while both briefly share its network.
 _DROPPED_CAPABILITIES = (21, 12, 13)
 _PR_CAPBSET_DROP = 24
 _PR_SET_NO_NEW_PRIVS = 38
@@ -31,7 +31,7 @@ def _check(libc: ctypes.CDLL, result: int) -> None:
 
 
 def _join(libc: ctypes.CDLL, descriptors: dict[str, int]) -> None:
-    """Join every namespace in *descriptors*; the user namespace as nsenter does.
+    """Join every namespace in ``descriptors``, the user namespace the way nsenter does.
 
     Joined first, a user namespace leaves no capability to join the others;
     joined last, it may be the one that grants them. So join the others

@@ -1,9 +1,4 @@
-"""ClaudeComputerTool: Claude's native ``computer_use`` schema, driven over RFB/VNC.
-
-Translates Claude's computer-use action vocabulary into ``RFBTool`` primitive
-calls. The same RFBTool helpers will back the future Gemini/OpenAI computer
-tools — only the LLM-facing schema differs.
-"""
+"""Claude's ``computer`` tool, executed over RFB."""
 
 from __future__ import annotations
 
@@ -12,9 +7,10 @@ import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.tools import RFBTool
+from PIL import Image
+
 from hud.agents.tools.base import tool_err, tool_ok
-from hud.agents.tools.rfb import keysym
+from hud.agents.tools.rfb import RFBTool, keysym
 from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
 from hud.types import ImageContent, ToolResult
 
@@ -44,10 +40,8 @@ def _hold_keys(text: str | None) -> list[str] | None:
     return keys or None
 
 
-# ─── Claude tool specs (per-model gating) ───────────────────────────
-
-#: Current Claude models take the computer toolset; only the older models listed in
-#: ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
+# Current Claude models take the computer toolset; only the older models listed in
+# ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
 COMPUTER_TOOLSET_SPEC = ClaudeToolSpec(api_type="computer_toolset_20260801", api_name="computer")
 
 CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
@@ -166,7 +160,11 @@ _COMPUTER_INPUT_SCHEMA: dict[str, Any] = {
 
 
 class ClaudeComputerTool(RFBTool):
-    """Claude's native ``computer_use`` schema, executed over an RFB capability."""
+    """Claude's ``computer`` tool over RFB.
+
+    The computer toolset for current Claude models, a versioned native schema for the older
+    models in ``CLAUDE_COMPUTER_SPECS``, and a function schema for other models.
+    """
 
     name = "computer"
 
@@ -238,8 +236,6 @@ class ClaudeComputerTool(RFBTool):
         except Exception as exc:
             logger.exception("ClaudeComputerTool action %s failed", action)
             return tool_err(f"computer action {action!r} failed: {exc}")
-
-    # ─── action dispatch ──────────────────────────────────────────────
 
     async def _dispatch(self, action: str | None, arguments: dict[str, Any]) -> ToolResult:
         match action:
@@ -352,10 +348,7 @@ class ClaudeComputerTool(RFBTool):
             case _:
                 return tool_err(f"unsupported computer action: {action!r}")
 
-        # Most actions return the post-action screenshot so the model can verify.
         return await self.screenshot()
-
-    # ─── zoom ────────────────────────────────────────────────────────
 
     async def _zoom(self, arguments: dict[str, Any]) -> ToolResult:
         region = arguments.get("region")
@@ -368,7 +361,7 @@ class ClaudeComputerTool(RFBTool):
             x0, y0, x1, y1 = (int(v) for v in region_seq)
         except (TypeError, ValueError):
             return tool_err("region must contain 4 integers")
-        screenshot, _ = await self.client.screenshot_png("image/png")
+        screenshot, _ = await self.client.screenshot("image/png")
         cropped, mime_type = _crop_png(screenshot, (x0, y0, x1, y1), self.screenshot_encoding)
         return ToolResult(
             content=[
@@ -379,9 +372,6 @@ class ClaudeComputerTool(RFBTool):
                 )
             ],
         )
-
-
-# ─── helpers ─────────────────────────────────────────────────────────
 
 
 def _xy(coordinate: Any) -> tuple[int | None, int | None]:
@@ -444,8 +434,6 @@ def _crop_png(
     region: tuple[int, int, int, int],
     encoding: ScreenshotEncoding,
 ) -> tuple[bytes, str]:
-    from PIL import Image
-
     image = Image.open(BytesIO(png))
     cropped = image.crop(region)
     buf = BytesIO()
@@ -454,11 +442,3 @@ def _crop_png(
     else:
         cropped.save(buf, format="PNG")
     return buf.getvalue(), encoding.mime_type
-
-
-__all__ = [
-    "CLAUDE_COMPUTER_SPECS",
-    "COMPUTER_TOOLSET_SPEC",
-    "GENERIC_COMPUTER_SPEC",
-    "ClaudeComputerTool",
-]

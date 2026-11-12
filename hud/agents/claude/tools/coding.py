@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
+from hud.agents.tools.ssh import SSHTool
 from hud.types import TextContent, ToolResult
 
 from .base import ClaudeToolSpec, is_anthropic_model
@@ -83,7 +83,10 @@ _TEXT_EDITOR_INPUT_SCHEMA: dict[str, Any] = {
 
 
 class ClaudeBashTool(SSHTool):
-    """Claude's native ``bash_20250124`` schema, executed over SSH."""
+    """Claude's ``bash`` tool over SSH.
+
+    The native ``bash_20250124`` schema for Claude models, a function schema otherwise.
+    """
 
     name = "bash"
 
@@ -131,7 +134,10 @@ class ClaudeBashTool(SSHTool):
 
 
 class ClaudeTextEditorTool(SSHTool):
-    """Claude's native ``text_editor_20250728`` schema, executed over SSH."""
+    """Claude's ``str_replace_based_edit_tool`` over SSH.
+
+    The native ``text_editor_20250728`` schema for Claude models, a function schema otherwise.
+    """
 
     name = "str_replace_based_edit_tool"
 
@@ -211,13 +217,3 @@ class ClaudeTextEditorTool(SSHTool):
             text += "\n"
         lines.insert(line, text)
         return await self.file_write(path, "".join(lines))
-
-
-__all__ = [
-    "CLAUDE_BASH_SPEC",
-    "CLAUDE_TEXT_EDITOR_SPEC",
-    "GENERIC_BASH_SPEC",
-    "GENERIC_TEXT_EDITOR_SPEC",
-    "ClaudeBashTool",
-    "ClaudeTextEditorTool",
-]

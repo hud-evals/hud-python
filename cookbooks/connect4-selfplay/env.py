@@ -3,14 +3,14 @@
 6x7 board, drop-a-disc moves, decisive outcomes (draws are rare on a full
 42-cell board), so the reward keeps real spread as the policy improves.
 
-Starting order is randomized per task (seed % 2 decides who drops first). The
+Starting order is randomized per task (``seed % 2`` decides who drops first). The
 outer agent plays one side for a full game; the inner model (same slug) plays
 the other. Reward is always from the outer agent's perspective: win=1.0,
 draw=0.5, loss=0.0.
 
-Inner-model token data (prompt_token_ids, token_ids, logprobs) is captured from
-the HUD gateway response and stored in EvaluationResult.info so the training
-loop can train on both sides of each game at once.
+Inner-model token data (``prompt_token_ids``, ``token_ids``, ``logprobs``) is
+captured from the HUD gateway response and stored in ``EvaluationResult.info``, so
+the training loop can train on both sides of each game at once.
 """
 
 from __future__ import annotations
@@ -23,31 +23,27 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from hud import Environment
 from hud.capabilities import Capability
-from hud.environment import Environment
 from hud.graders import EvaluationResult
+from hud.utils.gateway import build_gateway_client, resolve_gateway_model
 
 _INNER_MODEL: str = "c4-selfplay"
 _INNER_MODEL_NAME: str = "c4-selfplay"  # resolved model_name (gateway routing key)
-_INNER_PROVIDER: str = "openai"
 _OUTER_MARK: str = "X"  # set per game; "X" drops first, "O" drops second
 
 # Per-game inner model samples (reset at game start, read at game end).
 _inner_samples: list[dict[str, Any]] = []
+_inner_error: str | None = None  # why the inner side could not move, ending the game
 
-# Shared rules text — the SAME framing for both sides, so the matchup is fair
-# self-play between equal copies (the inner model used to get a terse, rule-free
-# prompt and only 8 output tokens, which handed the outer agent a systematic edge).
+# Both sides get the same rules text, so self-play is between equal copies.
 _RULES = (
     "Connect Four on a 6-row by 7-column board. Drop a disc into a column (0-6); "
     "it falls to the lowest empty cell. Win by connecting four of your discs in a "
     "row — horizontally, vertically, or diagonally."
 )
-# Output budget for a move. Used for the inner model; the outer agent reasons under
-# the harness with no tighter cap, so this keeps the two sides comparable.
+# Output budget for one inner-model move.
 _MOVE_MAX_TOKENS = 64
-
-# ── game logic ─────────────────────────────────────────────────────────────────
 
 ROWS, COLS = 6, 7
 _DIRS = ((0, 1), (1, 0), (1, 1), (1, -1))  # right, down, down-right, down-left
@@ -115,28 +111,6 @@ class ConnectFour:
 game = ConnectFour()
 
 
-def _resolve_inner_model(model: str) -> tuple[str, str]:
-    """Return (model_name, provider) by looking up the model in the gateway registry.
-
-    create_agent() does this same lookup (agents/__init__.py:36-65) so that the
-    gateway receives the resolved model_name, not a raw slug/UUID. The token-id
-    extensions (return_token_ids) are gated on the model routing as a known
-    trainable model; passing a raw id or slug can miss that path silently.
-    """
-    from hud.utils.gateway import list_gateway_models
-
-    try:
-        for gm in list_gateway_models():
-            if model in (gm.id, gm.name, gm.model_name):
-                return gm.model_name or model, gm.provider.name or "openai"
-    except Exception:
-        pass
-    return model, "openai"
-
-
-# ── MCP server ─────────────────────────────────────────────────────────────────
-
-
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -148,67 +122,60 @@ server = FastMCP(name="connect-four")
 
 
 async def _inner_move(inner_mark: str) -> int:
-    """Ask the inner model to pick a column. Falls back to first available.
+    """Ask the inner model to pick a column, recording its token-level sample.
 
-    Also captures token-level training data (prompt_token_ids, token_ids,
-    logprobs) into _inner_samples so the training loop can train on both sides
-    of each game with a flipped reward.
+    The sample (prompt and output token ids, logprobs) lets the training loop train
+    on both sides of each game with a flipped reward. A reply naming no open column
+    plays the first open one.
     """
-    from hud.utils.gateway import build_gateway_client
-
-    client = build_gateway_client(_INNER_PROVIDER)
+    client = build_gateway_client("openai")
     available = game.available()
-
-    try:
-        resp = await client.chat.completions.create(
-            model=_INNER_MODEL_NAME,
-            messages=[
-                {
-                    "role": "system",
-                    "content": f"You are playing Connect Four as {inner_mark}. {_RULES}",
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"{game.render()}\n\n"
-                        "Choose your move. Reason briefly if you want, then end your reply "
-                        "with the column number to drop into."
-                    ),
-                },
-            ],
-            max_tokens=_MOVE_MAX_TOKENS,
-            logprobs=True,
-            extra_body={"return_token_ids": True},
+    resp = await client.chat.completions.create(
+        model=_INNER_MODEL_NAME,
+        messages=[
+            {
+                "role": "system",
+                "content": f"You are playing Connect Four as {inner_mark}. {_RULES}",
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"{game.render()}\n\n"
+                    "Choose your move. Reason briefly if you want, then end your reply "
+                    "with the column number to drop into."
+                ),
+            },
+        ],
+        max_tokens=_MOVE_MAX_TOKENS,
+        logprobs=True,
+        extra_body={"return_token_ids": True},
+    )
+    choice = resp.choices[0]
+    # HUD gateway returns these as non-standard attributes when return_token_ids=True
+    prompt_ids = getattr(choice, "prompt_token_ids", None)
+    token_ids = getattr(choice, "token_ids", None)
+    if prompt_ids is None or token_ids is None:
+        raise RuntimeError(
+            f"{_INNER_MODEL_NAME} returned no token ids; self-play needs a trainable gateway model"
         )
-        choice = resp.choices[0]
-        # HUD gateway returns these as non-standard attributes when return_token_ids=True
-        prompt_ids = getattr(choice, "prompt_token_ids", None)
-        token_ids = getattr(choice, "token_ids", None)
-        if prompt_ids is not None and token_ids is not None:
-            content_lp = choice.logprobs.content if choice.logprobs else None
-            _inner_samples.append(
-                {
-                    "prompt_token_ids": list(prompt_ids),
-                    "output_token_ids": list(token_ids),
-                    "output_logprobs": [tok.logprob for tok in content_lp] if content_lp else [],
-                }
-            )
-        text = choice.message.content or ""
-        # Prefer an explicit "column N" mention; fall back to the last bare digit
-        # in range. Using \b[0-6]\b avoids mis-picking row indices or counts like
-        # "4 in a row" that appear after the stated column.
-        explicit = re.search(r"\bcol(?:umn)?\s*([0-6])\b", text, re.IGNORECASE)
-        if explicit:
-            col = int(explicit.group(1))
-            if col in available:
-                return col
-        for tok in reversed(re.findall(r"\b([0-6])\b", text)):
-            col = int(tok)
-            if col in available:
-                return col
-    except Exception:
-        pass
-
+    content_lp = choice.logprobs.content if choice.logprobs else None
+    _inner_samples.append(
+        {
+            "prompt_token_ids": list(prompt_ids),
+            "output_token_ids": list(token_ids),
+            "output_logprobs": [tok.logprob for tok in content_lp] if content_lp else [],
+        }
+    )
+    text = choice.message.content or ""
+    # Prefer an explicit "column N" mention; fall back to the last bare digit
+    # in range. Using \b[0-6]\b avoids mis-picking row indices or counts like
+    # "4 in a row" that appear after the stated column.
+    explicit = re.search(r"\bcol(?:umn)?\s*([0-6])\b", text, re.IGNORECASE)
+    if explicit and int(explicit.group(1)) in available:
+        return int(explicit.group(1))
+    for tok in reversed(re.findall(r"\b([0-6])\b", text)):
+        if int(tok) in available:
+            return int(tok)
     return available[0]
 
 
@@ -220,6 +187,7 @@ async def make_move(column: int) -> str:
     Returns the board after both moves. Keep calling until you see "Winner" or
     "Draw".
     """
+    global _inner_error
     if game.over():
         return f"Game is already over.\n{game.render()}"
 
@@ -236,7 +204,12 @@ async def make_move(column: int) -> str:
     if game.over():
         return game.render()
 
-    col = await _inner_move(inner_mark)
+    try:
+        col = await _inner_move(inner_mark)
+    except Exception as exc:
+        # The game cannot go on without the inner side; the grade reports it as an error.
+        _inner_error = f"{type(exc).__name__}: {exc}"
+        raise
     game.drop(col, inner_mark)
 
     return game.render()
@@ -247,8 +220,6 @@ def get_state() -> str:
     """Return the current board, whose turn it is, and available columns."""
     return game.render()
 
-
-# ── environment ────────────────────────────────────────────────────────────────
 
 env = Environment(name="connect-four-selfplay")
 _server_task: asyncio.Task[None] | None = None
@@ -287,16 +258,17 @@ async def _down() -> None:
 @env.template()
 async def play_self(model: str = _INNER_MODEL, seed: int = 0) -> None:
     """Self-play game. seed % 2 decides who drops first: even → outer is X, odd → outer is O."""
-    global _INNER_MODEL, _INNER_MODEL_NAME, _INNER_PROVIDER, _OUTER_MARK, _inner_samples
+    global _INNER_MODEL, _INNER_MODEL_NAME, _OUTER_MARK, _inner_samples, _inner_error
     _INNER_MODEL = model
-    _INNER_MODEL_NAME, _INNER_PROVIDER = _resolve_inner_model(model)
+    # The gateway's token-id extensions need the resolved model name, not a slug or id.
+    _INNER_MODEL_NAME = resolve_gateway_model(model).model_name
     _OUTER_MARK = "X" if seed % 2 == 0 else "O"
     inner_mark = "O" if _OUTER_MARK == "X" else "X"
 
     game.reset()
-    _inner_samples = []  # fresh per game
+    _inner_samples = []
+    _inner_error = None
 
-    # If the inner model goes first (outer is O), let it make the opening move now.
     if _OUTER_MARK == "O":
         opening = await _inner_move("X")
         game.drop(opening, "X")
@@ -310,6 +282,10 @@ async def play_self(model: str = _INNER_MODEL, seed: int = 0) -> None:
         "Keep playing until you see 'Winner' or 'Draw'.\n\n"
         f"Current board:\n{game.render()}"
     )
+
+    if _inner_error is not None:
+        yield EvaluationResult(isError=True, content=f"the inner model failed: {_inner_error}")
+        return
 
     w = game.winner()
     reward = 1.0 if w == _OUTER_MARK else (0.0 if w is not None else 0.5)

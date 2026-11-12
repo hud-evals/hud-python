@@ -30,12 +30,10 @@ class SSHConnectionError(ConnectionError):
 
 
 class SSHClient(CapabilityClient):
-    """Thin asyncssh wrapper. Exposes the raw connection via ``conn``.
+    """asyncssh session that reconnects a dropped transport; ``conn`` is the raw connection.
 
-    File helpers pass paths to the session verbatim: relative paths resolve
-    against the session cwd, absolute paths mean what they say. The namespace
-    the session runs in is the only path truth — file helpers and shell
-    commands must never disagree about what a path names.
+    File helpers pass paths verbatim, so a path names what it would in a shell
+    command: relative paths resolve against the session cwd.
     """
 
     protocol: ClassVar[str] = "ssh/2"
@@ -59,8 +57,6 @@ class SSHClient(CapabilityClient):
         parts = urlsplit(cap.url)
         if parts.hostname is None or parts.port is None:
             raise ValueError(f"ssh capability missing host or port: {cap.url!r}")
-        # Key content travels in the binding (works across network
-        # namespaces); a key path only works on a shared filesystem.
         client_keys: list[Any] | None = None
         if client_key := cap.params.get("client_key"):
             client_keys = [asyncssh.import_private_key(client_key)]
@@ -88,7 +84,11 @@ class SSHClient(CapabilityClient):
         *,
         connections: Sequence[Connection] = (),
     ) -> asyncssh.SSHClientProcess[bytes]:
-        """Open a binary exec channel after restoring a dropped SSH transport."""
+        """Open a binary exec channel, reconnecting a dropped transport first.
+
+        ``connections`` are exposed to this process only. The capability must set
+        ``process_connections``, and each connection's ``capability`` must name this one.
+        """
         if connections and self.capability.params.get("process_connections") is not True:
             raise ValueError("SSH capability does not support process-bound connections")
         capability_refs = {
@@ -284,13 +284,9 @@ def _is_closed(conn: asyncssh.SSHClientConnection) -> bool:
 
 
 def _powershell(script: str) -> str:
-    """Wrap a script for remote execution with no quoting at all.
+    """Wrap a script as ``-EncodedCommand``.
 
-    ``-Command "..."`` breaks against the built-in Windows workspace: its exec
-    handler splits with ``shlex.split(posix=False)`` (quotes retained) and
-    ``subprocess`` re-quotes, so PowerShell sees a string literal instead of a
-    script. ``-EncodedCommand`` carries the script as base64 UTF-16LE — no
-    quotes to mangle anywhere.
+    No command-line splitting or re-quoting on the way to PowerShell can alter it.
     """
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     return f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"
@@ -308,6 +304,3 @@ def _decode(raw: object) -> str:
 
 def _powershell_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
-
-
-__all__ = ["PROCESS_CONNECTIONS_REQUEST", "SSHClient"]

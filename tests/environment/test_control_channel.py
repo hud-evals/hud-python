@@ -1,6 +1,6 @@
 """The control channel as a peer speaks it: a task's typed start and answer, how a
 session's template is torn down, a request at the frame limit, sessions that drop and
-resume, and capability streams tunneled through its port."""
+resume, capability streams tunneled through its port, and malformed frames."""
 
 from __future__ import annotations
 
@@ -11,12 +11,10 @@ from urllib.parse import urlsplit
 import pytest
 from pydantic import BaseModel
 
+from hud import Environment, Task
 from hud.capabilities import Capability
 from hud.clients import connect
-from hud.environment import (
-    Environment,
-)
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 from tests.environment.conftest import FRAME_LIMIT, encode, wire
 
 if TYPE_CHECKING:

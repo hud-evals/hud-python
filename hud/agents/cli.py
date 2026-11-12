@@ -7,7 +7,7 @@ import base64
 import contextlib
 import os
 import shlex
-from typing import TYPE_CHECKING, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
 import asyncssh
 
@@ -19,9 +19,10 @@ from hud.utils.gateway import provider_api_key, routes_to_gateway
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from hud.capabilities import Connection, SSHClient
+    from hud.capabilities.connection import Connection
+    from hud.capabilities.ssh import SSHClient
     from hud.eval.run import Run
-    from hud.eval.runtime import RuntimeConfig
+    from hud.runtime.core import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
 PROCESS_CLOSE_TIMEOUT_S = 5.0
@@ -33,11 +34,13 @@ _PROVIDER_URLS = {
 
 
 class CLIAgent(Agent[ConfigT_co]):
-    """An agent that runs a coding CLI in the environment's workspace, where the CLI
-    calls its model itself; ``rollout`` relays those calls for it in a sandbox."""
+    """Agent that runs a coding CLI in the environment's workspace; the CLI calls its model itself.
 
-    #: The provider whose API the CLI speaks.
-    provider: ClassVar[str]
+    In a sandboxed workspace, ``rollout`` relays those calls through an ``inference`` connection.
+    """
+
+    # The provider whose API the CLI speaks.
+    provider: ClassVar[Literal["anthropic", "openai"]]
 
 
 class ModelEndpoint(NamedTuple):
@@ -48,8 +51,10 @@ class ModelEndpoint(NamedTuple):
     connection: Connection | None
 
 
-def model_endpoint(run: Run, provider: str, *, gateway: bool) -> ModelEndpoint | None:
-    """Where the CLI in *run* calls its model.
+def model_endpoint(
+    run: Run, provider: Literal["anthropic", "openai"], *, gateway: bool
+) -> ModelEndpoint | None:
+    """Where the CLI in ``run`` calls its model, or ``None`` to use the workspace's own login.
 
     Through the run's ``inference`` connection when it has one. Otherwise the CLI
     holds a key, which only a workspace declared unsandboxed (isolation ``none``)

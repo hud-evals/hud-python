@@ -1,11 +1,4 @@
-"""RFBTool: capability base for tools driven by an ``RFBClient``.
-
-Provides primitive HID + framebuffer verbs (``screenshot``, ``move``, ``click``,
-``type_text``, ``press_keys``, ``scroll``, ``drag``, ``wait``) on top of
-``RFBClient``. Provider tools (``ClaudeComputerTool``, ``GeminiComputerTool``,
-``OpenAIComputerTool``) extend this with the LLM-facing action schema and
-translate the LLM's call into these primitives.
-"""
+"""RFBTool: capability base for tools driven by an ``RFBClient``."""
 
 from __future__ import annotations
 
@@ -15,8 +8,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, Self
 
 from hud.agents.tools.base import AgentTool, AgentToolSpec
-from hud.capabilities import RFBClient
-from hud.capabilities.rfb import PngScreenshotEncoding, ScreenshotEncoding
+from hud.capabilities.rfb import PngScreenshotEncoding, RFBClient, ScreenshotEncoding
 from hud.types import ImageContent, ToolResult
 
 if TYPE_CHECKING:
@@ -25,15 +17,14 @@ if TYPE_CHECKING:
     from hud.agents.types import ToolAgentConfig
 
 
-#: RFB pointer button index.
 Button = Literal["left", "middle", "right"]
 _BUTTON_INDEX: dict[Button, int] = {"left": 0, "middle": 1, "right": 2}
 _DEFAULT_SCREENSHOT_ENCODING = PngScreenshotEncoding()
 
-#: Models name keys the way xdotool or a browser does (``ctrl``, ``Enter``, ``ArrowUp``,
-#: ``cmd``); the display takes X11 keysyms. Names not listed, such as letters, ``F5`` or
-#: ``Page_Down``, are keysyms already. Environments run Linux, so ``meta`` and ``cmd``
-#: are the Super key.
+# Models name keys the way xdotool or a browser does (``ctrl``, ``Enter``, ``ArrowUp``,
+# ``cmd``); the display takes X11 keysyms. Names not listed, such as letters, ``F5`` or
+# ``Page_Down``, are keysyms already. Environments run Linux, so ``meta`` and ``cmd``
+# are the Super key.
 _KEYSYMS: dict[str, str] = {
     "alt": "Alt_L",
     "option": "Alt_L",
@@ -93,8 +84,6 @@ class RFBTool(AgentTool[RFBClient]):
     ) -> Self:
         return cls(spec=spec, client=client, screenshot_encoding=config.screenshot_encoding)
 
-    # ─── geometry ────────────────────────────────────────────────────
-
     @property
     def display_width(self) -> int:
         return self.client.width
@@ -103,11 +92,9 @@ class RFBTool(AgentTool[RFBClient]):
     def display_height(self) -> int:
         return self.client.height
 
-    # ─── framebuffer ─────────────────────────────────────────────────
-
     async def screenshot(self) -> ToolResult:
         """Capture a screenshot and return it as a single ``ImageContent`` block."""
-        screenshot, mime_type = await self.client.screenshot_png(self.screenshot_encoding)
+        screenshot, mime_type = await self.client.screenshot(self.screenshot_encoding)
         return ToolResult(
             content=[
                 ImageContent(
@@ -117,8 +104,6 @@ class RFBTool(AgentTool[RFBClient]):
                 )
             ],
         )
-
-    # ─── pointer ─────────────────────────────────────────────────────
 
     async def move(self, x: int, y: int) -> None:
         self.client.move(int(x), int(y))
@@ -164,10 +149,7 @@ class RFBTool(AgentTool[RFBClient]):
         scroll_y: int = 0,
         hold_keys: Iterable[str] | None = None,
     ) -> None:
-        """Scroll at (x, y). ``scroll_y > 0`` scrolls down, ``< 0`` scrolls up.
-
-        ``scroll_x`` / ``scroll_y`` are in *clicks* (VNC has no pixel scroll).
-        """
+        """Scroll at (x, y) in wheel clicks; positive ``scroll_y`` scrolls down."""
         if x is not None and y is not None:
             self.client.move(int(x), int(y))
         async with self._with_keys(hold_keys):
@@ -181,10 +163,9 @@ class RFBTool(AgentTool[RFBClient]):
         button: Button = "left",
         hold_keys: Iterable[str] | None = None,
     ) -> None:
-        """Press ``button`` at path[0], move through every subsequent point, then release.
+        """Press ``button`` at ``path[0]``, move through each later point, then release.
 
-        Interpolated and paced: a press/move/release burst within one frame
-        reads as a click to pages that sample pointer state per frame.
+        Paced, because pages that sample pointer state per frame read a one-frame burst as a click.
         """
         if len(path) < 2:
             raise ValueError("drag requires at least 2 points")
@@ -210,8 +191,6 @@ class RFBTool(AgentTool[RFBClient]):
                 await asyncio.sleep(0.2)
         await self.client.drain()
 
-    # ─── keyboard ────────────────────────────────────────────────────
-
     async def type_text(self, text: str) -> None:
         """Type a literal string, one key at a time."""
         self.client.type_text(text)
@@ -225,12 +204,12 @@ class RFBTool(AgentTool[RFBClient]):
         await self.client.drain()
 
     async def key_down(self, key: str) -> None:
-        """Press ``key`` without releasing it (paired with a later :meth:`key_up`)."""
+        """Press ``key`` without releasing it (paired with a later ``key_up``)."""
         self.client.key_down(key)
         await self.client.drain()
 
     async def key_up(self, key: str) -> None:
-        """Release ``key`` (paired with a prior :meth:`key_down`)."""
+        """Release ``key`` (paired with a prior ``key_down``)."""
         self.client.key_up(key)
         await self.client.drain()
 
@@ -240,13 +219,9 @@ class RFBTool(AgentTool[RFBClient]):
             await asyncio.sleep(duration_ms / 1000)
         await self.client.drain()
 
-    # ─── timing ──────────────────────────────────────────────────────
-
     @staticmethod
     async def wait(duration_ms: int) -> None:
         await asyncio.sleep(duration_ms / 1000)
-
-    # ─── internal ────────────────────────────────────────────────────
 
     @asynccontextmanager
     async def _with_keys(self, keys: Iterable[str] | None) -> AsyncGenerator[None]:
@@ -255,6 +230,3 @@ class RFBTool(AgentTool[RFBClient]):
             return
         with self.client.holding_keys(*keys):
             yield
-
-
-__all__ = ["Button", "RFBTool", "keysym"]

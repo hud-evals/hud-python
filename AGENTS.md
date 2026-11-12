@@ -101,6 +101,9 @@ Before calling a change done, check its diff:
 - Imports at the top of the module, except an existing lazy
   optional-dependency pattern or a documented import cycle. Use
   `TYPE_CHECKING` for type-only imports that would add runtime cost or cycles.
+- Declare `__all__` only in package `__init__.py` files, where it lists the
+  names the package re-exports. Ordinary modules leave it out; their names
+  without a leading underscore are already public.
 - Public APIs expose user operations and domain concepts, not construction
   stages or compatibility scaffolding.
 - Every new `if`, `try`, nullable mode, or compatibility path earns its keep.
@@ -108,6 +111,10 @@ Before calling a change done, check its diff:
   broad `try` blocks, type bypasses, deep nesting, and thin wrappers.
 - Comments are rare and explain non-obvious intent. Delete dead code. Decompose
   a file past 1000 lines when a focused module is there to extract.
+- Docstrings are a one-line summary plus any contract a caller cannot read off
+  the signature. Refer to code as double-backtick literals; skip Sphinx and
+  reStructuredText markup (`:class:` roles, `#:` comments, `::` blocks), since
+  nothing here renders it.
 - Use `uv` for Python commands; do not rely on an activated virtualenv. Run
   commands from the repository root.
 
@@ -126,8 +133,9 @@ uv run ty check
 ## Repository map
 
 - Core flow: `hud/environment/` (spec: capabilities, tasks, serving) →
-  `hud/eval/` (engine: rollout, runtimes, jobs) → `hud/agents/` (harnesses),
-  connected by `hud/capabilities/` and `hud/clients/`.
+  `hud/eval/` (engine: rollout, jobs) placing work through `hud/runtime/`
+  (providers) → `hud/agents/` (harnesses), connected by `hud/capabilities/`
+  and `hud/clients/`.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` holds adapters for external task formats.
 - `tests/` mirrors the SDK's subsystems; `tests/fixtures` holds fixture

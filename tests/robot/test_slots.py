@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
+from hud import Environment, Task
 from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
 from hud.clients import HudProtocolError, connect
-from hud.environment import Environment
 from hud.environment.robot import RobotBridge, RobotEndpoint
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from hud.eval import Runtime
+    from hud.runtime import Runtime
 
 
 class Sim(RobotBridge):
@@ -95,7 +95,7 @@ async def serving(sim: Sim) -> AsyncGenerator[tuple[int, RobotEndpoint, Capabili
 
 
 def slot_env(port: int) -> Environment:
-    """An env whose ``episode`` claims a slot of the sim on *port* and grades it."""
+    """An env whose ``episode`` claims a slot of the sim on ``port`` and grades it."""
     env = Environment("slots")
     endpoint = RobotEndpoint.remote("127.0.0.1", port).attach(env)
 
@@ -210,9 +210,6 @@ async def test_concurrent_sessions_with_different_args_cannot_share_a_batch() ->
             await second.start_task("episode", {"task": "B"})
 
     assert started == {"prompt": "prompt [('task', 'A')]"}
-
-
-# ─── stepping a batch ──────────────────────────────────────────────────
 
 
 async def test_a_silent_slot_times_out_while_its_peer_keeps_stepping() -> None:

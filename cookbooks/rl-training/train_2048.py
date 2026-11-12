@@ -21,19 +21,20 @@ import time
 
 from dotenv import load_dotenv
 
-from hud import TrainingClient
+from hud import Job, Taskset
 from hud.agents import create_agent
 from hud.agents.types import AgentStep
-from hud.eval import Job, LocalRuntime, Taskset
+from hud.runtime import LocalRuntime
+from hud.train import TrainingClient
 
 from game2048_env import play
 
 
-def _output_tokens(runs: list) -> int:
+def _output_tokens(traces: list) -> int:
     return sum(
         len(sample.output_token_ids)
-        for run in runs
-        for sample in run.trace.collect(
+        for trace in traces
+        for sample in trace.collect(
             lambda s: s.sample if isinstance(s, AgentStep) and s.sample else None
         )
     )
@@ -65,7 +66,7 @@ async def main(
 
     session = await Job.start("game2048-rl", group=group)
     for step in range(steps):
-        batch_start = len(session.runs)
+        batch_start = len(session.traces)
 
         t0 = time.perf_counter()
         await taskset.run(
@@ -76,9 +77,9 @@ async def main(
             rollout_timeout=rollout_timeout,  # a wedged game can't stall the batch
         )
         rollout_s = time.perf_counter() - t0
-        batch = session.runs[batch_start:]
+        batch = session.traces[batch_start:]
         tokens = _output_tokens(batch)
-        failed = sum(1 for run in batch if run.trace.stop_reason == "timeout" or run.grade.is_error)
+        failed = sum(1 for trace in batch if trace.stop_reason == "timeout" or trace.grade.is_error)
         if failed:
             print(f"step {step:2d} | skipped training: {failed} rollout(s) failed", flush=True)
             continue
@@ -92,11 +93,11 @@ async def main(
         result = await trainer.optim_step(learning_rate=learning_rate)
         train_s = time.perf_counter() - t1
 
-        rewards = [run.reward for run in batch]
+        rewards = [trace.reward for trace in batch]
         mean_reward = sum(rewards) / len(rewards)
         # Read the best tile straight from the env's grade info: the reward is
         # clamped to [0, 1], so inverting it would cap best_tile at --target.
-        best_tile = max(int(run.grade.info.get("max_tile", 0)) for run in batch)
+        best_tile = max(int(trace.grade.info.get("max_tile", 0)) for trace in batch)
         tok_per_s = tokens / rollout_s if rollout_s > 0 else 0.0
         loss = fb.metrics.get("loss:sum", float("nan"))
         print(

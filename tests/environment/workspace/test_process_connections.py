@@ -1,8 +1,8 @@
 """Controller connections bound to one process: only that process reaches them.
 
-A control session hands the environment a :class:`~hud.capabilities.Connection`;
-the workspace serves it behind a credential-owning relay that only the process
-it was requested for may connect to. The guard that enforces this has one
+A control session hands the environment a ``Connection``; the workspace serves it
+behind a credential-owning relay that only the process it was requested for may
+connect to. The guard that enforces this has one
 backend per kernel facility (seccomp user notification, ptrace), each held to
 the same table; the served workspace is the sandbox-lane scenario.
 """
@@ -23,12 +23,13 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
 
+from hud import Environment, Task
 from hud.capabilities import Connection, SSHClient
 from hud.clients import HudClient, HudProtocolError, connect
-from hud.environment import Environment, Peer, WorkspaceRoute, process_guard
-from hud.environment.egress import ANY_HOST, BRIDGE_PORT
+from hud.environment import process_guard
+from hud.environment.egress import ANY_HOST, BRIDGE_PORT, Peer, WorkspaceRoute
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Generator
@@ -229,7 +230,8 @@ async def test_only_the_bound_session_process_reaches_a_controller_connection(
             url=f"http://127.0.0.1:{protected}",
             headers={"Authorization": "Bearer scoped-runtime-token"},
         )
-        # Two relays on one port listen on different loopback addresses.
+        # A second connection's relay shares the port on another loopback address;
+        # the bound process must not reach it.
         neighbour = Connection(
             name="neighbour",
             capability="ssh",

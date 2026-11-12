@@ -1,4 +1,4 @@
-"""``Shared``: one substrate per environment and runtime configuration, leased to at most
+"""``Shared``: one host per environment and runtime configuration, leased to at most
 ``width`` rollouts at once for the life of its scope."""
 
 from __future__ import annotations
@@ -7,16 +7,16 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from hud import Environment
+from hud import Environment, Task, Taskset
 from hud.agents.base import Agent
-from hud.eval import LocalRuntime, Runtime, Shared, Task, Taskset
+from hud.runtime import LocalRuntime, Runtime, Shared
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from hud.eval import Run
+    from hud import Run
 
 
 async def test_a_pool_boots_once_and_holds_at_most_width_rollouts_at_a_time() -> None:
@@ -46,7 +46,7 @@ async def test_a_pool_boots_once_and_holds_at_most_width_rollouts_at_a_time() ->
     pool = Shared(LocalRuntime(env), width=2)
     job = await Taskset("sim", [step(n=1), step(n=2)]).run(Overlaps(), runtime=pool, group=2)
 
-    assert [run.reward for run in job.runs] == [1.0] * 4
+    assert [trace.reward for trace in job.traces] == [1.0] * 4
     assert (events, max(seen)) == (["up"], 2)
 
 
@@ -75,7 +75,7 @@ async def test_an_open_pool_stays_warm_across_calls_and_stops_when_its_scope_clo
     assert events == ["up", "down"]
 
 
-async def test_each_environment_and_runtime_configuration_gets_its_own_substrate() -> None:
+async def test_each_environment_and_runtime_configuration_gets_its_own_host() -> None:
     placed = []
 
     def build(task: Task) -> Environment:
@@ -129,7 +129,7 @@ async def test_a_failed_boot_fails_its_own_lease_and_the_next_lease_boots_again(
         ScriptedAgent("x"), runtime=Shared(flaky, width=1), group=2, max_concurrent=1
     )
 
-    assert [(run.reward, run.trace.error) for run in job.runs] == [
+    assert [(trace.reward, trace.error) for trace in job.traces] == [
         (0.0, "[provisioning] RuntimeError: boot failed"),
         (1.0, None),
     ]

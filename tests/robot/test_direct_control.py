@@ -1,7 +1,7 @@
 """Direct control: a tool-calling agent drives a robot sim through MCP motion tools.
 
 Each case is a whole rollout: an in-process bridge serving the ``openpi/0`` wire,
-an env publishing it plus :class:`DirectControl`'s ``mcp`` capability, and a
+an env publishing it plus ``DirectControl``'s ``mcp`` capability, and a
 scripted agent calling the tools through the tunneled manifest binding, graded
 by the sim. Every case asserts what the sim was commanded and where the arm ended
 up, with the tools and verdicts the model saw.
@@ -9,16 +9,16 @@ up, with the tools and verdicts the model saw.
 
 from __future__ import annotations
 
-import copy
 import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
 
-from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
+from hud import Task
 from hud.environment.robot import DirectControl
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 
 from .sims import (
     Arm,
@@ -34,9 +34,9 @@ from .sims import (
 )
 
 if TYPE_CHECKING:
-    from hud.eval.run import Run
+    from hud import Trace
 
-#: The default contract: an absolute ``[x, grip]`` action, x in [0, 1].
+# The default contract: an absolute ``[x, grip]`` action, x in [0, 1].
 REACH = contract("ee_abs", [0.0, -1.0], [1.0, 1.0])
 
 
@@ -45,18 +45,32 @@ async def drive(
     control: DirectControl,
     *calls: tuple[str, dict[str, Any]],
     max_ticks: float | None = None,
-) -> tuple[ScriptedLLM, Run]:
+) -> tuple[ScriptedLLM, Trace]:
     agent = ScriptedLLM(*calls)
     async with arm_env(sim, control) as env:
         task = Task(env="arm", id="reach", args={"max_ticks": max_ticks})
-        run = await rollout(task, agent, runtime=LocalRuntime(env))
-    return agent, run
+        trace = await rollout(task, agent, runtime=LocalRuntime(env))
+    return agent, trace
+
+
+def strict(schema: dict[str, Any]) -> bool:
+    """Whether ``schema`` meets OpenAI's strict mode: objects closed, all properties required."""
+    if schema.get("type") == "object":
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is not False or set(
+            schema.get("required", [])
+        ) != set(properties):
+            return False
+        if not all(strict(sub) for sub in properties.values()):
+            return False
+    nested = [schema["items"]] if isinstance(schema.get("items"), dict) else []
+    return all(strict(sub) for sub in [*nested, *schema.get("anyOf", [])])
 
 
 async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() -> None:
     sim = Arm(REACH, done=reached)
 
-    agent, run = await drive(
+    agent, trace = await drive(
         sim,
         DirectControl(max_step={"grip": 2.0}),
         move("move_to", x=0.5),
@@ -65,8 +79,8 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
 
     assert agent.tools == {"move_to", "wait"}  # the ee_abs contract picked the motion tool
     schema = agent.schemas["move_to"]
-    assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
-    assert run.reward == 1.0  # graded by the sim, not the tools
+    assert strict(schema)  # OpenAI's strict mode accepts it unchanged
+    assert trace.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
     # The sim matches the command; the call holds until two 3-tick windows show it settled.
     reach_x, held, close = np.array(sim.actions[:50]), sim.actions[50:56], sim.actions[56:]
@@ -133,9 +147,6 @@ async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(
     assert sim.actions == []
 
 
-# ─── the tool surface ──────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     ("action_type", "names", "call", "column"),
     [
@@ -181,8 +192,6 @@ async def test_tools_use_standard_dimension_names_when_every_native_name_has_one
     commanded[column] = 0.3
     np.testing.assert_allclose(sim.actions[-1], commanded, atol=1e-4)
 
-
-# ─── settle verdicts: how each kind of arm ends an absolute move ───────
 
 STOPPED_SHORT = "Stopped short of the target; the arm is at rest. Remaining offsets: "
 
@@ -249,9 +258,6 @@ async def test_a_gripper_offset_never_decides_the_verdict() -> None:
     assert "At the target." in agent.replies()[0]
     assert len(sim.actions) == 80
     assert sim.state.tolist() == pytest.approx([0.5, 1.0])
-
-
-# ─── rotations: roll / pitch / yaw onto whatever the contract stores ───
 
 
 @pytest.mark.parametrize(
@@ -326,9 +332,6 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
     np.testing.assert_allclose(roll[1:7], wrapped, atol=1e-6)
     np.testing.assert_allclose(roll[7:], -math.pi, atol=1e-6)
     assert sim.state[1] == pytest.approx(-math.pi)
-
-
-# ─── the episode's time budget ─────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -413,7 +416,7 @@ async def test_each_episode_has_its_own_tick_limit_and_budget() -> None:
 
 @pytest.mark.parametrize("max_ticks", [0, 1.5])
 async def test_a_tick_limit_must_be_a_positive_integer(max_ticks: float) -> None:
-    _, run = await drive(Arm(REACH, done=reached), DirectControl(), look(), max_ticks=max_ticks)
+    _, trace = await drive(Arm(REACH, done=reached), DirectControl(), look(), max_ticks=max_ticks)
 
-    assert run.trace.status == "error"
-    assert "max_ticks must be a positive integer" in (run.trace.error or "")
+    assert trace.status == "error"
+    assert "max_ticks must be a positive integer" in (trace.error or "")

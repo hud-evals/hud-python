@@ -4,9 +4,8 @@
     uv run baseline.py --variants 24 --group 2
 
 Runs the same agent config training would use, with no optimizer. The decision
-this informs: a ~20-40% pass rate leaves room for GRPO to learn. Near 0% or near
-100% means retune the task instead of spending hours discovering the gradient was
-dead.
+this informs: a 15-55% pass rate leaves room for GRPO to learn; near 0% or near
+100% means retune the task before training.
 """
 
 from __future__ import annotations
@@ -17,8 +16,9 @@ import time
 from collections import Counter
 
 from daytona import Image
+from hud import Job, Taskset
 from hud.agents import create_agent
-from hud.eval import DaytonaRuntime, Job, Taskset
+from hud.runtime import DaytonaRuntime
 
 import bugs
 from env import fix_calc
@@ -44,29 +44,29 @@ async def main(*, variants: int, group: int, max_concurrent: int, start: int, mo
     await taskset.run(agent, runtime=runtime, job=session, max_concurrent=max_concurrent)
     wall = time.perf_counter() - t0
 
-    runs = session.runs
-    rewards = [r.reward for r in runs]
+    traces = session.traces
+    rewards = [r.reward for r in traces]
     solved = sum(1 for r in rewards if r == 1.0)
 
     by_k: Counter = Counter()
     solved_by_k: Counter = Counter()
     unattributed = 0
-    for run in runs:
-        variant = getattr(run, "_args", {}).get("variant")
-        if variant is None:
+    variant_by_slug = {task.slug: task.args["variant"] for task in taskset}
+    for trace in traces:
+        if trace.prompt_text is None:  # never launched, so no difficulty signal
             unattributed += 1
             continue
-        k = len(bugs.broken_for(variant))
+        k = len(bugs.broken_for(variant_by_slug[trace.slug]))
         by_k[k] += 1
-        if run.reward == 1.0:
+        if trace.reward == 1.0:
             solved_by_k[k] += 1
 
-    launched = len(runs) - unattributed
-    print(f"\nwall {wall:.1f}s | runs {len(runs)} | launched {launched}")
+    launched = len(traces) - unattributed
+    print(f"\nwall {wall:.1f}s | runs {len(traces)} | launched {launched}")
 
     if unattributed:
         print(
-            f"\n{unattributed}/{len(runs)} rollouts never launched — no difficulty "
+            f"\n{unattributed}/{len(traces)} rollouts never launched — no difficulty "
             f"signal here. Check the env starts in the sandbox (a missing file in "
             f"Dockerfile.hud shows up as \"env closed connection during 'hello'\")."
         )

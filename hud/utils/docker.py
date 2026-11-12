@@ -7,12 +7,11 @@ import asyncio
 from hud.utils.process import create_process_group_exec
 
 
-async def docker(*args: str, check: bool = True, deadline: float | None = None) -> tuple[str, str]:
+async def docker(*args: str, check: bool = True, timeout_s: float | None = None) -> tuple[str, str]:
     """Run a docker command and return decoded ``(stdout, stderr)``.
 
-    *deadline* bounds it and tears down the process group: a build or pull
-    that hangs must not hang its caller, and killing only the CLI leaves its
-    children behind.
+    After ``timeout_s`` seconds the whole process group is torn down, since killing only
+    the CLI leaves its children behind.
     """
     group = await create_process_group_exec(
         "docker",
@@ -22,10 +21,10 @@ async def docker(*args: str, check: bool = True, deadline: float | None = None) 
     )
     process = group.process
     try:
-        out, err = await asyncio.wait_for(process.communicate(), timeout=deadline)
+        out, err = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
     except TimeoutError:
         await group.terminate()
-        raise RuntimeError(f"docker {' '.join(args)} timed out after {deadline:.0f}s") from None
+        raise RuntimeError(f"docker {' '.join(args)} timed out after {timeout_s:.0f}s") from None
     except asyncio.CancelledError:
         await group.terminate()
         raise

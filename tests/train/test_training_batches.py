@@ -8,10 +8,9 @@ import pytest
 import torch
 from dirty_equals import IsStr
 
-from hud import Environment
+from hud import Environment, Taskset, Trace
 from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.eval import Run, Taskset
 from hud.train import DatumTensors, TrainingClient
 from hud.utils.exceptions import HudRequestError
 from tests.fixtures.agents import ScriptedAgent
@@ -61,10 +60,10 @@ async def answer(target: str = "ok"):
     yield 1.0 if reply == target else 0.0
 
 
-async def answered(agent: Agent, *targets: str) -> list[Run]:
-    """Two runs per target of ``agent`` answering "Reply with ok.", graded 1 on the target."""
+async def answered(agent: Agent, *targets: str) -> list[Trace]:
+    """Two traces per target of ``agent`` answering "Reply with ok.", graded 1 on the target."""
     tasks = [answer(target=target) for target in targets or ("ok",)]
-    return (await Taskset("t", tasks).run(agent, group=2, max_concurrent=1)).runs
+    return (await Taskset("t", tasks).run(agent, group=2, max_concurrent=1)).traces
 
 
 def sampled(text: str) -> Turn:
@@ -92,7 +91,12 @@ async def test_a_step_sends_the_sampled_runs_then_one_optimizer_step(
     await TrainingClient("owner/model").step(runs, learning_rate=1e-5, group_size=2)
 
     (sent,) = trainer.bodies("rl", "POST", f"{TRAIN}/forward-backward")
-    sample = {"prompt_token_ids": [1, 2, 3], "output_token_ids": [7], "output_logprobs": [-0.5]}
+    sample = {
+        "prompt_token_ids": [1, 2, 3],
+        "prompt_chunks": None,
+        "output_token_ids": [7],
+        "output_logprobs": [-0.5],
+    }
     assert [(i["samples"], i["reward"], i["trace_id"]) for i in sent["inputs"]] == [
         ([sample], 1.0, TRACE_ID),
         ([sample], 0.0, TRACE_ID),
@@ -164,10 +168,10 @@ async def test_a_custom_loss_sends_its_gradients_to_backward(trainer: FakeServic
 async def test_timed_out_runs_need_an_explicit_reward_and_nothing_is_sent(
     trainer: FakeServices,
 ) -> None:
-    runs = (await answer().run(ScriptedAgent("ok", delay=5), rollout_timeout=0.2)).runs
+    traces = (await answer().run(ScriptedAgent("ok", delay=5), rollout_timeout=0.2)).traces
 
     with pytest.raises(ValueError, match="timed-out runs require an explicit training reward"):
-        await TrainingClient("owner/model").forward_backward(runs)
+        await TrainingClient("owner/model").forward_backward(traces)
     assert trainer.requests("rl") == []
 
 

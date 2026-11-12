@@ -58,8 +58,9 @@ def get_command(
 ) -> Any:
     """Render the turns and tool calls for one rollout.
 
-    Checks the local span directory first (``HUD_TELEMETRY_LOCAL_DIR``, or
-    ``~/.hud/spans`` when uploads are disabled), then ``GET /v2/trace/{id}/events``.
+    Reads the trace from the local span directory (HUD_TELEMETRY_LOCAL_DIR, or
+    ~/.hud/spans when HUD_TELEMETRY_ENABLED is false) when it is there, otherwise
+    from the HUD platform.
 
     [not dim]Examples:
         hud trace get <trace-id>
@@ -70,7 +71,6 @@ def get_command(
 
     events: list[dict[str, Any]] = []
     if local is not None and local.exists():
-        # Local spans: one JSON span per line; step spans carry the conversation payload.
         source = f"local ({local})"
         spans: list[dict[str, Any]] = []
         incomplete = 0

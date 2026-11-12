@@ -1,22 +1,21 @@
 """Pluggable scorers for the HUD VideoGameBench template.
 
-A scenario builds a :class:`ScoreBoard` from a list of scorers. After every
-agent action, ``ScoreBoard.on_step`` feeds the new screen + emulator to each
-scorer; at the end ``ScoreBoard.result`` collapses them into a single HUD
-``EvaluationResult`` with one ``SubScore`` per scorer.
+A template builds a ``ScoreBoard`` from a list of scorers. After every agent
+action, ``ScoreBoard.on_step`` feeds the new screen and emulator to each scorer;
+at the end ``ScoreBoard.result`` collapses them into one ``EvaluationResult``
+with a ``SubScore`` per scorer.
 
 Three scorers ship:
 
-* :class:`CheckpointScorer` — VideoGameBench-style perceptual-hash matching
-  against ordered checkpoint images. Sparse / staged progress.
-* :class:`RamScorer` — *dense* reward read from per-game RAM (richer than
-  upstream VideoGameBench, which is screenshot-only).
-* :class:`ExplorationScorer` — generic, ROM-agnostic dense reward = number of
-  distinct screens seen / a target. Used by the bundled test game.
+* ``CheckpointScorer``: VideoGameBench-style perceptual-hash matching against
+  ordered checkpoint images (sparse, staged progress).
+* ``RamScorer``: dense reward read from per-game RAM (richer than upstream
+  VideoGameBench, which is screenshot-only).
+* ``ExplorationScorer``: ROM-agnostic dense reward, distinct screens seen over a
+  target. The bundled test game uses it.
 
 Subscore weights are normalized so positive weights sum to 1.0 and
-``reward == sum(value * weight)``, satisfying ``hud.graders.EvaluationResult``
-validation.
+``reward == sum(value * weight)``, which ``EvaluationResult`` validates.
 """
 
 from __future__ import annotations
@@ -74,10 +73,8 @@ class CheckpointScorer:
         if screen is None or self.idx >= self.total:
             return
         h = hash_image(screen)
-        # Advance ONLY when this frame matches the next expected checkpoint, one at
-        # a time. (A forward scan would let a single frame that happens to be close
-        # to a *later* checkpoint skip the ones in between and award unearned
-        # credit — e.g. shipped Zelda checkpoints 4 and 9 are only a few bits apart.)
+        # Advance only when this frame matches the next expected checkpoint, so a frame
+        # close to a later checkpoint cannot skip the ones in between.
         if (h - self.hashes[self.idx]) <= self.threshold:
             self.idx += 1
 
@@ -145,12 +142,8 @@ class RamScorer:
     def on_step(self, *, screen: Image.Image | None = None, emulator: Any | None) -> None:
         if emulator is None:
             return
-        try:
-            self.last_values = self.ram_map.read(emulator)
-            r = float(self.ram_map.reward(self.last_values))
-        except Exception as exc:  # never let a flaky RAM read crash an eval
-            self.last_values = {"error": str(exc)}
-            return
+        self.last_values = self.ram_map.read(emulator)
+        r = float(self.ram_map.reward(self.last_values))
         self.best = max(self.best, max(0.0, min(1.0, r)))
 
     def value(self) -> float:
@@ -195,7 +188,7 @@ class ScoreBoard:
             reward += w * v
             info[s.name] = s.info()
 
-        # Clamp tiny float drift so it never trips ScenarioResult validation.
+        # Round off float drift so it never trips EvaluationResult's subscore check.
         reward = max(0.0, min(1.0, round(reward, 6)))
         return EvaluationResult(
             reward=reward,

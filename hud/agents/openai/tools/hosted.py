@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from openai.types.responses import ToolParam
 
-from hud.agents.tools import HostedTool
+from hud.agents.tools.hosted import HostedTool
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -17,8 +17,6 @@ class OpenAIHostedTool(HostedTool[ToolParam]):
 
 @dataclass(frozen=True, kw_only=True)
 class OpenAICodeInterpreterTool(OpenAIHostedTool):
-    """OpenAI code interpreter."""
-
     container: dict[str, Any]
 
     def to_params(self) -> ToolParam:
@@ -27,7 +25,11 @@ class OpenAICodeInterpreterTool(OpenAIHostedTool):
 
 @dataclass(frozen=True, kw_only=True)
 class OpenAIToolSearchTool(OpenAIHostedTool):
-    """OpenAI tool search for large tool sets."""
+    """OpenAI tool search for large tool sets.
+
+    When the request carries more function tools than ``threshold``, the agent marks them
+    ``defer_loading`` so the model finds them through search.
+    """
 
     threshold: int = 10
 

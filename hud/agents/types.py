@@ -1,31 +1,22 @@
-"""Agent configuration and the tool-agent family's step payloads.
-
-Config classes are defined here separately from agent implementations
-to allow importing them without requiring SDK dependencies (anthropic, google-genai).
-
-The trajectory section layers the tool-agent family on the core contract:
-:mod:`hud.types` owns the skeleton (ordering, timing, error, span
-transport); this module adds what an LLM tool-use loop produces, flat on
-that skeleton — the model's turn (:class:`AgentStep`), the tool round-trip
-(:class:`ToolStep` pairing a ``ToolCall`` with its ``ToolResult``),
-nested rollouts (:class:`SubagentStep`), and the token-level training and
-accounting vocabulary (:class:`Sample`, :class:`Usage`). All ship under
-the core ``hud.step.v1`` schema — the platform's serializer for that
-schema understands this family's payload.
-"""
+"""Agent configs and the step payloads agents record."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Literal, NotRequired, Self, cast
+from typing import Annotated, Any, Literal, NotRequired, Self, cast
 from uuid import uuid4
 
+from openai.types.responses import ResponseTextConfigParam
+from openai.types.responses.response_create_params import ToolChoice
+from openai.types.shared_params.reasoning import Reasoning
 from pydantic import (
     AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
     StringConstraints,
+    ValidatorFunctionWrapHandler,
     field_serializer,
+    field_validator,
     model_validator,
     with_config,
 )
@@ -38,26 +29,22 @@ from hud.capabilities.rfb import (
     WebPScreenshotEncoding,
 )
 from hud.types import (
-    ROBOT_STEP_SCHEMA,
-    ContentBlock,
-    ImageContent,
-    RobotStepSource,
     Step,
     StepSource,
     StopCondition,
-    TextContent,
     ToolCall,
     ToolResult,
     Trace,
 )
 from hud.utils.serialization import json_safe_value
 
-# Alias to accept both 'model' and 'checkpoint_name' (backwards compat)
+# Agent configs written before the field was named ``model`` call it ``checkpoint_name``;
+# task rows store them in ``agent_config``.
 _model_alias = AliasChoices("model", "checkpoint_name")
 
 ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
-#: A name a shell assignment accepts.
+# A name a shell assignment accepts.
 EnvironmentName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 
 
@@ -76,19 +63,13 @@ class ToolAgentConfig(AgentConfig):
     tool_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     system_prompt: str | None = None
     citations_enabled: bool = False
-    #: Conditions that end the rollout instead of being answered with an error
-    #: result the model can react to; training configs typically stop on both.
+    # Turn conditions that end the rollout rather than leaving the model to recover.
     stop_on: set[StopCondition] = Field(default_factory=set[StopCondition])
     hosted_tools: list[HostedTool[object]] = Field(
         default_factory=list[HostedTool[object]], exclude=True
     )
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=PngScreenshotEncoding)
     model_client: Any = Field(default=None, exclude=True)
-
-
-# -----------------------------------------------------------------------------
-# Claude
-# -----------------------------------------------------------------------------
 
 
 @with_config(ConfigDict(extra="forbid"))
@@ -122,7 +103,7 @@ class ClaudeConfig(ToolAgentConfig):
     use_computer_beta: bool = True
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
     thinking: ClaudeThinkingConfig | None = None
-    #: Sent as ``output_config.effort``; unset leaves the model's own default.
+    # Sent as ``output_config.effort``; unset leaves the model's own default.
     reasoning_effort: ClaudeEffort | None = None
     max_tool_result_images: int | None = Field(default=None, gt=0)
 
@@ -143,14 +124,7 @@ class ClaudeConfig(ToolAgentConfig):
         return self
 
 
-# -----------------------------------------------------------------------------
-# Gemini
-# -----------------------------------------------------------------------------
-
-
 class GeminiConfig(ToolAgentConfig):
-    """Configuration for GeminiAgent."""
-
     model_name: str = "Gemini"
     model: str = Field(default="gemini-3.1-pro-preview", validation_alias=_model_alias)
     temperature: float | None = None
@@ -163,21 +137,14 @@ class GeminiConfig(ToolAgentConfig):
     max_tool_result_chars: int = 64 * 1024
 
 
-# -----------------------------------------------------------------------------
-# OpenAI
-# -----------------------------------------------------------------------------
-
-
 class OpenAIConfig(ToolAgentConfig):
-    """Configuration for OpenAIAgent."""
-
     model_name: str = "OpenAI"
     model: str = Field(default="gpt-5.6", validation_alias=_model_alias)
     max_output_tokens: int | None = None
     temperature: float | None = None
-    reasoning: Any = None  # openai Reasoning
-    tool_choice: Any = None  # openai ToolChoice
-    text: Any = None  # {"verbosity": "low"|"medium"|"high"}
+    reasoning: Reasoning | None = None
+    tool_choice: ToolChoice | None = None
+    text: ResponseTextConfigParam | None = None
     truncation: Literal["auto", "disabled"] | None = None
     parallel_tool_calls: bool | None = None
     prompt_cache_key: str = Field(
@@ -186,10 +153,32 @@ class OpenAIConfig(ToolAgentConfig):
         max_length=64,
     )
 
+    @field_validator("reasoning", "tool_choice", "text", mode="wrap")
+    @classmethod
+    def _declared_keys_only(cls, value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
+        """Raise on a key the OpenAI SDK's type does not declare, which validation would drop."""
+        validated = handler(value)
+        if dropped := _dropped_keys(value, validated):
+            raise ValueError(f"unknown keys for the installed openai SDK: {', '.join(dropped)}")
+        return validated
+
+
+def _dropped_keys(raw: Any, kept: Any, path: str = "") -> list[str]:
+    if not isinstance(raw, dict) or not isinstance(kept, dict):
+        return []
+    raw_dict, kept_dict = cast("dict[str, Any]", raw), cast("dict[str, Any]", kept)
+    return [
+        dropped
+        for key, value in raw_dict.items()
+        for dropped in (
+            [f"{path}{key}"]
+            if key not in kept_dict
+            else _dropped_keys(value, kept_dict[key], f"{path}{key}.")
+        )
+    ]
+
 
 class OpenAIChatConfig(ToolAgentConfig):
-    """Configuration for OpenAIChatAgent."""
-
     model_name: str = "OpenAI Chat"
     model: str = Field(default="gpt-5.4-mini", validation_alias=_model_alias)
     checkpoint: str | None = Field(
@@ -204,28 +193,19 @@ class OpenAIChatConfig(ToolAgentConfig):
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
-# -----------------------------------------------------------------------------
-# Claude CLI (over SSH)
-# -----------------------------------------------------------------------------
-
-
 class ClaudeCLIConfig(AgentConfig):
-    """Configuration for ClaudeCLIAgent (runs the ``claude`` CLI over SSH).
-
-    ``max_steps`` maps to the CLI's ``--max-turns``; values <= 0 leave the turn
-    budget to the CLI (unlimited).
-    """
+    """``max_steps`` is the CLI's ``--max-turns``; values <= 0 leave it unlimited."""
 
     system_prompt: str | None = None
     model_name: str = "Claude CLI"
     model: str = Field(default="claude-sonnet-5", validation_alias=_model_alias)
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
-    #: Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
+    # Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
     reasoning_effort: ClaudeEffort | None = None
-    #: Extra variables for the CLI's environment, such as its model tiers. They reach
-    #: the CLI as given, inside the workspace, and travel with the serialized config.
-    #: None may name a variable the agent sets, compared without case.
+    # Extra variables for the CLI's environment, such as its model tiers. They reach
+    # the CLI as given, inside the workspace, and travel with the serialized config.
+    # No key may name a variable the agent sets; names compare case-insensitively.
     env: dict[EnvironmentName, str] = Field(default_factory=dict)
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
     allowed_tools: list[str] = Field(
@@ -243,43 +223,21 @@ class ClaudeCLIConfig(AgentConfig):
     disallowed_tools: list[str] = Field(default_factory=list)
 
 
-# -----------------------------------------------------------------------------
-# Codex CLI (over SSH)
-# -----------------------------------------------------------------------------
-
-
 class CodexCLIConfig(AgentConfig):
-    """Configuration for CodexCLIAgent (runs ``codex exec`` over SSH).
+    """``sandbox`` does not apply under an inference connection; the workspace isolates it.
 
-    Without an explicit inference connection or API key, the agent leaves
-    ``CODEX_HOME`` unchanged so a login in that execution environment can apply.
-    A process-bound inference connection runs Codex without its inner sandbox;
-    the connection is available only inside the environment's isolated workspace.
+    Without injected credentials, the environment's own Codex login applies.
     """
 
     model_name: str = "Codex CLI"
     model: str = Field(default="gpt-5.6-sol", validation_alias=_model_alias)
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
-    #: Maps to ``model_reasoning_effort``; unset leaves the CLI's own default.
+    # Maps to ``model_reasoning_effort``; unset leaves the CLI's own default.
     reasoning_effort: CodexReasoningEffort | None = None
 
 
-# -----------------------------------------------------------------------------
-# Trajectory (tool-agent family step payloads)
-# -----------------------------------------------------------------------------
-
-
 class Citation(BaseModel):
-    """Normalized citation from any provider.
-
-    Unifies OpenAI ``url_citation``/``file_citation`` annotations, Claude ``cite``
-    blocks, and Gemini grounding into a single shape: a span of agent output linked
-    to its source. The ``type`` field preserves the provider-specific category.
-    A reply annotation, not a grading input: provider agents attach these to the
-    turn (``AgentStep.citations``), where chat surfaces and the platform read
-    them — e.g. the final reply's citations are
-    ``trace.final(lambda s: s.citations if isinstance(s, AgentStep) else None)``.
-    """
+    """A span of agent output linked to its source, normalized across providers."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -302,55 +260,39 @@ class Citation(BaseModel):
 
 
 class Sample(BaseModel):
-    """One model generation in a rollout: tokens conditioned on + tokens produced.
+    """One generation's prompt and output tokens, recorded only by trainable backends.
 
-    Token-level data for RL training (Tinker-shaped). ``output_logprobs`` are the
-    per-output-token logprobs under the *sampling* policy (q). Populated only when
-    the model backend is trainable (returns token ids + logprobs); closed/eval-only
-    backends leave it empty.
+    ``output_logprobs`` are under the sampling policy.
     """
 
     prompt_token_ids: list[int] = Field(default_factory=list[int])
-    # Multimodal prompt as serialized ``ModelInput`` chunks (text + image), set by
-    # vision rollouts where the prompt is not a flat token list. When present it is
-    # the authoritative prompt for training; ``prompt_token_ids`` stays empty.
+    # Serialized ``ModelInput`` chunks of a multimodal prompt; when set, they are the prompt
+    # and ``prompt_token_ids`` is empty.
     prompt_chunks: list[dict[str, Any]] | None = None
     output_token_ids: list[int] = Field(default_factory=list[int])
     output_logprobs: list[float] = Field(default_factory=list[float])
 
 
 class Usage(BaseModel):
-    """Normalized per-step usage accounting.
-
-    Provider responses report usage under different keys; this is the canonical
-    accounting shape (token-level training data lives in ``Sample``).
-    ``llm_call_count`` is for aggregate steps that wrap several calls.
-    """
+    """Per-step token and cost accounting, normalized across providers."""
 
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     cached_tokens: int | None = None
     cost_usd: float | None = None
+    # Set on aggregate steps that wrap several calls.
     llm_call_count: int | None = None
 
 
 class AgentStep(Step[StepSource]):
-    """The model's turn: one LLM call, flat on the step skeleton.
-
-    Provider agents return one from ``get_response()`` and the loop records
-    it directly — timing lands on ``started_at``/``ended_at`` and failures
-    on ``error``, the skeleton's own channels. ``usage`` is the turn's
-    normalized accounting (aggregate turns wrapping several calls report
-    ``llm_call_count``); ``sample`` carries this turn's token-level
-    training data iff the model backend is trainable.
-    """
+    """One model output: a ``ToolAgent``'s LLM call, or one streamed item from a CLI agent."""
 
     source: StepSource = "agent"
 
     content: str | None = None
     reasoning: str | None = None
     tool_calls: list[ToolCall] = Field(default_factory=list[ToolCall])
-    #: No further tool calls expected — the loop's stop signal.
+    # No further tool calls expected — the loop's stop signal.
     done: bool = False
     finish_reason: str | None = None
     stop_reason: StopCondition | None = None
@@ -368,10 +310,9 @@ class AgentStep(Step[StepSource]):
 
 
 class ToolStep(Step[StepSource]):
-    """One tool round-trip: the originating call paired with its result.
+    """One tool call and its result.
 
-    Error-ness of the call is data on the ``result`` (``isError``), not a
-    step failure; ``error`` stays for harness-level faults.
+    A failed call is ``result.isError``; the step's ``error`` is for harness faults.
     """
 
     source: StepSource = "tool"
@@ -380,195 +321,7 @@ class ToolStep(Step[StepSource]):
 
 
 class SubagentStep(Step[StepSource]):
-    """A nested rollout (e.g. an ``AgentTool`` invocation), embedded whole.
-
-    The sub-rollout's own steps stream under its own trace id; this step is
-    the enclosing trace's record of the invocation.
-    """
+    """A nested rollout's trace, embedded whole; its steps stream under their own trace id."""
 
     source: StepSource = "subagent"
     subagent: Trace
-
-
-# -----------------------------------------------------------------------------
-# Robot family step payloads (ship under ROBOT_STEP_SCHEMA)
-# -----------------------------------------------------------------------------
-
-
-class StateFeature(BaseModel):
-    """One observation feature group: its per-dimension labels + values, kept
-    together so a state vector is self-describing (e.g. ``robot0_eef_pos`` ->
-    ``names=[".x", ".y", ".z"], values=[...]``). ``names`` is empty when the
-    contract omits per-dim labels."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    names: list[str] = Field(default_factory=list[str])
-    values: list[float] = Field(default_factory=list[float])
-
-
-class ObservationStep(Step[RobotStepSource]):
-    """What the policy saw at one control tick: camera frames + numeric state.
-
-    Camera ``images`` are MCP ``ImageContent`` keyed by camera name — ingest
-    offloads each to S3 by shape (no bespoke type needed) and presigns it on
-    read. ``state`` maps each env-contract feature group (e.g. ``robot0_eef_pos``,
-    ``robot0_gripper_qpos``) to a :class:`StateFeature` carrying that slice's
-    per-dimension ``names`` + ``values`` — so grouping and semantics travel with
-    the data, no side schema. ``tick`` is the 0-based control-tick index, so the
-    viewer can pair it with :class:`InferenceStep`.
-    """
-
-    schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
-    source: RobotStepSource = "observation"
-
-    tick: int = 0
-    # TODO: note - this reuses the MCP-native ImageContent type
-    images: dict[str, ImageContent] = Field(default_factory=dict[str, ImageContent])
-    state: dict[str, StateFeature] = Field(default_factory=dict[str, StateFeature])
-
-    @classmethod
-    def from_obs(
-        cls,
-        obs: dict[str, Any],
-        *,
-        tick: int = 0,
-        obs_space: dict[str, Any] | None = None,
-    ) -> ObservationStep:
-        """Build an observation step (numeric ``state``) from a raw ``robot`` obs dict.
-
-        Camera frames are streamed as per-camera H.264 video, not stored per-tick
-        here (see :class:`~hud.agents.robot.video.SegmentEncoder`), so image arrays
-        are skipped.
-        """
-        obs_space = obs_space or {}
-        state: dict[str, StateFeature] = {}
-        for name, arr in obs.get("data", {}).items():
-            if arr.ndim >= 2:
-                continue  # camera frames travel as video, not per-tick images
-            vec = arr.tolist()
-            # Label the flat wire vector (e.g. "state") from the contract. Each
-            # feature whose key carries this data key as a dot-segment describes
-            # it, in one of two layouts:
-            #  - ordered slices that tile the vector -> split into named groups
-            #    (libero_pro eef_pos + axis_angle + gripper; robolab single slice)
-            #  - a single feature keyed exactly by the data key whose ``names`` span
-            #    the whole vector -> one named group (libero_ee_del's flat "state")
-            # Fall back to one unlabelled group when neither fits.
-            slices: list[tuple[int, int, str, list[str]]] = []
-            direct: list[str] | None = None
-            for feature_key, feature in obs_space.items():
-                if name not in feature_key.split(".") or not isinstance(feature, dict):
-                    continue
-                feature_meta = cast("dict[str, Any]", feature)
-                raw_names = feature_meta.get("names")
-                labels = (
-                    [str(n) for n in cast("list[Any]", raw_names)]
-                    if isinstance(raw_names, list)
-                    else []
-                )
-                order = feature_meta.get("order")
-                if order is not None:
-                    bounds = str(order).split("-")
-                    slices.append(
-                        (
-                            int(bounds[0]),
-                            int(bounds[-1]),
-                            feature_key.split(".")[-1],
-                            labels,
-                        )
-                    )
-                elif feature_key.split(".")[-1] == name and len(labels) == len(vec):
-                    direct = labels
-            slices.sort()
-            covered = [i for start, end, _, _ in slices for i in range(start, end + 1)]
-            if covered == list(range(len(vec))):
-                for start, end, key, labels in slices:
-                    values = vec[start : end + 1]
-                    state[key] = StateFeature(
-                        names=labels if len(labels) == len(values) else [],
-                        values=values,
-                    )
-            elif direct is not None:
-                state[name] = StateFeature(names=direct, values=vec)
-            else:
-                state[name] = StateFeature(values=vec)
-        return cls(tick=tick, state=state)
-
-
-class InferenceStep(Step[RobotStepSource]):
-    """What the policy did at one control tick: the ``[T, A]`` action chunk it executed.
-
-    A single executed action is just a length-1 chunk; a re-infer tick carries the
-    full freshly inferred chunk. ``tick`` matches the paired observation.
-    """
-
-    schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
-    source: RobotStepSource = "inference"
-
-    # tick id
-    tick: int = 0  # start of inference
-    # end_tick: int = 0 # end of inference - future implementation
-
-    # post model inference (a single action is a length-1 chunk)
-    chunk: list[list[float]] = Field(default_factory=list[list[float]])
-    chunk_length: int = 1
-    #: Per action-dim labels from the env contract (e.g. ["eef.dx", ..., "gripper"]),
-    #: so the viewer can label action plots and match them to state features.
-    names: list[str] = Field(default_factory=list[str])
-
-
-class VideoSegmentStep(Step[RobotStepSource]):
-    """One CMAF (fragmented-MP4) fragment of a camera's H.264 stream.
-
-    Replaces per-tick JPEG frames: the episode's frames for one camera are
-    encoded into a single H.264 stream cut into ``index``-ordered segments — an
-    ``init`` segment (codec config, ``index=0``) then media fragments. ``segment``
-    is the fragment bytes wrapped as a ``video`` content block so the ingest
-    artifact pipeline offloads it to S3 exactly like an image (but counted as a
-    file, not a screenshot). The viewer feeds the ordered segments to one
-    ``<video>`` via MSE; ``fps`` maps a control tick to video time.
-    """
-
-    schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
-    source: RobotStepSource = "video_segment"
-
-    camera: str = ""
-    #: Position in the camera's stream; ``index`` 0 is the init segment.
-    index: int = 0
-    fps: int = 10
-    #: ``{"type": "video", "data": <base64 mp4>, "mimeType": "video/mp4"}`` —
-    #: the ingest artifact walker offloads this blob to S3 and redacts it inline.
-    segment: dict[str, Any] = Field(default_factory=dict[str, Any])
-
-
-class ContentResult(BaseModel):
-    """Ergonomic builder for a custom MCP tool's ``list[ContentBlock]`` return.
-
-    A ``@server.tool`` returns content blocks; this assembles the common
-    text (+ optional image) case in one line so vision tools — games,
-    computer-use, browsers — don't hand-roll the same block list::
-
-        from hud.agents.types import ContentResult
-
-
-        @server.tool
-        async def look() -> list[ContentBlock]:
-            return ContentResult(output=status, base64_image=png_b64).to_content_blocks()
-    """
-
-    output: str | None = None
-    error: str | None = None
-    base64_image: str | None = None
-
-    def to_content_blocks(self) -> list[ContentBlock]:
-        """Text block(s) for ``output``/``error``, plus an image for ``base64_image``."""
-        blocks: list[ContentBlock] = []
-        if self.output:
-            blocks.append(TextContent(type="text", text=self.output))
-        if self.error:
-            blocks.append(TextContent(type="text", text=self.error))
-        if self.base64_image:
-            mime = "image/jpeg" if self.base64_image.startswith("/9j/") else "image/png"
-            blocks.append(ImageContent(type="image", data=self.base64_image, mimeType=mime))
-        return blocks

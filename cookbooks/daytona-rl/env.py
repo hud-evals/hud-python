@@ -15,7 +15,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from hud.environment import Environment
+from hud import Environment
+from hud.agents import ClaudeAgent
+from hud.runtime import LocalRuntime
 
 import bugs
 
@@ -33,10 +35,10 @@ def seed_bug(variant: int) -> list[str]:
 
 
 async def calc_passes() -> bool:
-    """Whether the agent's calc.py returns the expected value for every test case.
+    """Whether the agent's ``calc.py`` returns the expected value for every test case.
 
-    `bugs.py` imports calc.py in a separate process and prints what it returned; the
-    comparison runs here.
+    ``bugs.py`` imports ``calc.py`` in a separate process and prints what it returned;
+    the comparison runs here.
     """
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -75,9 +77,6 @@ async def fix_calc(variant: int = 0):
 
 
 async def test() -> None:
-    from hud import LocalRuntime
-    from hud.agents.claude import ClaudeAgent
-
     job = await fix_calc(variant=0).run(ClaudeAgent(), runtime=LocalRuntime(__file__))
     print("reward:", job.reward)
 

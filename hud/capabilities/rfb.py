@@ -1,19 +1,4 @@
-"""RFBClient: a VNC (RFB 3.8) session with screenshots, pointer and keyboard.
-
-Latency note
-------------
-This impl is tuned for LLM-driven agents (Claude/Gemini/OpenAI computer
-use), where the model thinks for seconds per turn and a ~30-70 ms screenshot
-round-trip is irrelevant.
-
-It is **not** sufficient for the FDM-1 style video-model hot path
-(https://si.inc/posts/fdm1/) which targets ~11 ms round-trip. Reaching that
-requires: a Tight/ZRLE-capable transport (this client speaks only Raw + ZLib),
-incremental framebuffer streaming with a background reader task, raw RGBA
-frames (no PNG re-encoding), and native input bindings. When that workload
-shows up, layer it as an ``RFBStreamingClient`` subclass rather than rewriting
-this one.
-"""
+"""RFBClient: a VNC (RFB 3.8) session, fast enough for LLM agents, not video-rate control."""
 
 from __future__ import annotations
 
@@ -42,7 +27,7 @@ LOGGER = logging.getLogger("hud.capabilities.rfb")
 
 ScreenshotMimeType = Literal["image/png", "image/webp"]
 
-#: X11 keysyms by name (``Return``, ``Control_L``, ``F5``) and by the character they type.
+# X11 keysyms by name (``Return``, ``Control_L``, ``F5``) and by the character they type.
 _KEYSYMS: dict[str, int] = {name: code for name, code, _ in keysymdef}
 _KEYSYMS.update((chr(char), code) for _, code, char in keysymdef if char)
 _KEYSYMS.update({"\n": _KEYSYMS["Return"], "\r": _KEYSYMS["Return"], "\t": _KEYSYMS["Tab"]})
@@ -161,7 +146,6 @@ class RFBClient(CapabilityClient):
         return client
 
     async def _reconnect(self) -> None:
-        """Tear down the current VNC session and open a fresh one."""
         LOGGER.info("RFB stream desynced; reconnecting to %s", self.capability.url)
         await self.close()
         self._session = await _open(self.capability)
@@ -179,8 +163,6 @@ class RFBClient(CapabilityClient):
     def cursor(self) -> tuple[int, int]:
         """Where the pointer was last moved, in screen pixels."""
         return self._x, self._y
-
-    # ─── framebuffer ─────────────────────────────────────────────────
 
     async def _capture(self) -> Image.Image:
         """Request the whole framebuffer and read updates until every pixel has arrived."""
@@ -222,7 +204,7 @@ class RFBClient(CapabilityClient):
             case _:
                 raise ConnectionError(f"the VNC server sent unknown message type {kind}")
 
-    async def screenshot_png(
+    async def screenshot(
         self,
         encoding: ScreenshotEncoding | ScreenshotMimeType = "image/png",
     ) -> tuple[bytes, ScreenshotMimeType]:
@@ -247,8 +229,6 @@ class RFBClient(CapabilityClient):
                 await self._reconnect()
         raise RuntimeError("unreachable")
 
-    # ─── pointer ─────────────────────────────────────────────────────
-
     def _pointer(self) -> None:
         self._session.writer.write(struct.pack(">BBHH", 5, self._buttons, self._x, self._y))
 
@@ -263,7 +243,6 @@ class RFBClient(CapabilityClient):
         self._pointer()
 
     def button_up(self, button: int) -> None:
-        """Release pointer button ``button``."""
         self._buttons &= ~(1 << button)
         self._pointer()
 
@@ -286,8 +265,6 @@ class RFBClient(CapabilityClient):
         for _ in range(abs(clicks)):
             self.click(4 if clicks > 0 else 3)
 
-    # ─── keyboard ────────────────────────────────────────────────────
-
     def _key(self, code: int, *, down: bool) -> None:
         self._session.writer.write(struct.pack(">BBxxI", 4, down, code))
 
@@ -296,7 +273,6 @@ class RFBClient(CapabilityClient):
         self._key(_KEYSYMS[key], down=True)
 
     def key_up(self, key: str) -> None:
-        """Release ``key``."""
         self._key(_KEYSYMS[key], down=False)
 
     @contextlib.contextmanager
@@ -332,12 +308,3 @@ class RFBClient(CapabilityClient):
         writer.close()
         with contextlib.suppress(OSError):
             await writer.wait_closed()
-
-
-__all__ = [
-    "PngScreenshotEncoding",
-    "RFBClient",
-    "ScreenshotEncoding",
-    "ScreenshotMimeType",
-    "WebPScreenshotEncoding",
-]

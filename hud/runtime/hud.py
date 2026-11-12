@@ -6,16 +6,15 @@ import asyncio
 import contextlib
 import logging
 import uuid
-import warnings
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
+import websockets
 from websockets.exceptions import ConnectionClosedOK
 
-from hud.eval.job import reporting_enabled
-from hud.eval.run import Run, rollout
+from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
 
 from .core import Runtime
@@ -23,10 +22,9 @@ from .core import Runtime
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from hud.agents.base import Agent
     from hud.eval.task import Task
 
-logger = logging.getLogger("hud.eval.runtime")
+logger = logging.getLogger("hud.runtime")
 
 _RUNTIME_READY_TIMEOUT = 300.0
 
@@ -34,62 +32,27 @@ _RUNTIME_READY_TIMEOUT = 300.0
 class HUDRuntime:
     """HUD tunnel placement: local agent loop against a HUD-hosted environment.
 
-    The SDK creates a runtime session by environment name, exposes the remote
-    control channel through a local TCP listener, and lets the normal rollout
-    atom drive it from this process.
+    Each acquisition leases a runtime session by environment name and tunnels its
+    control channel to a local port.
     """
 
     def __init__(
         self,
         *,
-        run_timeout: float | None = None,
         runtime_url: str | None = None,
     ) -> None:
-        if run_timeout is not None:
-            warnings.warn(
-                "HUDRuntime(run_timeout=...) is deprecated; pass "
-                "rollout_timeout=... to Task.run or Taskset.run",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        self.run_timeout = run_timeout
         self.runtime_url = runtime_url
         self._warned_unsupported_config = False
-
-    async def run(
-        self,
-        task: Task,
-        agent: Agent,
-        *,
-        job_id: str,
-        group_id: str | None = None,
-        trace_id: str | None = None,
-        rollout_timeout: float | None = None,
-    ) -> Run:
-        return await rollout(
-            task,
-            agent,
-            runtime=self,
-            trace_id=trace_id,
-            job_id=job_id,
-            group_id=group_id,
-            rollout_timeout=(self.run_timeout if rollout_timeout is None else rollout_timeout),
-        )
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return self._runtime_session(task)
 
     @asynccontextmanager
     async def _runtime_session(self, task: Task) -> AsyncGenerator[Runtime]:
-        from hud.settings import settings as sdk_settings
-
         if task.runtime_config is not None:
-            # The lease resolves the env by name: a stamped image is
-            # provenance and rides along. Declared cpu/memory are best-effort
-            # on the platform's substrate (warned once, not fatal — loaders
-            # stamp them on every row), but a GPU or explicit limits change
-            # what the task *is*; running without them would grade a
-            # different environment than declared.
+            # The lease resolves the env by name, so an image or Compose recipe is only
+            # provenance and cpu/memory only warn; a GPU, OS, TPU or limits change what is
+            # graded, so those fail.
             resources = task.runtime_config.resources
             if (
                 resources is not None
@@ -118,10 +81,10 @@ class HUDRuntime:
                     "defaults",
                     sorted(softly_ignored),
                 )
-        api_key = sdk_settings.api_key
+        api_key = settings.api_key
         if not api_key:
             raise RuntimeError("HUD runtime tunnel requires HUD_API_KEY")
-        runtime_url = (self.runtime_url or sdk_settings.hud_runtime_url).rstrip("/")
+        runtime_url = (self.runtime_url or settings.hud_runtime_url).rstrip("/")
         session_id = await self._create_runtime_session(runtime_url, api_key, task)
         server: asyncio.Server | None = None
         try:
@@ -155,7 +118,7 @@ class HUDRuntime:
         payload: dict[str, Any] = {"environment": task.env}
         trace_id = get_current_trace_id()
         # Only a trace the platform has registered can own the session.
-        if trace_id is not None and reporting_enabled():
+        if trace_id is not None and settings.reporting_enabled:
             with contextlib.suppress(ValueError):
                 payload["trace_id"] = str(uuid.UUID(trace_id))
         async with httpx2.AsyncClient(timeout=30.0) as client:
@@ -200,8 +163,6 @@ class HUDRuntime:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        import websockets
-
         ws_url = _runtime_tunnel_ws_url(runtime_url, session_id)
         try:
             async with websockets.connect(

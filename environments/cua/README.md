@@ -46,7 +46,7 @@ docker rm -f hud-cua
 ```
 
 One desktop cannot isolate concurrent or sequential rollouts, so the environment accepts one task
-per container. Start a fresh runtime for every task instead of sharing a `tcp://` substrate.
+per container. Start a fresh runtime for every task instead of sharing a `tcp://` host.
 
 ## Tasks & grading
 

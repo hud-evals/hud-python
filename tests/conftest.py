@@ -2,9 +2,9 @@
 
 Every test runs against an isolated SDK configuration: a temporary home, no
 developer credentials, telemetry uploads off, and every HUD service URL pointed
-at a closed local port. :class:`HudEnv` is the only place tests touch
+at a closed local port. ``HudEnv`` is the only place tests touch
 ``hud.settings``: the SDK reads its configuration from environment variables
-once, when ``hud.settings`` is imported, so :class:`HudEnv` sets them for this
+once, when ``hud.settings`` is imported, so ``HudEnv`` sets them for this
 process and every subprocess it starts and rebuilds the settings object from
 them. A test that talks to HUD services asks for the
 ``services`` fixture, which points the SDK at the fake backend instead.
@@ -35,7 +35,6 @@ from dotenv import dotenv_values
 
 from hud.settings import Settings, settings
 from hud.telemetry import flush
-from hud.utils.gateway import list_gateway_models
 from tests.fixtures.models import Models
 from tests.fixtures.services import SERVICE_ENV, FakeServices
 
@@ -46,6 +45,10 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 # The fixture environments that need nothing but the SDK, so a container can serve them.
 IMAGE_FIXTURES = ("echo", "faulty", "sessions", "broken", "stalls")
+
+# Rows that need Linux, root and bubblewrap: they run in the sandbox lane
+# (``-m "e2e and sandbox"``), where every workspace session runs in the sandbox.
+SANDBOX = (pytest.mark.e2e, pytest.mark.sandbox)
 
 # The developer's or CI's own environment, captured before any test isolates it.
 # Only ``live`` tests read credentials from it.
@@ -123,9 +126,6 @@ class HudEnv:
         fresh = Settings(_env_file=None)
         for name in Settings.model_fields:
             self._monkeypatch.setattr(settings, name, getattr(fresh, name))
-        # The gateway model catalog is cached per process; a new configuration
-        # may point at a different catalog.
-        list_gateway_models.cache_clear()
 
 
 @dataclass(frozen=True)

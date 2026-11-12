@@ -8,12 +8,7 @@ from pydantic_settings.sources import DotEnvSettingsSource, PydanticBaseSettings
 
 
 class Settings(BaseSettings):
-    """
-    Global settings for the HUD SDK.
-
-    This class manages configuration values loaded from environment variables
-    and provides global access to settings throughout the application.
-    """
+    """Global settings for the HUD SDK."""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="allow")
 
@@ -26,16 +21,7 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """
-        Customize settings source precedence.
-
-        Precedence (highest to lowest):
-        - init_settings (explicit kwargs)
-        - env_settings (process environment)
-        - dotenv_settings (.env in CWD)
-        - user_dotenv_settings (~/.hud/.env, written by `hud set`)
-        - file_secret_settings
-        """
+        """Layer ``~/.hud/.env`` (from ``hud set``) under the process env and the CWD ``.env``."""
         user_dotenv_settings = DotEnvSettingsSource(
             settings_cls,
             env_file=Path.home() / ".hud" / ".env",
@@ -64,7 +50,7 @@ class Settings(BaseSettings):
 
     hud_web_url: str = Field(
         default="https://hud.ai",
-        description="Base URL of the HUD web app (used as a fallback for CLI login)",
+        description="Base URL of the HUD web app, used for the links the CLI and job logs print",
         validation_alias="HUD_WEB_URL",
     )
 
@@ -157,8 +143,7 @@ class Settings(BaseSettings):
     file_tracking_enabled: bool = Field(
         default=True,
         description="Publish a workspace's filetracking/1 capability and stream setup changes, "
-        "agent file-change diffs, and final artifacts to telemetry. "
-        "Enabled by default; set HUD_FILE_TRACKING_ENABLED=false to opt out.",
+        "agent file-change diffs, and final artifacts to telemetry.",
         validation_alias="HUD_FILE_TRACKING_ENABLED",
     )
 
@@ -171,6 +156,11 @@ class Settings(BaseSettings):
     )
 
     @property
+    def reporting_enabled(self) -> bool:
+        """Whether runs and spans reach the platform: telemetry is on and an API key is set."""
+        return bool(self.telemetry_enabled and self.api_key)
+
+    @property
     def span_dir(self) -> str | None:
         if self.telemetry_local_dir:
             return self.telemetry_local_dir
@@ -179,11 +169,4 @@ class Settings(BaseSettings):
         return None
 
 
-# Create a singleton instance
 settings = Settings()
-
-
-# Add utility functions for backwards compatibility
-def get_settings() -> Settings:
-    """Get the global settings instance."""
-    return settings

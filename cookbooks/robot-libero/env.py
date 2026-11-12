@@ -1,14 +1,16 @@
 """The environment: LIBERO tabletop manipulation for both VLA policies and tool-calling agents.
 
-The Franka Panda simulator runs in its own process behind a `RobotBridge` and is published
-as a `robot` capability, so a VLA policy can stream actions to it. In absolute mode the same
-env also serves direct control: a `move_to` MCP tool, so any tool-calling LLM or coding agent
-drives the arm with no robot code of its own.
+The Franka Panda simulator runs in its own process behind a ``RobotBridge`` and is published
+as a ``robot`` capability, so a VLA policy can stream actions to it. In absolute mode the same
+env also serves direct control: a ``move_to`` MCP tool, so any tool-calling LLM or coding
+agent drives the arm with no robot code of its own.
 
-`LIBERO_CONTROL` picks the interface the env serves (the sim and the tasks are unchanged):
+``LIBERO_CONTROL`` picks the interface the env serves (the sim and the tasks are unchanged):
 
-- `absolute` (default): absolute end-effector targets on `robot`, plus `move_to` direct control.
-- `delta`: end-effector deltas on `robot` only, the action space LIBERO policies are trained on.
+- ``absolute`` (default): absolute end-effector targets on ``robot``, plus ``move_to`` direct
+  control.
+- ``delta``: end-effector deltas on ``robot`` only, the action space LIBERO policies are
+  trained on.
 """
 
 from __future__ import annotations
@@ -65,7 +67,6 @@ def hold_pose(data: dict) -> np.ndarray:
     return np.concatenate([state[:3], rotation, [-1.0]])
 
 
-# Absolute mode also serves the `move_to` tool, so an LLM can drive the arm directly.
 if CONTROL == "absolute":
     DirectControl(
         reference=hold_pose,  # what an unset target dimension keeps

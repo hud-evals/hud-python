@@ -1,7 +1,7 @@
 """What the Harbor adapter hands the controller each image serves.
 
-The adapter writes a :class:`ControllerConfig` as ``config.json`` and binds each
-task row's ``task`` argument as a :class:`TaskSpec`; ``env.py`` reads both back.
+The adapter writes a ``ControllerConfig`` as ``config.json`` and binds each
+task row's ``task`` argument as a ``TaskSpec``; ``env.py`` reads both back.
 """
 
 from __future__ import annotations
@@ -13,10 +13,11 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from hud.environment import Mount, Peer
+from hud.environment.egress import Peer
+from hud.environment.workspace import Mount
 
 if TYPE_CHECKING:
-    from hud.eval.runtime.compose import ComposeHealthcheck
+    from hud.runtime.compose import ComposeHealthcheck
 
 
 class Artifact(BaseModel):

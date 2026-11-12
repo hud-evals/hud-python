@@ -1,13 +1,4 @@
-"""AgentTool + AgentToolSpec.
-
-``AgentTool`` is the provider-facing tool, generic in its ``CapabilityClient``
-type. Capability bases (``SSHTool``, ``MCPTool``, ``RFBTool``) bind the
-generic and add per-protocol helpers. Provider subclasses declare
-``default_spec(model)`` and implement ``to_params`` + ``execute``.
-
-Result formatting (turning a ``ToolResult`` into a provider message) lives
-on the agent, not on the tool — the agent owns that wire shape.
-"""
+"""Provider-facing tool base class, its spec, and naming and result helpers."""
 
 from __future__ import annotations
 
@@ -18,7 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 
-from hud.capabilities import CapabilityClient
+from hud.capabilities.base import CapabilityClient
 from hud.types import TextContent, ToolResult
 
 if TYPE_CHECKING:
@@ -38,17 +29,14 @@ def provider_tool_name(name: str) -> str:
 
 
 def tool_ok(text: str) -> ToolResult:
-    """Build a success ToolResult with one text block."""
     return ToolResult(content=[TextContent(type="text", text=text)])
 
 
 def tool_err(text: str) -> ToolResult:
-    """Build an error ToolResult with one text block."""
     return ToolResult(content=[TextContent(type="text", text=text)], isError=True)
 
 
 def result_text(result: ToolResult) -> str:
-    """Extract concatenated text from a ToolResult's TextContent blocks."""
     return "".join(block.text for block in result.content if isinstance(block, TextContent))
 
 
@@ -76,7 +64,7 @@ class AgentTool(ABC, Generic[ClientT]):
     """
 
     name: ClassVar[str]
-    #: Runtime dispatch key — set by each capability base.
+    # Runtime dispatch key — set by each capability base.
     client_type: ClassVar[type[CapabilityClient]]
 
     def __init__(self, *, spec: AgentToolSpec, client: ClientT) -> None:
@@ -85,13 +73,13 @@ class AgentTool(ABC, Generic[ClientT]):
 
     @classmethod
     def from_config(cls, *, spec: AgentToolSpec, client: ClientT, config: ToolAgentConfig) -> Self:
-        """This tool as an agent with *config* runs it; a tool reads what it needs from it."""
+        """Build this tool for an agent running with ``config``; subclasses read what they need."""
         del config
         return cls(spec=spec, client=client)
 
     @property
     def provider_name(self) -> str:
-        """Name advertised to the LLM. Overridden by ``MCPTool``."""
+        """Name advertised to the LLM."""
         return self.name
 
     @classmethod
@@ -105,14 +93,3 @@ class AgentTool(ABC, Generic[ClientT]):
 
     @abstractmethod
     def to_params(self) -> Any: ...
-
-
-__all__ = [
-    "AgentTool",
-    "AgentToolSpec",
-    "ClientT",
-    "provider_tool_name",
-    "result_text",
-    "tool_err",
-    "tool_ok",
-]

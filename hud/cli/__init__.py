@@ -1,13 +1,8 @@
-"""CLI infrastructure: the I/O contract, error mapping, and workspace pins.
-
-Command modules build on this; :mod:`hud.cli.__main__` assembles them.
-"""
+"""CLI infrastructure: the JSON output contract, error mapping, and ``.hud/config.json`` links."""
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import inspect
 import io
 import json
 import os
@@ -62,10 +57,8 @@ class AuthScope(BaseModel):
 class DirectoryLink(BaseModel):
     """``.hud/config.json``: platform ids plus the credentials that wrote them.
 
-    Releases before the scoped schema wrote camelCase ids (``registryId``,
-    ``tasksetId``, ``projectId``) alongside keys no longer kept (``registryName``,
-    ``syncEnv``); those files read as an unscoped link and are rewritten in this
-    schema on the next update.
+    camelCase ids (``registryId``, ``tasksetId``, ``projectId``) also validate; a file
+    without ``scope`` reads as an unscoped link, which the next update rewrites.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -352,8 +345,6 @@ class CLIGroup(TyperGroup):
                 else contextlib.nullcontext()
             ):
                 result = super().invoke(ctx)
-                if inspect.isawaitable(result):
-                    result = asyncio.run(result)
             payload, code = (
                 (result.payload, result.exit_code) if isinstance(result, Result) else (result, 0)
             )

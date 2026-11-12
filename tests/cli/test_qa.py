@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -58,7 +57,6 @@ def row(status: str = "completed", **fields: Any) -> dict[str, Any]:
         "status": status,
         "verdict": None,
         "result": None,
-        "legacy_result": None,
         "note": None,
         "error": None,
         **fields,
@@ -102,36 +100,10 @@ def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
     ]
 
 
-def legacy(**output: Any) -> dict[str, Any]:
-    """A result stored before ``qa_agent_result.v1``, as its check's own JSON."""
-    return row(legacy_result={"content": json.dumps(output)})
-
-
-@pytest.mark.parametrize(
-    ("outcome", "exit_code"),
-    [
-        pytest.param(
-            {**verdict("failed"), "source": "manual", "verdict": "passed"},
-            0,
-            id="a-manual-verdict-wins",
-        ),
-        pytest.param(
-            legacy(problems=[{"problem": "No output", "fault": "agent"}]),
-            1,
-            id="legacy-agent-fault",
-        ),
-        pytest.param(
-            legacy(is_false_negative=True, reasoning="Grader missed it."),
-            1,
-            id="legacy-false-negative-found",
-        ),
-    ],
-)
-def test_qa_run_reads_a_verdict_from_each_result_shape(
-    hud: Hud, catalog: FakeServices, outcome: dict[str, Any], exit_code: int
-) -> None:
+def test_a_manual_verdict_wins_over_the_check_result(hud: Hud, catalog: FakeServices) -> None:
+    outcome = {**verdict("failed"), "source": "manual", "verdict": "passed"}
     catalog.route("api", "GET", "/v2/qa/results", json={"results": [outcome]})
 
     result = hud("qa", "run", CHECK, TRACE_ID, "--yes", "--json")
 
-    assert result.exit_code == exit_code, result
+    assert result.exit_code == 0, result

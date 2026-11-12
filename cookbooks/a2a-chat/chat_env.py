@@ -4,19 +4,24 @@ Provides chat-style tasks that accept ``messages`` as ``list[PromptMessage]``
 -- each message has a role and typed content.
 
 Serve it locally with ``hud serve chat_env.py``, or drive a task directly with
-the ``Chat`` runner::
+the ``Chat`` runner:
 
     from hud import Chat
     from hud.agents import create_agent
+    from hud.runtime import LocalRuntime
 
-    chat = Chat(chat_simple(messages=[]), create_agent("claude-sonnet-4-5"))
+    chat = Chat(
+        chat_simple(messages=[]),
+        create_agent("claude-sonnet-4-5"),
+        runtime=LocalRuntime("chat_env.py"),
+    )
     r = await chat.send("What is the capital of France?")
 """
 
 from __future__ import annotations
 
-from hud.environment import Environment
 from hud.graders import EvaluationResult
+from hud import Environment
 from hud.types import PromptMessage, TextContent
 
 env = Environment(name="chat")
@@ -41,7 +46,7 @@ async def chat_full(messages: list[PromptMessage]):
     messages with their original roles.
     """
     system = PromptMessage(
-        role="user",  # type: ignore[arg-type]
+        role="user",
         content=TextContent(
             type="text",
             text=(

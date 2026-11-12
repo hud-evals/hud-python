@@ -4,7 +4,7 @@
     uv run --with daytona python warmpool_repro.py
     uv run --with daytona python warmpool_repro.py --snapshot my-snapshot --n 8
 
-Measures how long `daytona.create` takes from an existing snapshot, four ways:
+Measures how long ``daytona.create`` takes from an existing snapshot, four ways:
 one-at-a-time and N-at-once, each with and without a warm pool of size N.
 
 Creates a warm pool on the chosen snapshot and deletes it at the end, along with

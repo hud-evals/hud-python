@@ -266,7 +266,7 @@ class MySimBridge(RobotBridge):
 
 Those three methods are all you write. Under the hood the framework takes care of communication
 with the agent and starting/stopping as well as stepping of the simulator at the *control rate*.
-All three hooks run on the sim thread (main under `serve_bridge`), so thread-affine sims such as
+All three hooks run on the sim thread (main under `RobotBridge.serve`), so thread-affine sims such as
 Isaac are safe without extra hopping in your subclass.
 
 - **`reset`** starts a fresh episode for a task and returns its prompt (the text the agent is given).
@@ -353,7 +353,7 @@ until the environment terminates. You supply two objects.
 - **`Model`** - something with an `infer()` function that returns action chunks (pre-/post-processing included)
 - **`Adapter`** - translates env ↔ model spaces.
 
-Run it with the normal engine - `Taskset(...).run(agent, runtime=...)` - against any substrate
+Run it with the normal engine - `Taskset(...).run(agent, runtime=...)` - against any host
 serving an env with the robot capability and an adaptable embodiment.
 
 ## LeRobot integration
@@ -373,7 +373,7 @@ import torch
 from lerobot.policies.factory import make_pre_post_processors
 from lerobot.policies.pi05.modeling_pi05 import PI05Policy
 
-from hud.agents.robot import RobotAgent, LeRobotModel, LeRobotAdapter
+from hud.agents.robot import LeRobotAdapter, LeRobotModel, RobotAgent
 
 class PI05Agent(RobotAgent):
     def __init__(self):
@@ -431,7 +431,7 @@ rollout its own episode state, and shares one batched model that coalesces their
 into a single stacked forward.
 
 ```python
-from hud.agents.robot.batching import BatchedAgent
+from hud.agents.robot import BatchedAgent
 
 agent = BatchedAgent(MyRobotAgent())   # sizes itself to the live concurrency
 
@@ -457,10 +457,10 @@ container pays for its own physics from scratch, when a sim like Isaac Sim could
 N copies together in one [vectorized](#gym-style-envs) instance. Running an eval against a vectorized sim needs no changes to
 the agent or the env's contract, only to how the eval provisions rollouts: wrap the runtime in
 [`Shared(provider, width=N)`](/v6/reference/runtime#shared) so `width` rollouts share that one
-substrate instead of provisioning `N` containers.
+host instead of provisioning `N` containers.
 
 ```python
-from hud.eval import Shared, DockerRuntime
+from hud.runtime import DockerRuntime, Shared
 
 job = await taskset.run(
     MyAgent(),
@@ -475,7 +475,7 @@ job = await taskset.run(
 - **The agent doesn't change.** Each rollout still drives one ordinary WebSocket connection and
   calls `reset` / `result` as usual - the environment resolves each call to that rollout's own
   [slot](#gym-style-envs).
-- **One boot per run.** The substrate boots on the first rollout and is torn down when `run(...)`
+- **One boot per run.** The host boots on the first rollout and is torn down when `run(...)`
   returns; rollout `width + 1` waits for capacity instead of provisioning (or erroring). To
   keep the sim warm across several calls, open the scope yourself:
   `async with Shared(...) as rt: await taskset.run(..., runtime=rt)`.
@@ -759,8 +759,8 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
-| `BatchedAgent` / `BatchedModel` | `hud.agents.robot.batching` | Many concurrent rollouts against one shared, batched model |
-| `Shared(provider, width=N)` | `hud.eval` | Refcounting provider: N concurrent rollouts share one substrate |
+| `BatchedAgent` / `BatchedModel` | `hud.agents.robot` | Many concurrent rollouts against one shared, batched model |
+| `Shared(provider, width=N)` | `hud.runtime` | Refcounting provider: N concurrent rollouts share one host |
 
 ## See also
 

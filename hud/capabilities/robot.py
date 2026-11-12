@@ -1,20 +1,10 @@
-"""The ``openpi/0`` protocol: wire codec + the agent-side client.
-
-``openpi/0`` is openpi-like — it reuses openpi's msgpack-numpy wire format and flat
-observation/action naming — but flips the roles: here the *env* is the WebSocket
-server (it owns the world) and the *agent* is the client (it acts in the world).
-:class:`RobotClient` is that agent-side client; it dials a robot env and exchanges
-observations/actions over the socket.
-
-The *env-side* counterpart — the server bridge that owns the simulator
-(:class:`~hud.environment.robot.bridge.RobotBridge`) — lives in
-:mod:`hud.environment.robot`, and reuses the wire codec defined here.
-"""
+"""The ``openpi/0`` wire codec and agent-side client; unlike openpi, the env is the server."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from typing import Any, ClassVar, Self, cast
 
 import numpy as np
@@ -24,20 +14,18 @@ from openpi_client import msgpack_numpy
 
 from .base import Capability, CapabilityClient
 
-# ─── wire codec ──────────────────────────────────────────────────────────────
-# openpi's msgpack-numpy codec: numpy arrays nested anywhere in a message serialize
-# transparently and recursively, so neither end wraps obs/action fields by hand.
-_packb = msgpack_numpy.packb
-_unpackb = msgpack_numpy.unpackb
+LOGGER = logging.getLogger(__name__)
 
-
-# ─── agent-side client ───────────────────────────────────────────────────────
+# openpi's msgpack-numpy codec serializes nested numpy arrays, so neither end wraps
+# obs/action fields by hand.
+packb = msgpack_numpy.packb
+unpackb = msgpack_numpy.unpackb
 
 
 class RobotClient(CapabilityClient):
     """Live ``openpi/0`` connection: send actions, receive observations."""
 
-    protocol: ClassVar[str] = "openpi"
+    protocol: ClassVar[str] = "openpi/0"
 
     def __init__(
         self, capability: Capability, ws: Any, *, seed: dict[str, Any] | None = None
@@ -55,16 +43,14 @@ class RobotClient(CapabilityClient):
         return dict(self.capability.params.get("contract") or {})
 
     def get_control_rate(self, default: int = 10) -> int:
-        """The env's control rate in Hz (frames/actions per second), rounded to at least 1."""
+        """Control rate in Hz, rounded and at least 1; ``default`` when the contract sets none."""
         return max(1, round(self.contract.get("control_rate") or default))
 
     def spaces(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """Split the contract's ``features`` into ``(action_space, observation_space)`` by role.
 
-        ``action_space`` is the single ``role == "action"`` feature; the
-        observation space is the ordered ``name -> feature`` map of the
-        ``role == "observation"`` features. Full feature dicts (type/dtype/shape/
-        names/stats) are preserved, so agents wire policies with no shared config.
+        The action space is the single action feature; the observation space maps
+        names to observation features, in contract order.
         """
         features = self.contract.get("features", {})
         action = next((f for f in features.values() if f.get("role") == "action"), {})
@@ -75,23 +61,21 @@ class RobotClient(CapabilityClient):
     async def connect(cls, cap: Capability, *, token: str | None = None) -> Self:
         """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame.
 
-        A ``None`` token binds the sole claimed slot on a single-env bridge;
-        vectorized bridges (ambiguous slots) reject it — pass the token from
-        ``endpoint.reset()`` there. Waits for the first observation so a rejected
-        claim fails here instead of hanging the first ``get_observation``.
+        A ``None`` token binds the sole slot of a single-env bridge; vectorized bridges
+        need the token from ``endpoint.reset()``. A rejected claim raises here rather
+        than hanging the first ``get_observation``.
         """
         # Bounded dial: an undialed claim stalls the bridge's barrier for every peer.
         ws = await websockets.connect(cap.url, max_size=None, ping_interval=None, open_timeout=30.0)
-        # Consume initial metadata; string means env error.
         raw = await ws.recv()
         if isinstance(raw, str):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
-        # Bind this connection to an episode slot (scalar openpi from here). HUD
-        # bridges require the claim frame; plain openpi servers have no slots.
-        meta = _unpackb(raw)
+        # HUD bridges require a claim frame binding this connection to an episode slot;
+        # plain openpi servers have no slots.
+        meta = unpackb(raw)
         seed: dict[str, Any] | None = None
         if token is not None or (isinstance(meta, dict) and meta.get("claim_required")):
-            await ws.send(cast("Any", _packb({"claim": token})))
+            await ws.send(cast("Any", packb({"claim": token})))
             try:
                 first = await asyncio.wait_for(ws.recv(), timeout=30.0)
             except TimeoutError as exc:
@@ -102,18 +86,20 @@ class RobotClient(CapabilityClient):
                 with contextlib.suppress(Exception):
                     await ws.close()
                 raise RuntimeError(f"robot env error on claim:\n{first}")
-            seed = _unpackb(first)
+            seed = unpackb(first)
         return cls(cap, ws, seed=seed)
 
     async def get_observation(self) -> dict[str, Any]:
         """Await the latest observation: ``{"data": {name: ndarray}, "terminated": bool}``.
 
-        Wire format is a flat openpi dict (``{name: ndarray, ...}``) with ``terminated``
-        as a sibling; array fields are regrouped under ``"data"``. Realtime bridges also
-        attach ``"meta"`` (``obs_index``, ``queue_remaining``, ``delay``,
-        ``unexecuted_chunk``); sync bridges omit it. Raises on an env error frame.
+        A per-step ``"reward"`` and, from realtime bridges, ``"meta"`` ride alongside.
+        Raises on an env error frame, and once the connection has ended.
         """
         msg = await self._queue.get()
+        if "ended" in msg:
+            # Every read after the end raises, not only the first.
+            self._queue.put_nowait(msg)
+            raise RuntimeError(f"robot env error:\n{msg['ended']}")
         if "error" in msg:
             raise RuntimeError(f"robot env error:\n{msg['error']}")
         # Scalar openpi: each connection is one slot; terminated is always a bool.
@@ -122,30 +108,29 @@ class RobotClient(CapabilityClient):
         reward = msg.pop("reward", None)
         out: dict[str, Any] = {"data": msg, "terminated": terminated}
         if reward is not None:
-            out["reward"] = reward  # per-step reward sibling (RL collection)
+            out["reward"] = reward
         if meta is not None:
             out["meta"] = meta
         return out
 
     async def send_action(self, action: Any) -> None:
         """Send a single action under the openpi ``"actions"`` key (sync path)."""
-        await self._ws.send(_packb({"actions": np.asarray(action, dtype=np.float32)}))
+        await self._ws.send(packb({"actions": np.asarray(action, dtype=np.float32)}))
 
     async def send_chunk(
         self, chunk: Any, *, obs_index: int | None = None, delay_used: int | None = None
     ) -> None:
         """Send a whole action chunk ``[chunk_len, action_dim]`` to a realtime bridge.
 
-        ``obs_index`` echoes the observation the chunk was inferred from so the env
-        can measure the real inference delay (ticks consumed in flight); ``delay_used``
-        is the delay the agent conditioned on (informational).
+        ``obs_index`` names the observation the chunk was inferred from, so the env can
+        measure the real inference delay; ``delay_used`` is informational.
         """
         msg: dict[str, Any] = {"actions": np.asarray(chunk, dtype=np.float32)}
         if obs_index is not None:
             msg["obs_index"] = int(obs_index)
         if delay_used is not None:
             msg["delay_used"] = int(delay_used)
-        await self._ws.send(_packb(msg))
+        await self._ws.send(packb(msg))
 
     async def close(self) -> None:
         self._mailman.cancel()
@@ -158,20 +143,15 @@ class RobotClient(CapabilityClient):
         try:
             async for raw in self._ws:
                 # A string frame is the env's error convention (a traceback), not an obs.
-                msg = {"error": raw} if isinstance(raw, str) else _unpackb(raw)
+                msg = {"error": raw} if isinstance(raw, str) else unpackb(raw)
                 if self._queue.full():
                     self._queue.get_nowait()
                 await self._queue.put(msg)
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # never silently stop draining the socket
-            import traceback
-
-            print(f"[agent] robot recv loop crashed: {exc!r}", flush=True)
-            traceback.print_exc()
-            raise
-
-
-__all__ = ["RobotClient"]
+            ended = "the robot connection closed"
+        except websockets.exceptions.ConnectionClosed as exc:
+            ended = f"the robot connection closed: {exc}"
+        except Exception as exc:
+            LOGGER.exception("robot receive loop failed")
+            ended = f"the robot receive loop failed: {exc!r}"
+        # Queued behind any observation not yet read, so the next read after it raises.
+        await self._queue.put({"ended": ended})

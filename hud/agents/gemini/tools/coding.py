@@ -7,17 +7,15 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from google.genai import types as genai_types
 
-from hud.agents.tools import SSHTool
-from hud.agents.tools.base import result_text, tool_err
-
-from .base import GeminiToolSpec
+from hud.agents.tools.base import AgentToolSpec, result_text, tool_err
+from hud.agents.tools.ssh import SSHTool
 
 if TYPE_CHECKING:
     from hud.types import ToolResult
 
-GEMINI_SHELL_SPEC = GeminiToolSpec(api_type="run_shell_command", api_name="run_shell_command")
-GEMINI_EDIT_SPEC = GeminiToolSpec(api_type="replace", api_name="replace")
-GEMINI_WRITE_SPEC = GeminiToolSpec(api_type="write_file", api_name="write_file")
+GEMINI_SHELL_SPEC = AgentToolSpec(api_type="run_shell_command", api_name="run_shell_command")
+GEMINI_EDIT_SPEC = AgentToolSpec(api_type="replace", api_name="replace")
+GEMINI_WRITE_SPEC = AgentToolSpec(api_type="write_file", api_name="write_file")
 
 
 def tool_decl(name: str, description: str, parameters: dict[str, Any]) -> genai_types.Tool:
@@ -49,7 +47,7 @@ class GeminiShellTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_SHELL_SPEC
 
@@ -84,7 +82,7 @@ class GeminiEditTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_EDIT_SPEC
 
@@ -119,7 +117,7 @@ class GeminiWriteTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_WRITE_SPEC
 
@@ -138,6 +136,3 @@ def required_str(arguments: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{key} is required")
     return value
-
-
-__all__ = ["GeminiEditTool", "GeminiShellTool", "GeminiWriteTool"]

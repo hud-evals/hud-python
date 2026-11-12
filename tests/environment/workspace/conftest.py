@@ -1,8 +1,8 @@
 """A served workspace, reached the way an agent reaches it: over its ``ssh/2`` binding.
 
 ``shell`` serves ``env.workspace(root, ...)`` on loopback and yields the
-:class:`~hud.environment.Workspace` it attached (for what the environment itself
-does with it: verifier runs, launches) with an SSH client on its published binding.
+``Workspace`` it attached (for what the environment itself does with it: verifier
+runs, launches) with an SSH client on its published binding.
 
 Rows marked ``SANDBOX`` need Linux, root and bubblewrap; they run in the sandbox
 lane (``-m "e2e and sandbox"``), where every session runs in the bubblewrap
@@ -15,11 +15,9 @@ import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
-import pytest
-
+from hud import Environment, Task
 from hud.clients import connect
-from hud.environment import Environment
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -27,8 +25,6 @@ if TYPE_CHECKING:
 
     from hud.capabilities import SSHClient
     from hud.environment import Workspace
-
-SANDBOX = (pytest.mark.e2e, pytest.mark.sandbox)
 
 if sys.platform == "win32":
     collect_ignore_glob = ["test_*.py"]

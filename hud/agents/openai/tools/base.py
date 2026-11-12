@@ -1,4 +1,4 @@
-"""OpenAI tool spec + result formatting."""
+"""Responses API tool-result formatting."""
 
 from __future__ import annotations
 
@@ -15,14 +15,11 @@ from openai.types.responses import (
 from openai.types.responses.response_input_param import FunctionCallOutput, ResponseInputItemParam
 
 from hud import types
-from hud.agents.tools.base import AgentToolSpec
 
 if TYPE_CHECKING:
     from hud.types import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
-
-OpenAIToolSpec = AgentToolSpec
 
 
 def format_openai_result(call: ToolCall, result: ToolResult) -> ResponseInputItemParam | None:
@@ -81,6 +78,3 @@ def format_openai_result(call: ToolCall, result: ToolResult) -> ResponseInputIte
         "ResponseInputItemParam",
         FunctionCallOutput(type="function_call_output", call_id=call.id, output=output_items),
     )
-
-
-__all__ = ["OpenAIToolSpec", "format_openai_result"]

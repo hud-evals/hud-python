@@ -1,9 +1,10 @@
 """Stand-ins for the ``claude`` and ``codex`` executables a CLI agent launches.
 
 Each records what the agent handed it (argv, the variables it set, stdin, ``.hud_*``
-files), prints the JSONL stream the real CLI would, and exits as told. :func:`answer`,
-:func:`shell`, :func:`fault` and :func:`prompt` speak either CLI's stream by its
-executable name.
+files), prints the JSONL stream the real CLI would, and exits as told. Like the real
+CLIs, each is a native executable: a compiled launcher that runs the stub script in its
+own process. ``answer``, ``shell``, ``fault`` and ``prompt`` speak either CLI's stream
+by its executable name.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-#: Variables the CLI agents set for the process they launch.
+# Variables the CLI agents set for the process they launch.
 AGENT_VARIABLES = (
     "ANTHROPIC_",
     "CLAUDE_",
@@ -29,7 +30,21 @@ AGENT_VARIABLES = (
     "IS_SANDBOX",
 )
 
-# The session's python3: a sandbox shows /usr, not the interpreter running the tests.
+# Replaces itself with the session's python3 running SCRIPT, so the agent's process is
+# the stub's: a sandbox shows /usr, not the interpreter running the tests.
+LAUNCHER = r"""
+#include <unistd.h>
+int main(int argc, char **argv) {
+    char *args[argc + 2];
+    args[0] = "python3";
+    args[1] = SCRIPT;
+    for (int i = 1; i < argc; i++) args[i + 1] = argv[i];
+    args[argc + 1] = 0;
+    execvp(args[0], args);
+    return 127;
+}
+"""
+
 STUB = """#!/usr/bin/env python3
 import json, os, subprocess, sys, time
 
@@ -107,7 +122,10 @@ sys.exit(behavior.get("exit", 0))
 
 @dataclass
 class Stub:
-    """A stub CLI installed in ``bin``; ``captures()`` reads what each invocation recorded."""
+    """A stub CLI installed in ``bin``; ``captures()`` reads what each invocation recorded.
+
+    ``shebang`` installs the stub script itself, as an npm package's launcher script is.
+    """
 
     root: Path
     name: str
@@ -116,6 +134,7 @@ class Stub:
     exit: int = 0
     hang: bool = False
     computer: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    shebang: bool = False
 
     @property
     def bin(self) -> Path:
@@ -143,7 +162,8 @@ class Stub:
                 }
             )
         )
-        script = self.bin / self.name
+        executable = self.bin / self.name
+        script = executable if self.shebang else self.root / f"{self.name}.py"
         script.write_text(
             STUB.format(
                 behavior=str(behavior),
@@ -153,6 +173,21 @@ class Stub:
             )
         )
         script.chmod(0o755)
+        if not self.shebang:
+            subprocess.run(
+                [
+                    "cc",
+                    f"-DSCRIPT={json.dumps(str(script))}",
+                    "-o",
+                    str(executable),
+                    "-x",
+                    "c",
+                    "-",
+                ],
+                input=LAUNCHER,
+                text=True,
+                check=True,
+            )
 
     def captures(self) -> list[dict[str, Any]]:
         return [json.loads(path.read_text()) for path in sorted(self.captures_dir.glob("*.json"))]
@@ -188,9 +223,6 @@ def process_exited(pid: int, *, within: float = 10.0) -> bool:
 
 def jsonl(*events: dict[str, Any]) -> str:
     return "".join(json.dumps(event) + "\n" for event in events)
-
-
-# ─── what the real CLIs print ──────────────────────────────────────────
 
 
 def claude_assistant(*content: dict[str, Any], stop: str = "end_turn") -> dict[str, Any]:
@@ -231,9 +263,6 @@ CODEX_COMPLETED = {
     "type": "turn.completed",
     "usage": {"input_tokens": 20, "cached_input_tokens": 5, "output_tokens": 8},
 }
-
-
-# ─── either CLI, by executable name ────────────────────────────────────
 
 
 def answer(cli: str, text: str) -> str:

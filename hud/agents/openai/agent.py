@@ -16,24 +16,24 @@ from openai.types.responses import (
     ToolParam,
 )
 from openai.types.responses.easy_input_message_param import EasyInputMessageParam
-from openai.types.responses.response_create_params import ToolChoice  # noqa: TC002
 from openai.types.responses.response_input_param import (
     ComputerCallOutput,
     Message,
     ResponseInputItemParam,
 )
-from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
 from hud.agents.tool_agent import DegenerateTurnError, RunState, ToolAgent
 from hud.agents.tools.base import result_text
+from hud.agents.tools.hosted import defer_past_threshold
 from hud.agents.types import AgentStep, Citation, OpenAIConfig, Usage
 from hud.types import ToolCall, ToolResult
 from hud.utils import gateway
 
-from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
 from .tools.base import format_openai_result
-from .tools.coding import shell_output
-from .tools.computer import last_image_content
+from .tools.coding import OpenAIShellTool, shell_output
+from .tools.computer import OpenAIComputerTool, last_image_content
+from .tools.hosted import OpenAIToolSearchTool
+from .tools.mcp_proxy import OpenAIMCPProxyTool
 
 if TYPE_CHECKING:
     from hud.types import PromptMessage
@@ -43,10 +43,8 @@ logger = logging.getLogger(__name__)
 class EmptyShellCallError(DegenerateTurnError):
     """The model emitted a shell_call with an empty ``commands`` array.
 
-    OpenAI stores such a turn but returns 500 for every request that continues
-    from it via ``previous_response_id``. The turn is rejected before its
-    response id is committed, so the run state still points at the last
-    healthy response and the next sample continues from there.
+    OpenAI returns 500 for every request continuing from such a turn, so it is rejected before
+    its response id is committed.
     """
 
 
@@ -78,13 +76,11 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         self._model = config.model
         self.max_output_tokens = config.max_output_tokens
         self.temperature = config.temperature
-        self.reasoning: Reasoning | None = config.reasoning
-        self.tool_choice: ToolChoice | None = config.tool_choice
+        self.reasoning = config.reasoning
+        self.tool_choice = config.tool_choice
         self.parallel_tool_calls = config.parallel_tool_calls
         self.text = config.text
         self.truncation: Literal["auto", "disabled"] | None = config.truncation
-
-    # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(self, *, prompt: list[PromptMessage]) -> OpenAIRunState:
         return OpenAIRunState(messages=self._initial_messages(prompt))
@@ -170,6 +166,22 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
         return format_openai_result(call, result)
 
+    def _defer_for_tool_search(self, tools: list[ToolParam]) -> list[ToolParam]:
+        """Defer function tools to tool search once there are more than its threshold."""
+        search = next(
+            (
+                hosted
+                for hosted in self.config.hosted_tools
+                if isinstance(hosted, OpenAIToolSearchTool) and hosted.supports_model(self._model)
+            ),
+            None,
+        )
+        if search is None:
+            return tools
+        return defer_past_threshold(
+            tools, search.threshold, lambda tool: tool.get("type") == "function"
+        )
+
     async def get_response(
         self,
         state: RunState[ResponseInputItemParam],
@@ -195,32 +207,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         if citations_enabled:
             include_param = ["web_search_call.action.sources"]
 
-        effective_tools: list[ToolParam] = list(state.params)
-
-        # tool_search: if a ToolSearchTool is configured and function count exceeds
-        # its threshold, apply defer_loading to function tools.
-        from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
-
-        tool_search_threshold: int | None = None
-        for hosted in self.config.hosted_tools:
-            if isinstance(hosted, OpenAIToolSearchTool):
-                tool_search_threshold = hosted.threshold
-                break
-        if tool_search_threshold is not None:
-            fn_count = sum(1 for t in effective_tools if t.get("type") == "function")
-            if fn_count > tool_search_threshold:
-                logger.debug(
-                    "tool_search: %d function tools > threshold %d, applying defer_loading",
-                    fn_count,
-                    tool_search_threshold,
-                )
-                effective_tools = cast(
-                    "list[ToolParam]",
-                    [
-                        {**t, "defer_loading": True} if t.get("type") == "function" else t
-                        for t in effective_tools
-                    ],
-                )
+        effective_tools = self._defer_for_tool_search(list(state.params))
 
         response = await self.openai_client.responses.create(
             model=self._model,
@@ -359,6 +346,3 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
             model=response.model,
             usage=usage,
         )
-
-
-__all__ = ["EmptyShellCallError", "OpenAIAgent"]

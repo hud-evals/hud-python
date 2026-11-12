@@ -1,14 +1,4 @@
-"""``python -m hud.environment.server`` — the protocol server for an Environment.
-
-The substrate side of the runtime contract: an :class:`Environment` only
-declares what exists; this module puts one on the wire. It owns task execution
-(:class:`TaskRunner`), per-connection protocol dispatch and serving-time state
-(:func:`bind`), and the full serving lifecycle (:func:`serve`) — backing
-daemons up, control channel bound (announcing the port on stdout as
-``HUD_SERVE_PORT=<port>``), daemons down. Every substrate shape runs it: the
-:class:`~hud.eval.runtime.SubprocessRuntime` child process, a container CMD, and
-``hud serve``.
-"""
+"""The control-channel server for an Environment (``python -m hud.environment.server``)."""
 
 from __future__ import annotations
 
@@ -19,6 +9,7 @@ import inspect
 import logging
 import math
 import secrets
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
@@ -26,8 +17,9 @@ from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from hud.capabilities import Connection
-from hud.graders.results import EvaluationResult
+from hud.capabilities.connection import Connection
+from hud.environment import load_environment
+from hud.types import EvaluationResult
 from hud.utils.process import run_until_terminated
 
 from .egress import WorkspaceRoute
@@ -47,13 +39,26 @@ from .utils import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
-    from .env import Environment, _TaskFactory
+    from .env import Environment, TaskTemplate
 
 LOGGER = logging.getLogger("hud.environment.server")
 
-#: Line a serving process prints once its control channel is bound; the
-#: ``spawn`` provider reads it from the child's stdout.
+# Line a serving process prints once its control channel is bound; runtimes that
+# spawn the server read it from stdout.
 PORT_ANNOUNCEMENT = "HUD_SERVE_PORT="
+
+# The port a served environment's control channel listens on unless told otherwise.
+DEFAULT_PORT = 8765
+
+
+def default_serve_command(port: int = DEFAULT_PORT) -> str:
+    """The shell command a runtime starts an image's ``env.py`` with when given none.
+
+    A project venv in the working directory comes first on ``PATH``, so it serves both
+    an image that installs into ``.venv`` (as ``hud init`` scaffolds) and one that
+    installs onto ``PATH``.
+    """
+    return f'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port {port}'
 
 
 @dataclass
@@ -65,17 +70,7 @@ class _ServerState:
 _SERVER_STATES: WeakKeyDictionary[asyncio.Server, _ServerState] = WeakKeyDictionary()
 
 
-# ─── task execution ──────────────────────────────────────────────────────
-
-
 def _jsonable(value: Any) -> Any:
-    """Recursively convert a prompt payload into JSON-safe primitives.
-
-    The prompt frame may carry rich objects — most importantly a list of
-    ``PromptMessage`` (chat-style message prompts) — which must become plain
-    dicts/lists before the JSON-RPC framing layer (``json.dumps``) ships them.
-    Models dump by alias, so MCP's models keep their wire names (``mimeType``).
-    """
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json", by_alias=True)
     if isinstance(value, dict):
@@ -108,13 +103,6 @@ def _coerce_args(sig: inspect.Signature, args: dict[str, Any]) -> dict[str, Any]
 
 
 def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
-    """Build the value sent into the task gen for evaluation.
-
-    Without a declared ``return_type`` the answer value is forwarded unchanged.
-    With one, the agent's answer is parsed into an ``Answer[T]`` — the
-    structured-answer contract (parse failures fall back to the raw string
-    on ``content`` so the task can grade them).
-    """
     if return_type is None:
         return payload.get("answer")
 
@@ -127,7 +115,7 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
             else adapter.validate_python(raw_text)
         )
     except ValidationError:
-        content = raw_text
+        content = raw_text  # an unparseable answer still reaches the task to grade
     return Answer(
         content=content,
         raw=raw_text if isinstance(raw_text, str) else str(raw_text),
@@ -135,12 +123,6 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
 
 
 def _score_value(result: Any) -> float:
-    """Normalize a task's grade yield to a float score, loudly.
-
-    Accepts a number or an object with a numeric ``reward`` attribute (the
-    ``hud.graders.EvaluationResult`` shape). Anything else is an authoring bug;
-    grading it silently as 0.0 would hide it.
-    """
     score = getattr(result, "reward", result)
     if isinstance(score, (int, float)):
         return float(score)
@@ -153,7 +135,7 @@ def _score_value(result: Any) -> float:
 class TaskRunner:
     """Holds one task's suspended generator between ``tasks.start`` and ``tasks.grade``."""
 
-    def __init__(self, task: _TaskFactory[Any], args: dict[str, Any] | None = None) -> None:
+    def __init__(self, task: TaskTemplate[Any], args: dict[str, Any] | None = None) -> None:
         self.task = task
         self._args = args or {}
         self._gen: AsyncGenerator[Any, Any] | None = None
@@ -189,8 +171,7 @@ class TaskRunner:
                 )
             frame = cast("dict[str, Any]", _jsonable(evaluation))
         elif isinstance(evaluation, EvaluationResult):
-            # Forward the full grade frame so metadata (info/content/done/isError/
-            # subscores) survives; the wire names the score "score", the model "reward".
+            # Forward the whole frame so its metadata survives; the wire names ``reward`` "score".
             frame = evaluation.model_dump(mode="json")
             frame["score"] = frame.pop("reward")
         else:
@@ -207,15 +188,7 @@ class TaskRunner:
             with contextlib.suppress(Exception):
                 await self._gen.aclose()
             self._gen = None
-        # Session ended (cancel / bye / post-grade) — run teardown hooks.
-        for hook in self.task.env._on_task_teardown:
-            with contextlib.suppress(Exception):
-                await hook()
-
-
-# ─── wire protocol ───────────────────────────────────────────────────────
-# The connection grammar (control session vs capability stream) lives on
-# :func:`bind` — the accept point. Session dispatch lives on _ControlChannel.
+        await self.task.env.end_task()
 
 
 class _NoTaskInProgress(RuntimeError):
@@ -234,52 +207,47 @@ async def _frames(
 
 
 class _ControlChannel:
-    """Serving-time state for one bound control channel.
+    """One bound server's suspended tasks, one per session id.
 
-    Owns what the declaration must not: runtime state — one suspended task per
-    session, keyed by session id (scoped to this server; two servers for one
-    env never share). A session's ``start`` replaces its own runner, ``grade``
-    consumes it, ``cancel`` clears it. A connection drop parks the session's
-    runner in place; a later connection grades it by resuming the session
-    (``hello`` with its id) or, when exactly one session is parked, by a plain
-    ``tasks.grade`` — the split start/grade flow (e.g. ``hud task grade`` or
-    harbor's verifier reconnecting to grade) with no parking handoff to manage.
+    A dropped connection parks its session's task; a later connection grades it by
+    resuming the session (``hello`` with its id) or, when it is the only parked
+    session, by a plain ``tasks.grade``.
     """
 
     def __init__(self, env: Environment) -> None:
         self.env = env
-        #: Suspended tasks by session id. An entry whose session has no live
-        #: connection is parked, awaiting a resume (or adoption) to grade.
-        self._runners: dict[str, TaskRunner] = {}
-        self._live: set[str] = set()
+        # A runner whose session is not in ``live`` is parked.
+        self.runners: dict[str, TaskRunner] = {}
+        self.live: set[str] = set()
 
     async def start(self, session_id: str, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
         await self._cancel_runner(session_id)
         runner = TaskRunner(self.env.tasks[task_id], args)
-        self._runners[session_id] = runner
+        self.runners[session_id] = runner
         try:
             return await runner.start()
         except BaseException:
-            self._runners.pop(session_id, None)
+            self.runners.pop(session_id, None)
             await runner.cancel()
             raise
 
     async def grade(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        runner = self._runners.pop(session_id, None)
+        runner = self.runners.pop(session_id, None)
         claim_sid = session_id
         if runner is None:
-            # Blind adopt: free the parked session's robot claim, not this connection's.
+            # Grade under the parked session's id, so its session-keyed state is
+            # released, not this connection's.
             claim_sid, runner = self._adopt_parked()
         token = current_session_id.set(claim_sid)
         try:
             return await runner.grade(payload)
         finally:
             current_session_id.reset(token)
-            self._release_if_idle(claim_sid)
+            self.release_if_idle(claim_sid)
 
     def _adopt_parked(self) -> tuple[str, TaskRunner]:
         """Claim the parked session iff unambiguous — the blind-reconnect grade path."""
-        parked = sorted(sid for sid in self._runners if sid not in self._live)
+        parked = sorted(sid for sid in self.runners if sid not in self.live)
         if not parked:
             raise _NoTaskInProgress("no task in progress")
         if len(parked) > 1:
@@ -288,13 +256,13 @@ class _ControlChannel:
                 "resume one by sending hello with its session_id"
             )
         sid = parked[0]
-        return sid, self._runners.pop(sid)
+        return sid, self.runners.pop(sid)
 
     async def _cancel_runner(self, session_id: str) -> None:
-        runner = self._runners.pop(session_id, None)
+        runner = self.runners.pop(session_id, None)
         if runner is None:
             return
-        # Bind session id so teardown hooks (robot slot release) free the right claim.
+        # Bind the session id so teardown hooks release that session's state.
         token = current_session_id.set(session_id)
         try:
             await runner.cancel()
@@ -303,20 +271,16 @@ class _ControlChannel:
 
     async def cancel(self, session_id: str) -> None:
         await self._cancel_runner(session_id)
-        self._release_if_idle(session_id)
+        self.release_if_idle(session_id)
 
-    def _release_if_idle(self, session_id: str) -> None:
-        """Release a session's controller connections and routes once nothing can use them.
-
-        A live control connection or a parked task (awaiting resume or grade) keeps
-        them; otherwise they are released so a later session inherits neither.
-        """
-        if session_id not in self._live and session_id not in self._runners:
+    def release_if_idle(self, session_id: str) -> None:
+        """Release the session's connections and routes unless it is live or has a parked task."""
+        if session_id not in self.live and session_id not in self.runners:
             self.env.release_session(session_id)
 
     async def cancel_all(self) -> None:
         """Tear down every suspended/live task (server shutdown)."""
-        for session_id in list(self._runners):
+        for session_id in list(self.runners):
             await self.cancel(session_id)
 
     async def session(
@@ -343,7 +307,7 @@ class _Session:
         self.env = channel.env
         self.writer = writer
         self.id = "sess-" + secrets.token_hex(4)
-        channel._live.add(self.id)
+        channel.live.add(self.id)
         self._token = current_session_id.set(self.id)
         self._work: asyncio.Task[None] | None = None
         self._work_id: int | str | None = None
@@ -377,10 +341,11 @@ class _Session:
         finally:
             next_frame.cancel()
             await self._stop_work()
-            self.channel._live.discard(self.id)
-            # Task stays parked for resume/grade; robot slots free on cancel/bye/grade
-            # teardown (callers that abort must cancel first — see rollout timeout).
-            self.channel._release_if_idle(self.id)
+            self.channel.live.discard(self.id)
+            # A started task stays parked for resume or a blind grade; its session's
+            # bindings are released only once nothing is parked or live, so callers
+            # that abort must cancel first.
+            self.channel.release_if_idle(self.id)
             current_session_id.reset(self._token)
 
     async def _receive(self, msg: dict[str, Any]) -> bool:
@@ -456,16 +421,16 @@ class _Session:
             if not isinstance(requested, str):
                 await self._error(msg_id, -32602, "hello: 'session_id' must be a string")
                 return
-            if requested in self.channel._live:
+            if requested in self.channel.live:
                 await self._error(msg_id, -32600, f"session {requested!r} has a live connection")
                 return
-            if requested not in self.channel._runners:
+            if requested not in self.channel.runners:
                 await self._error(msg_id, -32600, f"unknown session: {requested!r}")
                 return
             # Resume: this connection becomes the parked session.
-            self.channel._live.discard(self.id)
+            self.channel.live.discard(self.id)
             self.id = requested
-            self.channel._live.add(self.id)
+            self.channel.live.add(self.id)
             current_session_id.reset(self._token)
             self._token = current_session_id.set(self.id)
         raw_routes = params.get("workspace_routes", [])
@@ -488,6 +453,9 @@ class _Session:
             return
         await self.env.bind_connections(connections, session=self.id)
         await self.env.bind_workspace_routes(workspace_routes, session=self.id)
+        if requested is None:
+            # Only a new session: a resume or a rebind must answer within its heartbeat.
+            await self.env.open_session()
         # env.start() ran before serving, so hook-published capabilities (e.g. a
         # workspace's ssh address) are already concrete here.
         bindings = [c.to_manifest() for c in self.env.capabilities]
@@ -544,11 +512,7 @@ async def _stream(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
 ) -> None:
-    """One capability stream: dial the resolved daemon and splice raw bytes.
-
-    The client opens one such connection per capability stream, so the
-    control port is the only address a substrate ever needs to expose.
-    """
+    """One capability stream: dial the resolved daemon and splice raw bytes."""
     msg_id = msg.get("id")
     try:
         name = (msg.get("params") or {}).get("capability")
@@ -582,23 +546,13 @@ async def _stream(
 
 
 async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:
-    """Bind a control-channel server for *env* (not yet serving).
+    """Bind a control-channel server for ``env`` without serving it yet.
 
-    The accept point owns the transport's connection grammar — TCP has no
-    native streams, so the preface (first) frame decides what a connection
-    is: a ``tunnel.open`` frame opens one capability stream (a single reply,
-    then raw bytes — the CONNECT analog); anything else begins a JSON-RPC
-    control session. Session methods are transport-invariant; the preface is
-    TCP routing (a WebSocket transport would tunnel via its native upgrade).
-
-    Each bind gets fresh serving state. Callers read the assigned port from
-    ``server.sockets[0].getsockname()`` and drive it with
-    ``server.serve_forever()``.
+    A connection's first frame decides what it is: ``tunnel.open`` opens one raw
+    capability stream; anything else begins a JSON-RPC control session.
     """
     channel = _ControlChannel(env)
-    # Live connection handlers, so teardown can cancel them instead of
-    # abandoning them to loop shutdown (-> "Task was destroyed but it is
-    # pending" + GeneratorExit thrown into mid-splice coroutines).
+    # Tracked so shutdown cancels handlers instead of abandoning them mid-splice.
     active: set[asyncio.Task[None]] = set()
 
     async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -630,7 +584,8 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
     return server
 
 
-async def _shutdown(server: asyncio.Server) -> None:
+async def unbind(server: asyncio.Server) -> None:
+    """Close a server from ``bind``: cancel its handlers and task sessions, then wait."""
     server.close()
     state = _SERVER_STATES.pop(server)
     handlers = list(state.handlers)
@@ -642,25 +597,25 @@ async def _shutdown(server: asyncio.Server) -> None:
 
 
 async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
-    """Start *env*'s daemons and serve its control channel until cancelled."""
+    """Start ``env``'s daemons and serve its control channel until cancelled."""
     await env.start()
     server: asyncio.Server | None = None
     try:
         server = await bind(env, host, port)
         port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
-        print(port_line, flush=True)  # noqa: T201 - the spawn provider reads this from stdout
+        # The runtimes that spawn this process read the port from its stdout.
+        sys.stdout.write(f"{port_line}\n")
+        sys.stdout.flush()
         # The bound server is already accepting. Not serve_forever(): cancelling it
-        # waits for open connections to close, and only _shutdown() closes them.
+        # waits for open connections to close, and only unbind() closes them.
         await asyncio.Event().wait()
     finally:
         if server is not None:
-            await _shutdown(server)
+            await unbind(server)
         await env.stop()
 
 
 def main() -> None:
-    from hud.environment import load_environment
-
     parser = argparse.ArgumentParser(description="Serve a HUD environment from source.")
     parser.add_argument("path", help="A .py file or a directory defining an Environment.")
     parser.add_argument("--env", default=None, help="Environment name when several are defined.")

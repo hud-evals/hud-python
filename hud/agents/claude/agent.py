@@ -37,6 +37,7 @@ from anthropic.types.beta import (
 from PIL import Image
 
 from hud.agents.tool_agent import RunState, ToolAgent
+from hud.agents.tools.hosted import defer_past_threshold
 from hud.agents.types import AgentStep, Citation, ClaudeConfig, Usage
 from hud.types import (
     BlobResourceContents,
@@ -125,8 +126,6 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                 "anthropic", model=self.config.model, gateway=self.config.gateway
             ),
         )
-
-    # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(self, *, prompt: list[PromptMessage]) -> RunState[BetaMessageParam]:
         return RunState(messages=self._initial_messages(prompt))
@@ -226,8 +225,6 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         if sibling_docs:
             return [tool_result_msg, {"role": "user", "content": sibling_docs}]
         return tool_result_msg
-
-    # ─── Anthropic call ───────────────────────────────────────────────
 
     async def _stream_response(
         self,
@@ -406,15 +403,11 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             ),
             None,
         )
-        custom = [tool for tool in tools if "type" not in tool or tool["type"] == "custom"]
-        if search is None or len(custom) <= search.threshold:
+        if search is None:
             return tools
-        return [
-            cast("BetaToolUnionParam", {**tool, "defer_loading": True})
-            if "type" not in tool or tool["type"] == "custom"
-            else tool
-            for tool in tools
-        ]
+        return defer_past_threshold(
+            tools, search.threshold, lambda tool: tool.get("type", "custom") == "custom"
+        )
 
     @staticmethod
     def _prune_tool_result_images(messages: list[BetaMessageParam], limit: int) -> None:
@@ -571,6 +564,3 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     start_index=None,
                     end_index=None,
                 )
-
-
-__all__ = ["ClaudeAgent"]

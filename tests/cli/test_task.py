@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
+from hud import Environment, Task
 from hud.clients import connect
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
     from tests.conftest import Hud
@@ -60,9 +60,6 @@ def test_a_task_spawned_from_its_source_starts_and_grades(
     result = hud("task", *argv, input="answer")
 
     assert (result.exit_code, result.stdout) == (0, stdout), result
-
-
-# ─── attached to a served environment ───────────────────────────────────
 
 
 def counting_env(starts: list[str], *, failing: bool = False) -> Environment:

@@ -6,16 +6,16 @@ import asyncio
 import logging
 from typing import Any
 
+from hud.types import SubScore
 from hud.utils.process import create_process_group_exec
 
 from .base import Grader
-from .results import SubScore
 
 logger = logging.getLogger(__name__)
 
 
 class BashGrader(Grader):
-    """Run a shell command and score by exit code. Fully async."""
+    """Run a shell command and score ``1.0`` on exit code ``0``, else ``0.0``."""
 
     name = "BashGrader"
 
@@ -80,6 +80,3 @@ class BashGrader(Grader):
             value=1.0 if returncode == 0 else 0.0,
             info={"exit_code": returncode, "stdout": stdout, "stderr": stderr},
         )
-
-
-__all__ = ["BashGrader"]

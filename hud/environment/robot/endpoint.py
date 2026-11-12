@@ -1,35 +1,4 @@
-"""``RobotEndpoint`` — the env server's handle on a sim process.
-
-A bridge always lives in the sim's own process (see :mod:`~.bridge`); the
-endpoint is the JSON-RPC client that drives it through episodes (``reset`` /
-``result``) and mints its capability — and, when it spawned the process, owns
-its lifecycle. Two ways to build one, identical methods either way:
-
-- **Spawned** — :meth:`RobotEndpoint.spawn`: fork the sim program, read its
-  announced control port, tear the process down on :meth:`stop`
-  (``env.gym(...)`` builds this).
-- **Attached** — :meth:`RobotEndpoint.remote`: dial a sim process something
-  else runs (another container, a warm Isaac kept alive across env-server
-  restarts); :meth:`stop` only drops the link, never the process.
-
-Control plane only: the agent's step/observation loop tunnels straight to the
-bridge's ``robot`` WebSocket, and templates drive episodes through the handle::
-
-    sim = env.gym(make_env)
-
-
-    @env.template(id="pawn_lift")
-    async def pawn_lift(task: str = "solo_pawn_lift", seed: int = 0):
-        ep = await sim.reset(task=task, seed=seed)  # {prompt, token}
-        yield {"prompt": ep["prompt"]}
-        yield await sim.result()
-
-A single-env sim has one slot, so the template may omit the token as above. A
-vectorized sim (``num_envs > 1``) must thread it through so each session grades
-its own slot: publish it as this capability's per-episode binding,
-``yield {"prompt": ..., "bindings": {"robot": {"token": ep["token"]}}}`` (the
-agent reads it off ``run.bindings``), and ``sim.result(token=ep["token"])``.
-"""
+"""``RobotEndpoint`` — the env server's handle on a sim process."""
 
 from __future__ import annotations
 
@@ -40,16 +9,17 @@ import json
 import sys
 from typing import TYPE_CHECKING, Any
 
+from hud.capabilities.base import Capability
 from hud.environment.env import current_session_id
 from hud.environment.utils import read_frame, send_frame
 from hud.utils.process import create_process_group_exec
 
-from .bridge import _HUD_STATE, PORT_ANNOUNCEMENT, RobotBridge
+from .bridge import HUD_STATE, PORT_ANNOUNCEMENT, SLOTS_FULL, RobotBridge, SlotsFull
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from hud.capabilities import Capability
+    from hud.environment.env import Environment
     from hud.environment.robot.control import DirectControl
     from hud.utils.process import ProcessGroup
 
@@ -57,16 +27,12 @@ if TYPE_CHECKING:
 def _bridge_init_kwargs(bridge: RobotBridge) -> dict[str, Any]:
     """JSON-safe kwargs for the spawned child from a declaration instance.
 
-    Subclass ``__init__`` params ride through as ctor kwargs (host/port skipped —
-    the child binds its own address). Declaration-time attrs set *after* init
-    (``bridge.contract = ...``, ``num_envs``, ``metadata``) are packed under
-    ``__hud_state__`` so the child can apply them without every subclass
-    accepting those names as kwargs.
+    The base ``host`` and ``port`` are left out: the child binds its own address.
     """
     base = set(inspect.signature(RobotBridge.__init__).parameters) - {"self"}
     out: dict[str, Any] = {}
     for name, param in inspect.signature(type(bridge).__init__).parameters.items():
-        if name == "self" or name in base or name == _HUD_STATE:
+        if name == "self" or name in base or name == HUD_STATE:
             continue
         if param.kind not in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY):
             continue
@@ -94,7 +60,7 @@ def _bridge_init_kwargs(bridge: RobotBridge) -> dict[str, Any]:
     if bridge.num_envs != 1:
         state["num_envs"] = bridge.num_envs
     if state:
-        out[_HUD_STATE] = state
+        out[HUD_STATE] = state
     return out
 
 
@@ -102,7 +68,7 @@ class RobotEndpoint:
     """Drive a simulation bridge living in another process.
 
     Build with a bridge class/instance (``start()`` spawns its process),
-    :meth:`spawn` (explicit argv), or :meth:`remote` (attach).
+    ``spawn`` (explicit argv), or ``remote`` (attach).
     """
 
     def __init__(
@@ -145,7 +111,7 @@ class RobotEndpoint:
 
     @classmethod
     def spawn(cls, cmd: Sequence[str], *, connect_timeout_s: float = 900.0) -> RobotEndpoint:
-        """An endpoint that forks *cmd* (a sim program; see :mod:`~.bridge`) and owns it."""
+        """An endpoint that forks ``cmd`` (a sim program; see ``bridge``) and owns it."""
         return cls(cmd=cmd, connect_timeout_s=connect_timeout_s)
 
     @classmethod
@@ -153,16 +119,14 @@ class RobotEndpoint:
         """An endpoint attached to a sim process something else runs."""
         return cls(host=host, port=port, connect_timeout_s=connect_timeout_s)
 
-    def attach(self, env: Any) -> RobotEndpoint:
-        """Hook slot release into *env* task teardown (``env.gym`` does this)."""
-        env._on_task_teardown.append(self.release_claim)
+    def attach(self, env: Environment) -> RobotEndpoint:
+        """Release this endpoint's slot claim whenever a task session on ``env`` ends."""
+        env.task_teardown(self.release_claim)
         return self
 
     def add_direct_control(self, control: DirectControl) -> None:
         """Serve a robotics direct-control profile beside this endpoint's wire."""
         self._direct_controls.append(control)
-
-    # ── lifecycle ─────────────────────────────────────────────────────────
 
     async def start(self) -> None:
         """Bring the link up: fork the sim program (spawned mode) and connect."""
@@ -238,28 +202,16 @@ class RobotEndpoint:
                 f"after {self._connect_timeout_s}s"
             ) from exc
 
-    # ── the control surface ───────────────────────────────────────────────
-
     async def url(self) -> str:
         """The bridge's ``ws://`` address — the robot capability's url."""
         return (await self._call("url"))["url"]
 
     async def contract(self) -> dict[str, Any]:
-        """The env's self-describing wire contract, read from the bridge.
-
-        Under lazy spawn this may build the env and derive ``contract.json`` when
-        none was pre-written — so a capability published at initialize is complete.
-        """
+        """The bridge's wire contract, which a bridge may first derive by building its env."""
         return (await self._call("contract"))["contract"]
 
     async def capabilities(self, name: str = "robot") -> list[Capability]:
-        """Everything the bridge serves — the ``robot`` wire named *name*, plus any
-        extras it adds itself (e.g. MCP tools from the sim process).
-
-        Publish from an ``@env.initialize`` hook (``env.gym`` does this).
-        """
-        from hud.capabilities import Capability
-
+        """The bridge's capabilities: the ``robot`` wire named ``name`` plus any it adds."""
         published = await self._call("capabilities", {"name": name})
         capabilities = [Capability.from_manifest(c) for c in published["capabilities"]]
         for control in self._direct_controls:
@@ -288,10 +240,8 @@ class RobotEndpoint:
         while True:
             try:
                 ep = await self._call("reset", task_args)
-            except RuntimeError as exc:
-                # Batch full: drop the lock between tries so a peer can result.
-                if "slots are claimed" not in str(exc):
-                    raise
+            except SlotsFull:
+                # Retried outside the link's lock, so a peer can result and free a slot.
                 await asyncio.sleep(0.05)
                 continue
             session_id, token = current_session_id.get(), ep.get("token")
@@ -306,7 +256,7 @@ class RobotEndpoint:
         """This slot's score dict (frees the slot), merged with any caller ``extra``.
 
         ``token`` may be omitted on a single-env bridge (one claimed slot);
-        vectorized envs must pass the token from :meth:`reset`.
+        vectorized envs must pass the token from ``reset``.
         """
         await self._end_direct_episodes()
         res = {**(await self._call("result", {"token": token})), **extra}
@@ -375,13 +325,13 @@ class RobotEndpoint:
             if msg is None:
                 raise ConnectionError(f"connection closed awaiting {method!r} reply")
             if "error" in msg:
-                raise RuntimeError(f"{method} failed: {msg['error']['message']}")
+                failure = f"{method} failed: {msg['error']['message']}"
+                if msg["error"]["code"] == SLOTS_FULL:
+                    raise SlotsFull(failure)
+                raise RuntimeError(failure)
             return msg["result"]
 
 
 async def _forward_lines(stream: asyncio.StreamReader) -> None:
     while line := await stream.readline():
         print(line.decode("utf-8", "replace").rstrip(), flush=True)
-
-
-__all__ = ["RobotEndpoint"]

@@ -1,11 +1,10 @@
-"""OpenAI-compatible tool spec + result formatting."""
+"""Chat Completions tool params and tool-result messages."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
-from hud.agents.tools.base import AgentToolSpec
-from hud.agents.tools.base import provider_tool_name as openai_compatible_tool_name
+from hud.agents.tools.base import provider_tool_name
 from hud.types import ImageContent, TextContent, Tool
 
 if TYPE_CHECKING:
@@ -20,7 +19,6 @@ def format_chat_result(
     call: ToolCall,
     result: ToolResult,
 ) -> ChatCompletionMessageParam | list[ChatCompletionMessageParam]:
-    """Format a tool result for OpenAI-compatible chat completions."""
     text_parts: list[str] = []
     image_parts: list[dict[str, Any]] = []
     items: list[Any] = list(result.content)
@@ -92,16 +90,16 @@ def _sanitize_schema_for_openai(schema: dict[str, Any]) -> dict[str, Any]:
             else:
                 sanitized["type"] = "string"
         elif key == "prefixItems" and isinstance(value, list):
+            # The subset has no tuples or unions: the items are typed only when every
+            # position shares one type.
             sanitized["type"] = "array"
-            prefix_items = cast("list[Any]", value)
-            if prefix_items:
-                first: Any = prefix_items[0]
-                if isinstance(first, dict):
-                    sanitized["items"] = {
-                        "type": cast("dict[str, Any]", first).get("type", "string")
-                    }
-                else:
-                    sanitized["items"] = {"type": "string"}
+            item_types = [
+                cast("dict[str, Any]", item).get("type") if isinstance(item, dict) else None
+                for item in cast("list[Any]", value)
+            ]
+            first = item_types[0] if item_types else None
+            if first is not None and all(item_type == first for item_type in item_types):
+                sanitized["items"] = {"type": first}
         elif key == "properties" and isinstance(value, dict):
             sanitized[key] = {
                 k: _sanitize_schema_for_openai(cast("dict[str, Any]", v))
@@ -139,17 +137,8 @@ def openai_compatible_tool_param(
     return {
         "type": "function",
         "function": {
-            "name": name or openai_compatible_tool_name(tool.name),
+            "name": name or provider_tool_name(tool.name),
             "description": tool.description or f"Call {tool.name}",
             "parameters": sanitized,
         },
     }
-
-
-__all__ = [
-    "AgentToolSpec",
-    "OpenAICompatibleToolParam",
-    "format_chat_result",
-    "openai_compatible_tool_name",
-    "openai_compatible_tool_param",
-]

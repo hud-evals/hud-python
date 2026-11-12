@@ -15,17 +15,25 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from hud.capabilities import Capability
-from hud.environment import Mount, Peer
-from hud.environment.egress import ANY_HOST, BRIDGE_PORT, VISITOR_PORT
-from hud.eval import Task, Taskset
-from hud.eval.runtime import RuntimeConfig, RuntimeGPU, RuntimeLimits, RuntimeResources, RuntimeTPU
-from hud.eval.runtime.compose import (
+from hud.capabilities.base import Capability
+from hud.environment.egress import ANY_HOST, BRIDGE_PORT, VISITOR_PORT, Peer
+from hud.environment.server import DEFAULT_PORT
+from hud.environment.workspace import Mount
+from hud.eval.task import Task
+from hud.eval.taskset import Taskset
+from hud.runtime.compose import (
     ComposeConfig,
     ComposeProject,
     ComposeService,
     ComposeUnboundVariableError,
     ComposeUnsupportedError,
+)
+from hud.runtime.core import (
+    RuntimeConfig,
+    RuntimeGPU,
+    RuntimeLimits,
+    RuntimeResources,
+    RuntimeTPU,
 )
 from hud.utils.naming import normalize_environment_name
 from hud.version import __version__
@@ -55,6 +63,8 @@ CONTROLLER_ROOT = Path("/controller")
 CONTROLLER_MODULE = "hud.integrations.harbor.env:env"
 MOUNTS_ROOT = Path("/mounts")
 TASK_ROOT = Path("/rootfs")
+# Ports HUD binds in the main service: the egress bridge, its visitor relay and the control channel.
+RESERVED_PORTS = frozenset({BRIDGE_PORT, VISITOR_PORT, DEFAULT_PORT})
 IGNORED = shutil.ignore_patterns(
     "__pycache__",
     "*.pyc",
@@ -371,7 +381,7 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
                     "harbor.invalid.sidecar_recipe",
                     f"Compose service {service_name!r} has neither image nor build",
                 )
-        for port in sorted(compose_main.tcp_ports & {BRIDGE_PORT, VISITOR_PORT, 8765}):
+        for port in sorted(compose_main.tcp_ports & RESERVED_PORTS):
             add(
                 "harbor.invalid.reserved_main_port",
                 f"Harbor main service port {port} conflicts with a HUD reserved port",
@@ -614,7 +624,7 @@ def adapt(
         # Reserved ports an image EXPOSEs are not forwarded; _inspect_task rejects
         # explicit Compose declarations of them.
         ports = compose_main.tcp_ports | (
-            image_ports(resolved.main, image="main image") - {BRIDGE_PORT, VISITOR_PORT, 8765}
+            image_ports(resolved.main, image="main image") - RESERVED_PORTS
         )
         verifier_image_user = (resolved.verifier.get("User") or None) if separate else image_user
         verifier_workdir = (
@@ -696,7 +706,7 @@ def adapt(
             "--host",
             "0.0.0.0",  # noqa: S104 - container control channel
             "--port",
-            "8765",
+            str(DEFAULT_PORT),
         ]
         for service_name, service in compose_project.services.items():
             depends_on = (service.model_extra or {}).get("depends_on")

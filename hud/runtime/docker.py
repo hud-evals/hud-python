@@ -16,12 +16,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
-from hud.clients import DEFAULT_READY_TIMEOUT
-from hud.environment.server import PORT_ANNOUNCEMENT
+from hud.clients.client import DEFAULT_READY_TIMEOUT
+from hud.environment.server import DEFAULT_PORT, PORT_ANNOUNCEMENT
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
-from .compose import ComposeConfig, DockerBindMount
+from .compose import SECCOMP_PROFILE, ComposeConfig, DockerBindMount
 from .core import Runtime, RuntimeConfig, validate_session_id
 
 if TYPE_CHECKING:
@@ -29,19 +29,14 @@ if TYPE_CHECKING:
 
     from hud.eval.task import Task
 
-logger = logging.getLogger("hud.eval.runtime")
+logger = logging.getLogger("hud.runtime")
 
 _SESSION_ROOT = "/runtime/sessions"
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
 
-#: DockerRuntime always serves HUD environments, so this is part of the
-#: provider contract rather than a per-image option. This is intentionally a
-#: default-allow compatibility profile: Workspace's bwrap sessions need the
-#: namespace and mount syscalls, while unrelated kernel interfaces stay denied.
-_DOCKER_SECCOMP_PROFILE = Path(__file__).parent.parent / "docker-seccomp.json"
 _DOCKER_SECURITY_ARGS = (
     "--security-opt",
-    f"seccomp={_DOCKER_SECCOMP_PROFILE}",
+    f"seccomp={SECCOMP_PROFILE}",
     # Docker exposes system-path masking only as an all-or-nothing option;
     # bwrap replaces the container's proc and dev mounts while building a wall.
     "--security-opt",
@@ -86,7 +81,7 @@ async def _docker_deadline(
 
 
 async def _wait_serving(container: str, name: str, seconds: float) -> None:
-    """Return once the env in *container* announces its port; raise if it exits first."""
+    """Return once the env in ``container`` announces its port; raise if it exits first."""
     logs = await create_process_group_exec(
         "docker",
         "logs",
@@ -145,16 +140,18 @@ async def _docker_output(*args: str) -> AsyncGenerator[None]:
 class DockerRuntime:
     """Start a HUD environment from an image or a Docker Compose file.
 
-    An image is started with ``docker run``. A Compose file is started unchanged
-    except for a small provider override that publishes the ``main`` service's
-    control-channel port and applies HUD's nested-workspace security profile.
+    An image is started with ``docker run``. A Compose file is normalized (interpolated
+    against its project ``.env``) and started with a provider override: the control-channel
+    port is published on the service that owns ``main``'s network, and ``main`` gets HUD's
+    nested-workspace security profile, session volumes, bind mounts, env vars, resource
+    limits and, with ``service_access``, the Docker socket.
     """
 
     def __init__(
         self,
         image: str | None = None,
         *,
-        port: int = 8765,
+        port: int = DEFAULT_PORT,
         run_args: Sequence[str] = (),
         bind_mounts: Sequence[DockerBindMount] = (),
         compose_service_socket: str | Path | None = None,
@@ -181,7 +178,7 @@ class DockerRuntime:
         params = {"ready_timeout": startup_timeout} if startup_timeout is not None else {}
         resources = config.resources
         if resources is not None:
-            resources._require_support("DockerRuntime", {"cpu", "memory_mb", "storage_mb", "gpu"})
+            resources.require_support("DockerRuntime", {"cpu", "memory_mb", "storage_mb", "gpu"})
         compose_project = config.compose
         if compose_project is not None:
             compose = compose_project.document
@@ -223,7 +220,7 @@ class DockerRuntime:
             with compose_project.stage(
                 f"127.0.0.1::{self.port}",
                 port_service=port_service,
-                seccomp=_DOCKER_SECCOMP_PROFILE,
+                seccomp=SECCOMP_PROFILE,
                 service_socket=service_socket,
                 bind_mounts=self.bind_mounts,
                 env_vars=self.env_vars,
@@ -260,7 +257,7 @@ class DockerRuntime:
                         "--detach",
                         "--build",
                         "--remove-orphans",
-                        deadline=startup_timeout,
+                        timeout_s=startup_timeout,
                     )
                     if awaited := compose_config.healthchecked_services():
                         await _docker(
@@ -271,7 +268,7 @@ class DockerRuntime:
                             "--no-recreate",
                             "--no-build",
                             *awaited,
-                            deadline=(
+                            timeout_s=(
                                 None if startup_deadline is None else startup_deadline - loop.time()
                             ),
                         )
@@ -333,7 +330,7 @@ class DockerRuntime:
         session_volume = f"hud-runtime-sessions-{uuid.uuid4().hex}"
         container = ""
         try:
-            await _docker("volume", "create", session_volume, deadline=startup_timeout)
+            await _docker("volume", "create", session_volume, timeout_s=startup_timeout)
             out, _ = await _docker(
                 "run",
                 "--detach",
@@ -349,7 +346,7 @@ class DockerRuntime:
                 "--publish",
                 f"127.0.0.1::{self.port}",
                 config.image,
-                deadline=startup_timeout,
+                timeout_s=startup_timeout,
             )
             container = out.strip()
             teardown = ("rm", "--force", container)
@@ -381,6 +378,8 @@ class DockerRuntime:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DockerEndpoint(Runtime):
+    """The ``Runtime`` a ``DockerRuntime`` yields: its control channel and ``container`` id."""
+
     transports_sessions: ClassVar[bool] = True
 
     container: str

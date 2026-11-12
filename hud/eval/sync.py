@@ -1,9 +1,4 @@
-"""Platform persistence for tasksets: diff plans and the fetch/upload wire format.
-
-Taskset endpoints and the upload payload shape.
-Transport (auth, retries, errors) is :mod:`hud.utils.platform`; the shapes and
-the local-vs-remote :func:`diff` live here, out of the collection itself.
-"""
+"""Taskset sync with the platform: diff, fetch and upload."""
 
 from __future__ import annotations
 
@@ -120,9 +115,6 @@ def diff(local: Taskset, remote: Taskset) -> SyncPlan:
     )
 
 
-# ─── fetch ──────────────────────────────────────────────────────────────
-
-
 def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, str]:
     """Resolve a taskset name or UUID to ``(uuid, name)``; uuid is "" for an unknown name."""
     try:
@@ -147,7 +139,6 @@ def fetch_taskset_tasks(
     platform: PlatformClient,
     taskset_id: str,
 ) -> tuple[str | None, list[Task]]:
-    """Fetch a platform taskset's export, mapped to ``(display_name, [Task])``."""
     try:
         export = platform.get(f"/tasksets/{taskset_id}/export", _TasksetExport)
     except HudRequestError as e:
@@ -155,9 +146,6 @@ def fetch_taskset_tasks(
             return None, []
         raise
     return export.name, export.tasks
-
-
-# ─── upload ─────────────────────────────────────────────────────────────
 
 
 def upload_taskset(
@@ -181,11 +169,6 @@ def upload_taskset(
 
 
 def task_upload_payload(task: Task) -> dict[str, Any]:
-    """One upload item: env name + bare task id, the v6 wire identity.
-
-    The platform resolves `(env, task_id)` against the env's latest build
-    manifest and validates `args` against the task's schema.
-    """
     row = task.model_dump(mode="json", exclude_none=True)
     return {
         "name": row.pop("slug"),
@@ -204,13 +187,3 @@ def _task_signature(task: Task) -> str:
         default=str,
         separators=(",", ":"),
     )
-
-
-__all__ = [
-    "SyncPlan",
-    "diff",
-    "fetch_taskset_tasks",
-    "resolve_taskset_id",
-    "task_upload_payload",
-    "upload_taskset",
-]

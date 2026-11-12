@@ -1,7 +1,5 @@
 """Linux process-bound network connection enforcement."""
 
-# ruff: noqa: UP045
-
 from __future__ import annotations
 
 import argparse
@@ -23,7 +21,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, NamedTuple, NoReturn, Optional, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, NoReturn, cast
 
 if sys.platform == "linux":
     import fcntl
@@ -54,8 +52,11 @@ _SECCOMP_IOCTL_NOTIF_SEND = 0xC0182101
 _PIDFD_OPEN_SYSCALL = 434
 _PIDFD_GETFD_SYSCALL = 438
 _REGISTER_ADDRESS = b"\0hud-process-connection-register"
-_SANDBOX_SOCKET = "/tmp/.hud-process-connection/control.sock"  # noqa: S108
-_SANDBOX_HELPER = "/tmp/.hud-process-connection/process_guard.py"  # noqa: S108
+# Outside /tmp, which every session of the sandbox shares; the guard's directory is bound
+# read-only into the guarded session's own view.
+_SANDBOX_DIR = "/.hud-process-connection"
+_SANDBOX_SOCKET = f"{_SANDBOX_DIR}/control.sock"
+_SANDBOX_HELPER = f"{_SANDBOX_DIR}/process_guard.py"
 _READY_TIMEOUT_SECONDS = 10.0
 
 _PTRACE_TRACEME = 0
@@ -77,7 +78,7 @@ if sys.platform == "linux":
     _LIBC = ctypes.CDLL(None, use_errno=True)
     _LIBC.ptrace.restype = ctypes.c_long
 GuardBackend = Literal["notify", "ptrace"]
-_backend: Optional[GuardBackend] = None
+_backend: GuardBackend | None = None
 _backend_probed = False
 
 
@@ -233,7 +234,7 @@ def _install_connect_trace() -> None:
         raise OSError(ctypes.get_errno(), "seccomp(TRACE)")
 
 
-def _detected_backend() -> Optional[GuardBackend]:
+def _detected_backend() -> GuardBackend | None:
     global _backend, _backend_probed
     if _backend_probed:
         return _backend
@@ -257,7 +258,7 @@ def _detected_backend() -> Optional[GuardBackend]:
 
 
 def process_connections_supported() -> bool:
-    """Whether this substrate has a race-free process connection guard."""
+    """Whether this host has a race-free process connection guard."""
     return _detected_backend() is not None
 
 
@@ -295,7 +296,7 @@ def _read_process(pid: int, address: int, length: int) -> bytes:
     return data
 
 
-def _destination(raw: bytes) -> Optional[tuple[str, int]]:
+def _destination(raw: bytes) -> tuple[str, int] | None:
     if len(raw) < 2:
         return None
     family = struct.unpack_from("H", raw)[0]
@@ -309,7 +310,7 @@ def _destination(raw: bytes) -> Optional[tuple[str, int]]:
 
 
 def _refused(
-    target: Optional[tuple[str, int]],
+    target: tuple[str, int] | None,
     trusted: bool,
     protected: Collection[tuple[str, int]],
     allowed: Collection[tuple[str, int]],
@@ -440,8 +441,8 @@ def _forward_signals(original: int) -> None:
             signal.signal(signum, forward)
 
 
-def _drop_to(identity: Optional[tuple[int, int]]) -> None:
-    """Become *identity*, with no supplementary groups; no-new-privs is already set."""
+def _drop_to(identity: tuple[int, int] | None) -> None:
+    """Become ``identity``, with no supplementary groups; no-new-privs is already set."""
     if identity is None:
         return
     assert sys.platform == "linux"
@@ -465,7 +466,7 @@ def _trace_exec(
     protected: Collection[tuple[str, int]],
     allowed: Collection[tuple[str, int]],
     argv: Sequence[str],
-    identity: Optional[tuple[int, int]],
+    identity: tuple[int, int] | None,
 ) -> NoReturn:
     if platform.machine() != "x86_64":
         raise RuntimeError("ptrace process connections currently require x86_64")
@@ -557,7 +558,7 @@ class ProcessConnectionGuard:
         protected: Collection[tuple[str, int]],
         allowed: Collection[tuple[str, int]],
         *,
-        backend: Optional[GuardBackend] = None,
+        backend: GuardBackend | None = None,
     ) -> None:
         self.directory = directory
         self.socket_path = directory / "control.sock"
@@ -568,14 +569,14 @@ class ProcessConnectionGuard:
             raise ValueError("allowed process connections must be protected destinations")
         selected_backend = backend or _detected_backend()
         if selected_backend is None:
-            raise RuntimeError("process connection guards are unavailable on this substrate")
+            raise RuntimeError("process connection guards are unavailable on this host")
         self.backend: GuardBackend = selected_backend
-        self._server: Optional[socket.socket] = None
-        self._listener: Optional[int] = None
+        self._server: socket.socket | None = None
+        self._listener: int | None = None
         self._stop_read, self._stop_write = os.pipe()
         self._ready = threading.Event()
-        self._error: Optional[BaseException] = None
-        self._thread: Optional[threading.Thread] = None
+        self._error: BaseException | None = None
+        self._thread: threading.Thread | None = None
 
     @property
     def sandbox_socket(self) -> str:
@@ -670,7 +671,7 @@ class ProcessConnectionGuard:
         poller = select.poll()
         poller.register(self._listener, select.POLLIN)
         poller.register(self._stop_read, select.POLLIN)
-        trusted_tgid: Optional[int] = None
+        trusted_tgid: int | None = None
         while True:
             ready = {descriptor for descriptor, _ in poller.poll()}
             if self._stop_read in ready:
@@ -722,10 +723,9 @@ def guarded_exec(
     backend: GuardBackend,
     socket_path: str,
     argv: Sequence[str],
-    identity: Optional[tuple[int, int]] = None,
+    identity: tuple[int, int] | None = None,
 ) -> None:
-    """Install the guard, register this process, and replace it with ``argv``,
-    run as *identity* when given."""
+    """Install the guard, register this process, and exec ``argv`` as ``identity`` if given."""
     if not argv:
         raise ValueError("guarded execution requires a command")
     channel = socket.socket(socket.AF_UNIX)
@@ -787,5 +787,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-__all__ = ["ProcessConnectionGuard", "guarded_exec", "process_connections_supported"]

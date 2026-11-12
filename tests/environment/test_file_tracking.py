@@ -7,16 +7,16 @@ import base64
 import hashlib
 from typing import TYPE_CHECKING
 
+from hud import Environment, Task
 from hud.clients import connect
-from hud.environment import Environment
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 from tests.conftest import write_files
 from tests.environment.conftest import wire
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-#: Larger than the per-file capture limit (5 MiB).
+# Larger than the per-file capture limit (5 MiB).
 BIG_PDF = 5 * 1024 * 1024 + 1
 
 

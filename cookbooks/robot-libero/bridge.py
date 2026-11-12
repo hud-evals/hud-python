@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-# Software rendering by default so the bridge runs on CPU-only machines.
+# MuJoCo reads MUJOCO_GL at import, so default to software rendering before importing the sim.
 os.environ.setdefault("MUJOCO_GL", "osmesa")
 
 import numpy as np

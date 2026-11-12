@@ -1,6 +1,6 @@
 """A fake Chromium DevTools endpoint: target discovery over HTTP and scripted CDP replies.
 
-:func:`fake_browser` serves, on one loopback port like Chrome's
+``fake_browser`` serves, on one loopback port like Chrome's
 ``--remote-debugging-port``, ``GET /json`` (the page targets plus a service
 worker), ``PUT /json/new`` (a new page), and a WebSocket per page at
 ``/devtools/page/<id>``. Each command frame is recorded; its reply comes from
@@ -43,7 +43,7 @@ class FakeBrowser:
 
     pages: list[str] = field(default_factory=lambda: ["page-1"])
     replies: dict[str, dict[str, Any]] = field(default_factory=dict)
-    #: Whether ``PUT /json/new`` creates a page; otherwise it answers ``{}``.
+    # Whether ``PUT /json/new`` creates a page; otherwise it answers ``{}``.
     can_create: bool = True
     http: list[str] = field(default_factory=list)
     commands: list[Command] = field(default_factory=list)
@@ -97,7 +97,7 @@ async def fake_browser(
     replies: dict[str, dict[str, Any]] | None = None,
     can_create: bool = True,
 ) -> AsyncGenerator[FakeBrowser]:
-    """Serve a :class:`FakeBrowser` on a loopback port for the duration of the block."""
+    """Serve a ``FakeBrowser`` on a loopback port for the duration of the block."""
     browser = FakeBrowser(
         pages=["page-1"] if pages is None else list(pages),
         replies=replies or {},

@@ -1,13 +1,4 @@
-"""``hud task`` — start a task (get its prompt) or grade an answer.
-
-The task source resolves an authored slug to its template id and bound args.
-Without ``--url`` that source is also spawned locally; with ``--url`` the task
-runs against the already-served control channel instead.
-
-    hud task list                          # what tasks this source exposes
-    hud task start fix_config              # -> the task's prompt (stdout)
-    hud task grade fix_config --answer "…" # -> the reward (stdout); --json for the frame
-"""
+"""``hud task`` — start a task (get its prompt) or grade an answer."""
 
 from __future__ import annotations
 
@@ -22,9 +13,10 @@ from hud.cli import (
     CLI,
     CliError,
 )
-from hud.clients import HudProtocolError, connect
-from hud.eval import Taskset
-from hud.eval.runtime import Runtime, SubprocessRuntime
+from hud.clients.client import HudProtocolError, connect
+from hud.eval.taskset import Taskset
+from hud.runtime.core import Runtime
+from hud.runtime.local import SubprocessRuntime
 from hud.utils.process import run_until_terminated
 
 if TYPE_CHECKING:
@@ -76,8 +68,8 @@ def _resolve(
     selected = matches[0]
     if url is not None:
         placement: AbstractAsyncContextManager[Runtime] = nullcontext(Runtime(url))
-    elif selected._env is not None:
-        placement = SubprocessRuntime(selected._env)(selected)
+    elif selected.environment is not None:
+        placement = SubprocessRuntime(selected.environment)(selected)
     else:
         # A data row (JSON/JSONL) names its env; the env source lives beside the file.
         path = Path(source or ".").resolve()
@@ -121,7 +113,7 @@ def start_command(
         "-s",
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
-    args: dict[str, Any] | None = typer.Option(  # noqa: B008
+    args: dict[str, Any] | None = typer.Option(
         None,
         "--args",
         "-a",
@@ -172,7 +164,7 @@ def grade_command(
         "-s",
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
-    args: dict[str, Any] | None = typer.Option(  # noqa: B008
+    args: dict[str, Any] | None = typer.Option(
         None,
         "--args",
         "-a",

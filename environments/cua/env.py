@@ -1,8 +1,5 @@
 """A virtual Linux desktop exposed through an RFB capability."""
 
-# NOTE: do NOT add `from __future__ import annotations` here - under it a typed @env.template
-# param crashes the sync/deploy manifest path (TypeAdapter on a string forward-ref). Keep
-# annotations as real objects.
 import asyncio
 import os
 from collections.abc import Awaitable
@@ -62,7 +59,7 @@ async def cua_task(
     if grading_criteria and not settings.api_key:
         raise RuntimeError("HUD_API_KEY is required for CUA tasks with grading_criteria")
     if _task_started:
-        raise RuntimeError("CUA supports one task per substrate; start a fresh runtime")
+        raise RuntimeError("CUA supports one task per host; start a fresh runtime")
     _task_started = True
 
     answer = yield f"Use computer use tools to complete the following task:\n\n{prompt}"

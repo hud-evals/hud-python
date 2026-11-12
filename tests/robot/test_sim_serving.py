@@ -10,6 +10,7 @@ stepped with.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -18,12 +19,12 @@ import pytest
 import websockets
 from openpi_client import msgpack_numpy
 
+from hud import Environment, Task
 from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
 from hud.clients import connect
-from hud.environment import Environment
 from hud.environment.robot import GymBridge, RobotEndpoint
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 from .sims import Reach, plain_env, vector_env
 
@@ -60,6 +61,29 @@ async def test_a_spawned_bridge_carries_its_declaration_into_the_child() -> None
         await websockets.connect(robot.url, open_timeout=5)
 
 
+async def test_a_client_whose_sim_stops_raises_instead_of_waiting() -> None:
+    declared = Reach(use_delta=True)
+    declared.contract = CONTRACT
+    declared.num_envs = 2
+    endpoint = RobotEndpoint(declared)
+
+    await endpoint.start()
+    try:
+        (robot,) = await endpoint.capabilities()
+        claimed = await endpoint.reset()
+        client = await RobotClient.connect(robot, token=claimed["token"])
+        await client.get_observation()
+    finally:
+        await endpoint.stop()
+
+    try:
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match="connection closed"):
+                await asyncio.wait_for(client.get_observation(), timeout=10)
+    finally:
+        await client.close()
+
+
 def gym_env(factory: Callable[..., Any], **defaults: Any) -> Environment:
     env = Environment("gym")
     sim = env.gym(factory, contract=None, **defaults)
@@ -74,7 +98,7 @@ def gym_env(factory: Callable[..., Any], **defaults: Any) -> Environment:
 
 
 async def step_once(env: Environment, action: list[float]) -> tuple[dict[str, Any], Any]:
-    """Start ``episode`` on *env*, play *action* once, and grade: the stepped observation
+    """Start ``episode`` on ``env``, play ``action`` once, and grade: the stepped observation
     and the grade."""
     async with (
         LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,

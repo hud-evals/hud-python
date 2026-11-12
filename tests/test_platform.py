@@ -1,5 +1,5 @@
 """``PlatformClient``, which environments and scripts call directly: a request that names no
-reply type gets the decoded JSON, as it always has."""
+reply type gets the decoded JSON."""
 
 from __future__ import annotations
 

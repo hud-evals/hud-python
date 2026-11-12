@@ -1,11 +1,4 @@
-"""Rollout-level file-tracking observer.
-
-Wraps the agent loop: if the env published a ``filetracking/1`` capability and
-file tracking is on, capture scenario setup when the server advertises support,
-then sample agent diffs on a fixed interval. On teardown it flushes the trailing
-diff plus changed deliverable artifacts. Decoupled from the tool loop — spans
-are self-timestamped and the viewer correlates them to steps by time.
-"""
+"""Workspace diffs from an env's filetracking capability, streamed as spans."""
 
 from __future__ import annotations
 
@@ -17,6 +10,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal, Self, TypeAlias
 from urllib.parse import urlsplit
 
+from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
 from hud.telemetry.span import (
@@ -32,7 +26,7 @@ from hud.utils.time import now_iso
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from hud.capabilities import Capability
+    from hud.capabilities.base import Capability
     from hud.clients.client import HudClient
 
 logger = logging.getLogger("hud.eval.file_tracking")
@@ -104,16 +98,12 @@ class FileTrackingClient:
 
 @asynccontextmanager
 async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
-    """Stream workspace diffs and final artifacts during the ``with`` block.
+    """Stream workspace diffs and final artifacts as spans during the block.
 
-    A no-op unless telemetry is enabled and the manifest has a ``filetracking``
-    binding. The binding's presence is the authoritative opt-in: it is published
-    iff the workspace was served with ``track_files=True`` (which itself defaults
-    to ``HUD_FILE_TRACKING_ENABLED``), so honoring it here means an explicit
-    ``track_files=True`` streams even when the global setting is off.
+    A no-op unless telemetry is on and the env binds ``filetracking``; the binding
+    alone opts in, whatever ``HUD_FILE_TRACKING_ENABLED`` says. A failed tracking
+    setup logs a warning and the block runs untracked.
     """
-    from hud.settings import settings
-
     if not settings.telemetry_enabled:
         yield
         return
@@ -123,8 +113,8 @@ async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
         yield
         return
 
-    # New servers expose setup changes; legacy filetracking/1 servers only know
-    # how to advance past setup. Both establish the same agent-edit baseline.
+    # Env images whose tracker lacks ``setup_diff`` can only ``advance`` past setup; both
+    # calls set the baseline agent edits are diffed against.
     ft: FileTrackingClient | None = None
     try:
         ft = await FileTrackingClient.connect(cap)
@@ -172,16 +162,14 @@ async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
         yield
     finally:
         stop.set()
-        # Let the current iteration finish cleanly (never cancel mid-request, which
-        # would desync the connection); fall back to cancel only if it wedges.
+        # Cancelling mid-request would desync the connection: let the poll finish first.
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.shield(task), _DRAIN_TIMEOUT)
         if not task.done():
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        # Trailing diff + artifacts since the last successful sample. Bound it so
-        # a connection desynced by the cancel above can't wedge teardown.
+        # Bounded: a cancel above may have desynced the connection.
         try:
             flush = await asyncio.wait_for(ft.call("flush"), _DRAIN_TIMEOUT)
         except TimeoutError:
@@ -231,6 +219,3 @@ def _emit_file_tracking(
     )
     queue_span(span.model_dump(mode="json"))
     return True
-
-
-__all__ = ["file_tracking_observer"]

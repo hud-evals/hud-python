@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from hud import LocalRuntime, Run, Taskset, connect
+from hud import Run, Taskset
+from hud.clients import connect
 from hud.environment import workspace as workspace_lib
+from hud.runtime import LocalRuntime
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PYTEST_COMMAND = (
@@ -81,8 +83,8 @@ async def _run_task(fixture_repo: Path, task, monkeypatch) -> float:
     async with runtime(task) as addr, connect(addr) as client:
         async with Run(client, task.id, task.args) as run:
             pass
-    assert not run.evaluation.get("isError"), run.evaluation
-    return run.reward
+    assert not run.trace.evaluation.get("isError"), run.trace.evaluation
+    return run.trace.reward
 
 
 async def test_agent_fix_scores_one(fixture_repo, tmp_path, monkeypatch, grading_workspace):

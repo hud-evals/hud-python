@@ -6,8 +6,8 @@ batch of fresh runs, and hand them to ``trainer.step``. ``step`` does one
 by one ``optim_step`` — which checkpoints and promotes the new weights behind the
 *same* model string, so the next rollout samples the updated policy.
 
-Runs are passed directly: ``TrainingClient`` reads each ``Run``'s trajectory and
-reward. (Pass ``run.trace_id`` strings instead to train on trajectories the
+Traces are passed directly: ``TrainingClient`` reads each trace's samples and
+reward. (Pass ``trace.trace_id`` strings instead to train on trajectories the
 platform already holds.)
 
     uv run simple_train.py --steps 10   # set MODEL below (pick one with `hud models list`)
@@ -22,57 +22,55 @@ import time
 from dotenv import load_dotenv
 
 from common import load_taskset_and_runtime
-from hud import TrainingClient
+from hud import Job
 from hud.agents import create_agent
 from hud.agents.types import AgentStep
-from hud.eval import Job
+from hud.train import TrainingClient
 
 # The trainable gateway model to sample from and train, in place.
 # Pick one with `hud models list` and paste its id here.
 MODEL = "Qwen3 4B Instruct 2507 (Tinker)"
 
 
-def _output_tokens(runs: list) -> int:
+def _output_tokens(traces: list) -> int:
     """Total generated tokens across a batch of runs (a throughput numerator)."""
     return sum(
         len(sample.output_token_ids)
-        for run in runs
-        for sample in run.trace.collect(
+        for trace in traces
+        for sample in trace.collect(
             lambda s: s.sample if isinstance(s, AgentStep) and s.sample else None
         )
     )
 
 
 async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: int) -> None:
-    model = MODEL  # the trainable gateway model (set at the top of this file)
+    model = MODEL
 
     # return_token_ids tells the gateway/agent this is a training rollout: the
     # response carries token ids + per-token logprobs, which the agent records on
     # each turn's trace Sample — the token-level data TrainingClient trains on.
-    # Allow room for chain-of-thought: this is a reasoning model, and the task
-    # (3-digit x 2-digit) needs scratch work — it just has to be hard enough to be
-    # right only sometimes (the GRPO signal).
+    # Leave room for scratch work: the 3-digit x 2-digit task is meant to be right
+    # only sometimes, which is the GRPO signal.
     agent = create_agent(
         model,
         completion_kwargs={"max_tokens": 1024, "extra_body": {"return_token_ids": True}},
     )
     trainer = TrainingClient(model)
-    # A deployed taskset on remote HUD boxes (HUD_TASKSET), or the local env.
+    # The deployed TASKSET (see common.py) on HUD boxes, or the bundled local env.
     taskset, runtime = load_taskset_and_runtime()
 
     # One job spans the whole session; each iteration appends its batch of runs.
     session = await Job.start("arith-rl-simple", group=group)
     for step in range(steps):
-        batch_start = len(session.runs)
+        batch_start = len(session.traces)
 
-        # --- rollout phase (sampling throughput) ---
         t0 = time.perf_counter()
         await taskset.run(agent, runtime=runtime, job=session, max_concurrent=max_concurrent)
         rollout_s = time.perf_counter() - t0
-        batch = session.runs[batch_start:]
+        batch = session.traces[batch_start:]
         tokens = _output_tokens(batch)
 
-        # --- train phase (forward_backward + optim_step, split out for metrics) ---
+        # trainer.step would run both; they are split here to time each.
         t1 = time.perf_counter()
         fb = await trainer.forward_backward(
             batch,
@@ -82,8 +80,8 @@ async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: 
         result = await trainer.optim_step(learning_rate=learning_rate)
         train_s = time.perf_counter() - t1
 
-        mean_reward = sum(run.reward for run in batch) / len(batch)
-        solved = sum(1 for run in batch if run.reward > 0)
+        mean_reward = sum(trace.reward for trace in batch) / len(batch)
+        solved = sum(1 for trace in batch if trace.reward > 0)
         tok_per_s = tokens / rollout_s if rollout_s > 0 else 0.0
         loss = fb.metrics.get("loss:sum", float("nan"))
         print(

@@ -1,10 +1,11 @@
 """Generate graded variants of the calc debugging task.
 
 Each function is self-contained — no function calls another — so an injected bug
-fails only its own tests. That keeps difficulty a function of *how many* bugs are
+fails only its own tests. That keeps difficulty a function of how many bugs are
 present rather than of which dependency chain happened to break.
 
-A variant is a deterministic subset of BUGS of size k, k cycling 2/3/4.
+A variant breaks a deterministic subset of ``FUNCS`` of size k, k cycling 4/5/6
+(``K_CYCLE``).
 """
 
 from __future__ import annotations
@@ -146,7 +147,7 @@ K_CYCLE = (4, 5, 6)
 
 
 def broken_for(variant: int) -> list[str]:
-    """Deterministic subset of function names to break for *variant*."""
+    """Deterministic subset of function names to break for ``variant``."""
     k = K_CYCLE[variant % len(K_CYCLE)]
     start = (variant * 3) % len(NAMES)
     return [NAMES[(start + i) % len(NAMES)] for i in range(k)]

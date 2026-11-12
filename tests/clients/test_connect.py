@@ -1,8 +1,5 @@
 """The control channel's client side: ``hud.clients.connect`` and ``HudClient`` against a
 scripted peer that answers each connection and records every frame it receives.
-
-Not covered: the 120 s control heartbeat. Its interval is a module constant with no
-public knob, and waiting it out has no place in the default lane.
 """
 
 from __future__ import annotations
@@ -14,7 +11,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from hud.clients import connect
-from hud.eval.runtime import Runtime
+from hud.runtime import Runtime
 from tests.clients.conftest import Action, control_peer
 
 HELLO = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}

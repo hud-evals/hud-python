@@ -3,7 +3,7 @@
 Same loop as ``simple_train.py``, but instead of a built-in ``loss_fn`` the
 policy-gradient loss is written here in torch and run client-side via
 ``trainer.forward_backward_custom``. The service runs the current-policy forward
-pass and returns per-token tensors (:class:`DatumTensors`); this loss turns them
+pass and returns per-token tensors (``DatumTensors``); this loss turns them
 into per-token gradients, which the service applies. ``optim_step`` then
 checkpoints and promotes as usual.
 
@@ -28,10 +28,9 @@ import torch
 from dotenv import load_dotenv
 
 from common import load_taskset_and_runtime
-from hud import TrainingClient
+from hud import Job
 from hud.agents import create_agent
-from hud.eval import Job
-from hud.train import DatumTensors
+from hud.train import DatumTensors, TrainingClient
 
 # The trainable gateway model to sample from and train, in place.
 # Pick one with `hud models list` and paste its id here.
@@ -50,13 +49,11 @@ def glm_double_sided_is(
     ``logprobs[i]`` are the current-policy (π_θ) per-token logprobs for datum
     ``i`` as differentiable leaves — build the loss out of *these* tensors so the
     gradient flows back. Everything else (rollout logprobs q, action mask,
-    reward) is a constant carried on the matching :class:`DatumTensors`.
+    reward) is a constant carried on the matching ``DatumTensors``.
     """
     # Per-group (GRPO) baseline: advantage = reward − group mean. GLM-5.2 uses a
-    # learned critic here (README, Option A); the group baseline is the
-    # critic-free stand-in so the focus stays on the IS ratio / mask / norm.
-    # ``group_idx`` is None when training ungrouped — then all datums share one
-    # baseline (a single-rollout / batch-mean formulation).
+    # learned critic here; the group baseline is the critic-free stand-in.
+    # ``group_idx`` is None when training ungrouped, so all datums share one baseline.
     group_rewards: dict[int | None, list[float]] = {}
     for datum in data:
         group_rewards.setdefault(datum.group_idx, []).append(datum.reward)
@@ -95,7 +92,7 @@ def glm_double_sided_is(
 
 
 async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: int) -> None:
-    model = MODEL  # the trainable gateway model (set at the top of this file)
+    model = MODEL
 
     # Training rollout: capture token ids + logprobs onto each turn's Sample;
     # room for chain-of-thought (the task needs scratch work).
@@ -104,20 +101,20 @@ async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: 
         completion_kwargs={"max_tokens": 1024, "extra_body": {"return_token_ids": True}},
     )
     trainer = TrainingClient(model)
-    # A deployed taskset on remote HUD boxes (HUD_TASKSET), or the local env.
+    # The deployed TASKSET (see common.py) on HUD boxes, or the bundled local env.
     taskset, runtime = load_taskset_and_runtime()
 
     session = await Job.start("arith-rl-ppo", group=group)
     for step in range(steps):
-        batch_start = len(session.runs)
+        batch_start = len(session.traces)
         await taskset.run(agent, runtime=runtime, job=session, max_concurrent=max_concurrent)
-        batch = session.runs[batch_start:]
+        batch = session.traces[batch_start:]
 
         # forward (server) -> glm loss (here, torch) -> backward (server)
         fb = await trainer.forward_backward_custom(batch, glm_double_sided_is, group_size=group)
         result = await trainer.optim_step(learning_rate=learning_rate)
 
-        mean_reward = sum(run.reward for run in batch) / len(batch)
+        mean_reward = sum(trace.reward for trace in batch) / len(batch)
         print(
             f"step {step}: mean_reward={mean_reward:.3f} "
             f"masked_tokens={fb.metrics.get('masked_tokens', 0.0):.0f} "

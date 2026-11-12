@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
+from hud import Task
 from hud.agents.robot import DatasetWriter, Model, RobotAgent
-from hud.eval import Task, rollout
+from hud.eval.run import rollout
 
 from .sims import EPISODE_TICKS, StubSim, stub_episode
 
@@ -23,10 +24,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from hud.eval import Run
+    from hud import Trace
     from tests.conftest import HudEnv
 
-#: Clear of the 32 px floor lerobot's episode video encoder needs.
+# Clear of the 32 px floor lerobot's episode video encoder needs.
 RECORD_SIDE = 64
 
 
@@ -68,7 +69,7 @@ class Recorder(RobotAgent):
 
 async def record(
     name: str, contract: dict[str, Any], *, fail_at: int | None = None, side: int = RECORD_SIDE
-) -> Run:
+) -> Trace:
     async with stub_episode(StubSim(contract=contract, side=side), name) as runtime:
         return await rollout(
             Task(env=name, id="episode"), Recorder(fail_at=fail_at), runtime=runtime
@@ -178,13 +179,13 @@ async def test_recorded_rollouts_land_in_one_dataset_per_rate_and_robot(
     episode_actions: list[list[float]] | None,
     features: set[str],
 ) -> None:
-    runs = await asyncio.gather(
+    traces = await asyncio.gather(
         *(record(name, contract, fail_at=fail_at) for name, contract in rollouts.items())
     )
     DatasetWriter.finalize()
 
     recorded = datasets(recording)
-    assert {run.trace.status for run in runs} == {status}
+    assert {trace.status for trace in traces} == {status}
     assert sorted((d.meta.fps, d.meta.robot_type, d.meta.total_episodes) for d in recorded) == found
     for dataset in recorded:
         assert features <= set(dataset.meta.features)
@@ -198,11 +199,11 @@ async def test_recorded_rollouts_land_in_one_dataset_per_rate_and_robot(
 async def test_a_recorded_episode_holds_the_observed_state_executed_action_and_task(
     recording: Path,
 ) -> None:
-    run = await record("arm", recording_contract())
+    trace = await record("arm", recording_contract())
     DatasetWriter.finalize()
 
     (dataset,) = datasets(recording)
-    assert run.reward == sum(range(EPISODE_TICKS))  # the sim saw every action
+    assert trace.reward == sum(range(EPISODE_TICKS))  # the sim saw every action
     assert dataset.meta.features["observation.state"]["names"] == ["slot", "tick"]
     image = dataset[0]["observation.images.observation_image"]
     assert tuple(image.shape) == (3, RECORD_SIDE, RECORD_SIDE)
@@ -233,7 +234,7 @@ async def test_a_dataset_stays_on_disk_whether_or_not_its_push_succeeds(
 async def test_a_camera_too_small_to_encode_fails_the_rollout_before_recording(
     recording: Path,
 ) -> None:
-    run = await record("arm", recording_contract(), side=16)
+    trace = await record("arm", recording_contract(), side=16)
     DatasetWriter.finalize()
 
-    assert (run.trace.status, datasets(recording)) == ("error", [])
+    assert (trace.status, datasets(recording)) == ("error", [])

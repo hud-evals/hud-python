@@ -1,6 +1,6 @@
 ---
 title: "Verifier environments"
-description: "Give authoritative grading its own environment, place the acting and grading substrates independently, and control what crosses the phase boundary."
+description: "Give authoritative grading its own environment, place the acting and grading hosts independently, and control what crosses the phase boundary."
 icon: "shield-check"
 tag: "Experimental"
 ---
@@ -15,8 +15,8 @@ whose grade becomes the run's final reward. The rollout engine (`hud/eval/run.py
 boundary.
 
 The two tasks can share an environment or name different ones. Different environment names produce
-a **two-substrate rollout**: the engine exits the actor acquisition before opening the verifier's.
-Whether that yields a genuinely separate substrate is the provider's property - fresh-per-rollout
+a **two-host rollout**: the engine exits the actor acquisition before opening the verifier's.
+Whether that yields a genuinely separate host is the provider's property - fresh-per-rollout
 providers (`DockerRuntime`, `LocalRuntime`) tear down the actor world and provision a new one, so
 grading material and agent state never coexist; a borrowed `Runtime(url)` or a `Shared` scope can
 hand the verifier the same live server.
@@ -67,9 +67,9 @@ task.verifier = verify(expected="secret")
 ```mermaid
 sequenceDiagram
     participant Engine as rollout
-    participant Actor as actor substrate
+    participant Actor as actor host
     participant Agent
-    participant Judge as verifier substrate
+    participant Judge as verifier host
     Engine->>Actor: provision + connect
     Engine->>Actor: tasks.start(actor)
     Engine->>Agent: drive Run
@@ -91,7 +91,7 @@ authoritative verifier can still run. A verifier provisioning or grading failure
 errored and ungraded.
 
 If both rows name the same environment and the verifier has no row-level `runtime_config`, the
-engine keeps the actor connection and substrate alive and starts the verifier task on that control
+engine keeps the actor connection and host alive and starts the verifier task on that control
 channel immediately after the actor task completes. A different environment name or verifier
 runtime configuration forces actor cleanup followed by a fresh provider acquisition.
 
@@ -107,7 +107,7 @@ custom providers execute verifier acquisitions through the client-side engine de
 | Verifier | Verifier setup and grading; no agent loop | None through HUD's agent interface | Authoritative |
 
 The engine forwards the actor task's result to the verifier unchanged. Files, processes, sockets,
-and environment memory do not cross between distinct substrates automatically - the actor result
+and environment memory do not cross between distinct hosts automatically - the actor result
 must carry any artifact reference, object-store key, or shared service endpoint the verifier needs.
 
 ## Harbor verifier environments

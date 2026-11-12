@@ -21,7 +21,7 @@ group and check that outcomes differ:
 ```python
 taskset = Taskset("spread-check", [my_task(seed=s) for s in range(5)])
 job = await taskset.run(agent, group=16)
-rewards = [run.reward for run in job.runs]
+rewards = [trace.reward for trace in job.traces]
 # All 0.0 (or all 1.0) -> no signal. You want a non-degenerate spread.
 ```
 

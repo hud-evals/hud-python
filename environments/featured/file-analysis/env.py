@@ -1,16 +1,11 @@
-"""Minimal environment showing what argument hints do.
+"""File analysis: the agent reads staged files and writes a report graded against weighted criteria.
 
-Three of this template's arguments carry an ``x-hud-hint`` in their JSON
-Schema, which is all it takes for the console to edit them with purpose-built
-controls instead of JSON boxes:
-
-- ``prompt`` -> a text box
-- ``attachments`` -> a picker over the team's data files, with upload
-- ``criteria`` -> a table of grading rows
-
-The environment then does the ordinary work: it pulls the referenced data files
-into the solver's workspace, hands the agent the prompt, and passes the criteria
-straight to ``LLMJudgeGrader``, whose input shape they are.
+The templates' ``prompt``, ``attachments`` and ``criteria`` arguments carry an
+``x-hud-hint`` in their JSON Schema, so the console edits them as a text box, a
+picker over the team's data files, and a table of grading rows. The environment
+pulls the referenced data files into the solver's workspace, and
+``LLMJudgeGrader`` grades the saved report against the criteria.
+``reconcile_supplier_payments`` also stages the bundled ``fixtures/`` records.
 """
 
 from __future__ import annotations
@@ -24,7 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
 import httpx
-from hud.environment import Environment
+from hud import Environment
 from hud.graders import EvaluationResult, LLMJudgeGrader, combine
 from hud.settings import settings
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -232,7 +227,6 @@ async def _review_files(
     declared.extend(uploaded)
 
     listing = "\n".join(f"- {entry['path']}" for entry in declared) or "- (none)"
-    # A template that declares no `returns` is sent the agent's final text.
     yield {
         "prompt": (
             f"You have a shell in {WORKSPACE_ROOT}. These files are staged for you:\n"

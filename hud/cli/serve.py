@@ -1,8 +1,4 @@
-"""``hud serve`` — serve a v6 :class:`~hud.environment.Environment` locally.
-
-In v6, ``hud serve`` brings up an environment's control channel (tcp JSON-RPC)
-so agents can connect to it.
-"""
+"""``hud serve`` — serve an ``Environment``'s control channel locally."""
 
 from __future__ import annotations
 
@@ -13,7 +9,7 @@ from rich.markup import escape
 
 from hud.cli import parse_key_value
 from hud.environment import load_environment
-from hud.environment.server import serve
+from hud.environment.server import DEFAULT_PORT, serve
 from hud.utils.hud_console import HUDConsole
 from hud.utils.process import run_until_terminated
 
@@ -27,26 +23,23 @@ def serve_command(
         "('pkg.mod:make_env' with --arg).",
     ),
     port: int = typer.Option(
-        8765, "--port", "-p", help="Port to serve the environment control channel on."
+        DEFAULT_PORT, "--port", "-p", help="Port to serve the environment control channel on."
     ),
     host: str = typer.Option(
         "127.0.0.1", "--host", help="Interface to bind (use 0.0.0.0 inside containers)."
     ),
-    arg: list[str] | None = typer.Option(  # noqa: B008
+    arg: list[str] | None = typer.Option(
         None, "--arg", help="key=value passed to a factory target (repeatable)."
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs."),
 ) -> None:
-    """Serve a HUD Environment locally (its tcp control channel).
+    """Serve an Environment's control channel locally over TCP.
 
     [not dim]Examples:
         hud serve                # auto-detect env.py
         hud serve env:env        # explicit module:attribute
         hud serve env.py -p 9000 # serve on a specific port
-        hud serve pkg.mod:make_env --arg name=demo  # call a factory
-
-    In v6, ``hud serve`` serves a :class:`hud.environment.Environment`. The old
-    MCP-server hot-reload / Docker dev mode is no longer supported.[/not dim]
+        hud serve pkg.mod:make_env --arg name=demo  # call a factory[/not dim]
     """
     if verbose:
         logging.basicConfig(level=logging.INFO)

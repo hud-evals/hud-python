@@ -56,7 +56,7 @@ app = CLI(
 
 
 def set_command(
-    assignments: list[str] = typer.Argument(  # noqa: B008
+    assignments: list[str] = typer.Argument(
         ..., help="One or more KEY=VALUE pairs to persist in ~/.hud/.env"
     ),
 ) -> dict[str, object]:
@@ -66,8 +66,8 @@ def set_command(
         hud set ANTHROPIC_API_KEY=sk-... OPENAI_API_KEY=sk-...
         hud set HUD_API_KEY=sk-... --json
 
-    Values are stored in ~/.hud/.env and are loaded by hud.settings with
-    the lowest precedence (overridden by process env and project .env).[/not dim]
+    Values are stored in ~/.hud/.env and have the lowest precedence: the
+    process environment and a project .env override them.[/not dim]
     """
     hud_console = HUDConsole()
 
@@ -135,7 +135,10 @@ def underlying_error(error: BaseException) -> BaseException | None:
 
 @contextlib.contextmanager
 def recorded_invocation(argv: list[str], cli: typer.Typer) -> Generator[None]:
-    """Record one CLI invocation around the wrapped block, then re-raise as-is."""
+    """Send one anonymous analytics event for the wrapped CLI invocation, unless disabled.
+
+    Exceptions propagate unchanged.
+    """
     started = time.monotonic()
     exit_code = 0
     error_class: str | None = None
@@ -262,14 +265,13 @@ def render_hud_warnings() -> None:
         else:
             show_default(message, category, filename, lineno, file, line)
 
+    # Python documents replacing showwarning; ty rejects assigning to a module function.
     warnings.showwarning = show  # ty: ignore[invalid-assignment]
 
 
 def main() -> None:
-    """Main entry point for the CLI."""
-    # Windows cmd.exe uses the system code page (e.g. cp1252) which can't
-    # encode the emoji that Rich uses. Rewrap stdout/stderr as UTF-8 so
-    # Rich's legacy Windows renderer never hits a charmap error.
+    # cmd.exe's code page (e.g. cp1252) can't encode Rich's emoji; UTF-8 streams
+    # keep Rich's legacy Windows renderer from hitting charmap errors.
     if sys.platform == "win32":
         if hasattr(sys.stdout, "buffer"):
             sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")

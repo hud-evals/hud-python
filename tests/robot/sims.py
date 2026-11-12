@@ -4,33 +4,32 @@ A spawned sim re-imports its bridge class or env factory from this file by path,
 so they live at module level. Each gym env reports, in its observation, the
 shape of the last action ``step`` got.
 
-:class:`Arm` is the direct-control sim: its observed state follows each
+``Arm`` is the direct-control sim: its observed state follows each
 commanded action by a ``follow`` law, so one class plays every arm a settle
-verdict is about. :class:`ScriptedLLM` stands in for a tool-calling model.
+verdict is about. ``ScriptedLLM`` stands in for a tool-calling model.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from gymnasium.spaces import Box
 
+from hud import Environment
 from hud.agents.base import Agent
-from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
-from hud.eval import LocalRuntime
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncGenerator, Callable
 
     from numpy.typing import NDArray
 
+    from hud import Run
     from hud.capabilities import MCPClient
-    from hud.eval import Provider
-    from hud.eval.run import Run
+    from hud.runtime import Provider
     from hud.types import ToolResult
 
 
@@ -38,11 +37,11 @@ if TYPE_CHECKING:
 async def sim_env(
     sim: RobotBridge, name: str, *, control: DirectControl | None = None
 ) -> AsyncGenerator[tuple[Environment, RobotEndpoint]]:
-    """The docs' custom-bridge env for *sim*, which this process serves, started.
+    """The docs' custom-bridge env for ``sim``, which this process serves, started.
 
     ``RobotEndpoint.remote`` attaches to a sim someone else runs; here that is
     the test, so the whole control plane is real without a spawned sim program.
-    *control* adds direct control's motion tools. Each scenario declares the
+    ``control`` adds direct control's motion tools. Each scenario declares the
     template it is about.
     """
     await sim.start()
@@ -71,9 +70,6 @@ async def sim_env(
         await sim.stop()
 
 
-# ─── direct control ────────────────────────────────────────────────────
-
-
 def contract(
     action_type: str,
     low: list[float],
@@ -82,7 +78,7 @@ def contract(
     *,
     rate: float = 10,
 ) -> dict[str, Any]:
-    """One camera, a state, and an action of *action_type*. Default action is ``[x, grip]``."""
+    """One camera, a state, and an action of ``action_type``. Default action is ``[x, grip]``."""
     labels = names or ["x", "grip"]
     return {
         "control_rate": rate,
@@ -159,12 +155,12 @@ def displace(arm: Arm, target: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 def lag(share: float) -> Callable[[Arm, NDArray[np.float64]], NDArray[np.float64]]:
-    """Closes *share* of the gap to the command each tick."""
+    """Closes ``share`` of the gap to the command each tick."""
     return lambda arm, target: arm.state + share * (target - arm.state)
 
 
 def still(noise: float) -> Callable[[Arm, NDArray[np.float64]], NDArray[np.float64]]:
-    """Never moves; its sensor reads *noise* high then low on alternate ticks."""
+    """Never moves; its sensor reads ``noise`` high then low on alternate ticks."""
     return lambda arm, target: arm.home + noise * (-1) ** len(arm.actions)
 
 
@@ -174,7 +170,7 @@ def offset(by: list[float]) -> Callable[[Arm, NDArray[np.float64]], NDArray[np.f
 
 
 def delayed(ticks: int) -> Callable[[Arm, NDArray[np.float64]], NDArray[np.float64]]:
-    """Follows each command *ticks* ticks late."""
+    """Follows each command ``ticks`` ticks late."""
     return lambda arm, target: arm.actions[-1 - ticks] if len(arm.actions) > ticks else arm.home
 
 
@@ -253,7 +249,7 @@ def look(duration: float | None = None) -> tuple[str, dict[str, Any]]:
 
 @asynccontextmanager
 async def arm_env(sim: RobotBridge, control: DirectControl) -> AsyncGenerator[Environment]:
-    """*sim* with direct control attached, as the ``arm`` env whose ``reach`` the sim grades."""
+    """``sim`` with direct control attached, as the ``arm`` env whose ``reach`` the sim grades."""
     async with sim_env(sim, "arm", control=control) as (env, endpoint):
 
         @env.template()
@@ -265,12 +261,10 @@ async def arm_env(sim: RobotBridge, control: DirectControl) -> AsyncGenerator[En
         yield env
 
 
-# ─── policies ──────────────────────────────────────────────────────────
-
-#: Ticks a stub sim runs before terminating.
+# Ticks a stub sim runs before terminating.
 EPISODE_TICKS = 3
 
-#: A minimal contract, exactly as documented: one camera, a state vector, an action.
+# A minimal contract, exactly as documented: one camera, a state vector, an action.
 STUB_CONTRACT = {
     "control_rate": 5,
     "features": {
@@ -334,7 +328,7 @@ class StubSim(RobotBridge):
 
 @asynccontextmanager
 async def stub_episode(sim: StubSim, name: str) -> AsyncGenerator[Provider]:
-    """*sim* as env *name*, whose ``episode`` the sim grades, placed in this process."""
+    """``sim`` as env ``name``, whose ``episode`` the sim grades, placed in this process."""
     async with sim_env(sim, name) as (env, endpoint):
 
         @env.template()
@@ -344,9 +338,6 @@ async def stub_episode(sim: StubSim, name: str) -> AsyncGenerator[Provider]:
             yield await endpoint.result()
 
         yield LocalRuntime(env)
-
-
-# ─── spawned sims and gym envs ─────────────────────────────────────────
 
 
 class Reach(RobotBridge):

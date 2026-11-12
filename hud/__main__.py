@@ -1,4 +1,4 @@
-"""Allow running CLI with python -m hud."""
+"""``python -m hud`` runs the ``hud`` CLI."""
 
 from __future__ import annotations
 

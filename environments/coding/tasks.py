@@ -1,7 +1,6 @@
 """Example coding tasks."""
 
 from env import coding_task
-from env import env as env
 
 _flask_config_from_file = coding_task(
     description="""Add a file mode parameter to flask.Config.from_file()

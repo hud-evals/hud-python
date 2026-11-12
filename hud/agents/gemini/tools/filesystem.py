@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from hud.agents.tools import SSHTool
-from hud.types import ToolResult
+from hud.agents.tools.base import AgentToolSpec, result_text
+from hud.agents.tools.ssh import SSHTool
+from hud.types import TextContent, ToolResult
 
-from .base import GeminiToolSpec
 from .coding import required_str, tool_decl
 
 if TYPE_CHECKING:
     from google.genai import types as genai_types
 
-GEMINI_READ_SPEC = GeminiToolSpec(api_type="read_file", api_name="read_file")
-GEMINI_SEARCH_SPEC = GeminiToolSpec(api_type="grep_search", api_name="grep_search")
-GEMINI_GLOB_SPEC = GeminiToolSpec(api_type="glob", api_name="glob")
-GEMINI_LIST_SPEC = GeminiToolSpec(api_type="list_directory", api_name="list_directory")
+GEMINI_READ_SPEC = AgentToolSpec(api_type="read_file", api_name="read_file")
+GEMINI_SEARCH_SPEC = AgentToolSpec(api_type="grep_search", api_name="grep_search")
+GEMINI_GLOB_SPEC = AgentToolSpec(api_type="glob", api_name="glob")
+GEMINI_LIST_SPEC = AgentToolSpec(api_type="list_directory", api_name="list_directory")
 
 
 class GeminiReadTool(SSHTool):
@@ -33,7 +34,7 @@ class GeminiReadTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_READ_SPEC
 
@@ -48,9 +49,6 @@ class GeminiReadTool(SSHTool):
         start = arguments.get("start_line")
         end = arguments.get("end_line")
         if isinstance(start, int) and start > 0:
-            from hud.agents.tools.base import result_text
-            from hud.types import TextContent
-
             lines = result_text(result).splitlines(keepends=True)
             offset = start - 1
             limit = (end - start + 1) if isinstance(end, int) and end >= start else len(lines)
@@ -75,7 +73,7 @@ class GeminiSearchTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_SEARCH_SPEC
 
@@ -86,9 +84,9 @@ class GeminiSearchTool(SSHTool):
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
         include = arguments.get("include_pattern")
-        cmd = f"grep -rn {_shell_quote(pattern)} {_shell_quote(str(dir_path))}"
+        cmd = f"grep -rn {shlex.quote(pattern)} {shlex.quote(str(dir_path))}"
         if isinstance(include, str) and include:
-            cmd += f" --include={_shell_quote(include)}"
+            cmd += f" --include={shlex.quote(include)}"
         return await self.bash(cmd)
 
 
@@ -105,7 +103,7 @@ class GeminiGlobTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_GLOB_SPEC
 
@@ -115,7 +113,7 @@ class GeminiGlobTool(SSHTool):
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
-        cmd = f"find {_shell_quote(str(dir_path))} -name {_shell_quote(pattern)}"
+        cmd = f"find {shlex.quote(str(dir_path))} -name {shlex.quote(pattern)}"
         return await self.bash(cmd)
 
 
@@ -131,7 +129,7 @@ class GeminiListTool(SSHTool):
     }
 
     @classmethod
-    def default_spec(cls, model: str) -> GeminiToolSpec:
+    def default_spec(cls, model: str) -> AgentToolSpec:
         del model
         return GEMINI_LIST_SPEC
 
@@ -140,12 +138,3 @@ class GeminiListTool(SSHTool):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         return await self.file_list(required_str(arguments, "dir_path"))
-
-
-def _shell_quote(s: str) -> str:
-    import shlex
-
-    return shlex.quote(s)
-
-
-__all__ = ["GeminiGlobTool", "GeminiListTool", "GeminiReadTool", "GeminiSearchTool"]

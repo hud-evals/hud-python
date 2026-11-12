@@ -1,4 +1,4 @@
-"""Deploy HUD environments to the platform via direct build."""
+"""``hud deploy``: upload an environment and build it on the HUD platform."""
 
 from __future__ import annotations
 
@@ -37,18 +37,20 @@ from hud.cli import (
 )
 from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.cli.sync import RegistryEnvironment
-from hud.eval.runtime import RuntimeConfig
+from hud.runtime.core import RuntimeConfig
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
+from hud.utils.process import run_until_terminated
 
 hud_console = HUDConsole()
 
+# Never uploaded. Applied last, so a ``.dockerignore`` negation cannot re-include them.
 SENSITIVE_EXCLUDES = [".git", ".env", ".env.*", "*.env"]
-"""Never uploaded. Applied last, so a ``.dockerignore`` negation cannot re-include them."""
 
+# Local junk no image needs. Applied first, so ``.dockerignore`` can re-include any of it.
 DEFAULT_EXCLUDES = [
     "__pycache__",
     "*.pyc",
@@ -62,8 +64,8 @@ DEFAULT_EXCLUDES = [
     ".DS_Store",
     "Thumbs.db",
 ]
-"""Local junk no image needs. Applied first, so ``.dockerignore`` can re-include any of it."""
 
+# Directories skipped when looking for ``Environment(...)`` declarations.
 _UNSEARCHED_DIRS = {
     ".git",
     ".venv",
@@ -74,10 +76,9 @@ _UNSEARCHED_DIRS = {
     ".pytest_cache",
     ".ruff_cache",
 }
-"""Directories skipped when looking for ``Environment(...)`` declarations."""
 
+# The runtimes --runtime can save as a registry's default.
 _REGISTRY_RUNTIMES = ("hud", "modal")
-"""Default runtimes a registry accepts (the platform's ``RequestedRuntimeProvider``)."""
 
 
 def _dockerignore_re(pattern: str) -> re.Pattern[str]:
@@ -160,14 +161,14 @@ class _DeployResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
-async def deploy_command(
+def deploy_command(
     directory: str = typer.Argument(".", help="Environment directory or env.py file"),
     name: str | None = typer.Option(
         None,
         "--name",
         help="Environment name when the tree declares more than one.",
     ),
-    env: list[str] | None = typer.Option(  # noqa: B008
+    env: list[str] | None = typer.Option(
         None,
         "--env",
         "-e",
@@ -183,12 +184,12 @@ async def deploy_command(
         "--no-env",
         help="Skip seeding registry secrets from a local .env on first deploy.",
     ),
-    build_args: list[str] | None = typer.Option(  # noqa: B008
+    build_args: list[str] | None = typer.Option(
         None,
         "--build-arg",
         help="Docker build argument (KEY=VALUE, repeatable)",
     ),
-    secrets: list[str] | None = typer.Option(  # noqa: B008
+    secrets: list[str] | None = typer.Option(
         None,
         "--secret",
         help="Docker build secret, e.g. --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN",
@@ -229,15 +230,12 @@ async def deploy_command(
         help="Skip confirmation prompts (required in non-interactive terminals).",
     ),
 ) -> Any:
-    """Deploy HUD environment to the platform.
+    """Build an environment on the HUD platform and stream the build logs.
 
-    Accepts a directory or an env.py file. The environment name comes from the
-    ``Environment(...)`` declaration in code; pass ``--name`` when the tree
-    declares more than one. A file supplies the declaration by itself while its
-    parent directory is still the uploaded tree, so a nested source tree with
-    its own declaration cannot make the name ambiguous. Streams the remote
-    build. Compose and other run settings belong in ``--runtime-config`` or on
-    the task, not inferred from filenames.
+    DIRECTORY is an environment directory or an env.py file. The name comes from
+    the Environment(...) declaration; pass --name when the tree declares more than
+    one. For a file, only its own declarations count and its parent directory is
+    uploaded. Set Compose and other run settings with --runtime-config.
 
     [not dim]Examples:
         hud deploy
@@ -246,7 +244,7 @@ async def deploy_command(
         hud deploy --dry-run --json[/not dim]
     """
     platform = PlatformClient.from_settings()
-    source = Path(directory).expanduser().resolve()  # noqa: ASYNC240
+    source = Path(directory).expanduser().resolve()
     if source.is_file():
         env_dir = source.parent
         modules = [source]
@@ -327,7 +325,7 @@ async def deploy_command(
             f"Unknown runtime {runtime!r}. Choose one of: {', '.join(_REGISTRY_RUNTIMES)}.",
             input={"runtime": runtime},
         )
-    config_path = Path(runtime_config).expanduser() if runtime_config else None  # noqa: ASYNC240
+    config_path = Path(runtime_config).expanduser() if runtime_config else None
     if config_path is None:
         resolved_runtime_config = None
     else:
@@ -394,7 +392,7 @@ async def deploy_command(
                 )
             build_secrets[secret_id] = value
         elif "src" in spec:
-            src_path = env_dir / Path(spec["src"]).expanduser()  # noqa: ASYNC240
+            src_path = env_dir / Path(spec["src"]).expanduser()
             try:
                 build_secrets[secret_id] = src_path.read_text(encoding="utf-8")
             except OSError as e:
@@ -458,135 +456,157 @@ async def deploy_command(
             for child in env_dir.iterdir():
                 tar.add(child, arcname=child.name, filter=keep)
     except BaseException:
-        tarball.unlink(missing_ok=True)  # noqa: ASYNC240
+        tarball.unlink(missing_ok=True)
         raise
-    hud_console.success(f"Created tarball: {tarball.stat().st_size} bytes")  # noqa: ASYNC240
+    hud_console.success(f"Created tarball: {tarball.stat().st_size} bytes")
+    optional: dict[str, Any] = {
+        "registry_id": registry_id,
+        "project_id": placement.project_id,
+        "runtime_provider": resolved_runtime,
+        "runtime_config": resolved_runtime_config,
+        "environment_variables": env_vars,
+        "build_args": parsed_build_args,
+        "build_secrets": build_secrets,
+    }
     try:
-        hud_console.progress_message("Getting upload URL...")
-        started = time.time()
-        upload = await platform.apost("/builds/upload-url", _BuildUpload)
-        hud_console.success(f"Got upload URL [{time.time() - started:.1f}s]")
-        hud_console.info(f"Build ID: {upload['build_id']}")
-
-        hud_console.progress_message("Uploading build context...")
-        started = time.time()
-        content = await asyncio.to_thread(tarball.read_bytes)
-        async with httpx2.AsyncClient(timeout=300.0) as client:
-            response = await client.put(
-                upload["upload_url"],
-                content=content,
-                headers={"Content-Type": "application/gzip"},
+        result = run_until_terminated(
+            _upload_and_build(
+                platform,
+                tarball,
+                name=name,
+                no_cache=no_cache,
+                optional=optional,
+                link=state if registry_id is None and project is None else None,
             )
-            response.raise_for_status()
-        hud_console.success(f"Upload complete [{time.time() - started:.1f}s]")
-
-        optional: dict[str, Any] = {
-            "registry_id": registry_id,
-            "project_id": placement.project_id,
-            "runtime_provider": resolved_runtime,
-            "runtime_config": resolved_runtime_config,
-            "environment_variables": env_vars,
-            "build_args": parsed_build_args,
-            "build_secrets": build_secrets,
-        }
-        hud_console.progress_message("Triggering build...")
-        started = time.time()
-        build = await platform.apost(
-            "/builds/trigger",
-            _Build,
-            json={
-                "source": "direct",
-                "build_id": upload["build_id"],
-                "name": name,
-                "no_cache": no_cache,
-                **{key: value for key, value in optional.items() if value},
-            },
-        )
-        hud_console.success(f"Build triggered [{time.time() - started:.1f}s]")
-        build_id = build.id
-        built_registry_id = build.registry_id
-        if registry_id is None and project is None:
-            state.update(DirectoryLink(registry_id=built_registry_id))
-        hud_console.info(f"Build ID: {build_id}")
-        hud_console.info("")
-
-        hud_console.section_title("Build Logs")
-        http_url = platform.url(f"/builds/{build_id}/logs", params={"api_key": platform.api_key})
-        parts = urlsplit(http_url)
-        ws_url = urlunsplit(
-            (
-                "wss" if parts.scheme == "https" else "ws",
-                parts.netloc,
-                parts.path,
-                parts.query,
-                parts.fragment,
-            )
-        )
-        try:
-            hud_console.info("Connecting to build logs stream...")
-            async with websockets.connect(ws_url, ping_interval=30, ping_timeout=10) as websocket:
-                async for message in websocket:
-                    frame = json.loads(message)
-                    match frame["type"]:
-                        case "status":
-                            hud_console.info(frame["message"])
-                        case "status_update" if frame.get("status") != "IN_PROGRESS":
-                            hud_console.info(f"Build status: {frame.get('status', '')}")
-                        case "log" if frame.get("message"):
-                            timestamp_ms = frame.get("timestamp")
-                            prefix = (
-                                f"[{datetime.fromtimestamp(timestamp_ms / 1000):%H:%M:%S}] "
-                                if timestamp_ms is not None
-                                else ""
-                            )
-                            hud_console.info(f"{prefix}{frame['message'].rstrip()}")
-                        case "complete":
-                            hud_console.info(frame["message"])
-                            break
-                        case "error":
-                            hud_console.error(f"Build error: {frame['error']}")
-                            break
-        except ConnectionClosed as e:
-            if e.code == 4003:
-                hud_console.error(f"Access denied: {e.reason}")
-            else:
-                hud_console.warning(f"Log stream closed: {e.reason}")
-        except (OSError, WebSocketException) as e:
-            hud_console.warning(f"Log stream unavailable: {e}")
-
-        status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
-        while status["status"] in {"IN_PROGRESS", "MIGRATING", "CANCELLING"}:
-            await asyncio.sleep(5)
-            status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
-
-        manifest = status.get("manifest") or {}
-        tasks = [task["id"] for task in manifest.get("tasks") or []]
-        capabilities = [capability["name"] for capability in manifest.get("capabilities") or []]
-        summary: dict[str, str | int | float] = {
-            "Environment": name,
-            "Status": status["status"],
-            "Version": status.get("version") or "unknown",
-        }
-        if uri := status.get("uri"):
-            summary["Image"] = uri
-        if error_message := status.get("error_message"):
-            summary["Error"] = error_message
-        if tasks:
-            summary["Tasks"] = ", ".join(tasks)
-        if capabilities:
-            summary["Capabilities"] = ", ".join(capabilities)
-        hud_console.section_title("Build")
-        hud_console.key_value_table(summary)
-        hud_console.link(f"{settings.hud_web_url}/environments/{built_registry_id}")
-        result = _DeployResult(
-            success=status["status"] == "SUCCEEDED",
-            details=dict(status),
-            name=name,
-            build_id=build_id,
-            registry_id=str(built_registry_id),
-            status=status["status"],
         )
     finally:
-        tarball.unlink(missing_ok=True)  # noqa: ASYNC240
+        tarball.unlink(missing_ok=True)
     payload = asdict(result)
     return Result(payload) if not result.success else payload
+
+
+async def _upload_and_build(
+    platform: PlatformClient,
+    tarball: Path,
+    *,
+    name: str,
+    no_cache: bool,
+    optional: dict[str, Any],
+    link: DirectoryState | None,
+) -> _DeployResult:
+    """Upload the build context, trigger the build, stream its logs, and wait for it."""
+    hud_console.progress_message("Getting upload URL...")
+    started = time.time()
+    upload = await platform.apost("/builds/upload-url", _BuildUpload)
+    hud_console.success(f"Got upload URL [{time.time() - started:.1f}s]")
+    hud_console.info(f"Build ID: {upload['build_id']}")
+
+    hud_console.progress_message("Uploading build context...")
+    started = time.time()
+    content = await asyncio.to_thread(tarball.read_bytes)
+    async with httpx2.AsyncClient(timeout=300.0) as client:
+        response = await client.put(
+            upload["upload_url"],
+            content=content,
+            headers={"Content-Type": "application/gzip"},
+        )
+        response.raise_for_status()
+    hud_console.success(f"Upload complete [{time.time() - started:.1f}s]")
+
+    hud_console.progress_message("Triggering build...")
+    started = time.time()
+    build = await platform.apost(
+        "/builds/trigger",
+        _Build,
+        json={
+            "source": "direct",
+            "build_id": upload["build_id"],
+            "name": name,
+            "no_cache": no_cache,
+            **{key: value for key, value in optional.items() if value},
+        },
+    )
+    hud_console.success(f"Build triggered [{time.time() - started:.1f}s]")
+    build_id = build.id
+    built_registry_id = build.registry_id
+    if link is not None:
+        link.update(DirectoryLink(registry_id=built_registry_id))
+    hud_console.info(f"Build ID: {build_id}")
+    hud_console.info("")
+
+    hud_console.section_title("Build Logs")
+    http_url = platform.url(f"/builds/{build_id}/logs", params={"api_key": platform.api_key})
+    parts = urlsplit(http_url)
+    ws_url = urlunsplit(
+        (
+            "wss" if parts.scheme == "https" else "ws",
+            parts.netloc,
+            parts.path,
+            parts.query,
+            parts.fragment,
+        )
+    )
+    try:
+        hud_console.info("Connecting to build logs stream...")
+        async with websockets.connect(ws_url, ping_interval=30, ping_timeout=10) as websocket:
+            async for message in websocket:
+                frame = json.loads(message)
+                match frame["type"]:
+                    case "status":
+                        hud_console.info(frame["message"])
+                    case "status_update" if frame.get("status") != "IN_PROGRESS":
+                        hud_console.info(f"Build status: {frame.get('status', '')}")
+                    case "log" if frame.get("message"):
+                        timestamp_ms = frame.get("timestamp")
+                        prefix = (
+                            f"[{datetime.fromtimestamp(timestamp_ms / 1000):%H:%M:%S}] "
+                            if timestamp_ms is not None
+                            else ""
+                        )
+                        hud_console.info(f"{prefix}{frame['message'].rstrip()}")
+                    case "complete":
+                        hud_console.info(frame["message"])
+                        break
+                    case "error":
+                        hud_console.error(f"Build error: {frame['error']}")
+                        break
+    except ConnectionClosed as e:
+        if e.code == 4003:
+            hud_console.error(f"Access denied: {e.reason}")
+        else:
+            hud_console.warning(f"Log stream closed: {e.reason}")
+    except (OSError, WebSocketException) as e:
+        hud_console.warning(f"Log stream unavailable: {e}")
+
+    status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
+    while status["status"] in {"IN_PROGRESS", "MIGRATING", "CANCELLING"}:
+        await asyncio.sleep(5)
+        status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
+
+    manifest = status.get("manifest") or {}
+    tasks = [task["id"] for task in manifest.get("tasks") or []]
+    capabilities = [capability["name"] for capability in manifest.get("capabilities") or []]
+    summary: dict[str, str | int | float] = {
+        "Environment": name,
+        "Status": status["status"],
+        "Version": status.get("version") or "unknown",
+    }
+    if uri := status.get("uri"):
+        summary["Image"] = uri
+    if error_message := status.get("error_message"):
+        summary["Error"] = error_message
+    if tasks:
+        summary["Tasks"] = ", ".join(tasks)
+    if capabilities:
+        summary["Capabilities"] = ", ".join(capabilities)
+    hud_console.section_title("Build")
+    hud_console.key_value_table(summary)
+    hud_console.link(f"{settings.hud_web_url}/environments/{built_registry_id}")
+    return _DeployResult(
+        success=status["status"] == "SUCCEEDED",
+        details=dict(status),
+        name=name,
+        build_id=build_id,
+        registry_id=str(built_registry_id),
+        status=status["status"],
+    )

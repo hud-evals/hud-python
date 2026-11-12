@@ -7,16 +7,19 @@ import json
 import shlex
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from hud.environment import Environment, load_environment
-from hud.environment.server import TaskRunner
-from hud.eval import Task, Taskset
+from hud.environment import load_environment
+from hud.environment.server import DEFAULT_PORT, TaskRunner
+from hud.eval.taskset import Taskset
 from hud.utils.naming import normalize_environment_name
+
+if TYPE_CHECKING:
+    from hud.environment.env import Environment
+    from hud.eval.task import Task
 
 ALLOWED_PROTOCOLS = ("ssh", "mcp")
 DEFAULT_ANSWER_FILE = "/workspace/answer.txt"
-CONTROL_PORT = 8765
 BUILD_CONTEXT_IGNORE = shutil.ignore_patterns(
     "__pycache__", "*.pyc", ".git", ".venv", "venv", "*.egg-info", ".pytest_cache"
 )
@@ -59,7 +62,7 @@ async def export(
     answer_file: str = DEFAULT_ANSWER_FILE,
     timeout_sec: float = 600.0,
 ) -> list[Path]:
-    """Export HUD tasks from *source* into Harbor task folders under *out_dir*.
+    """Export HUD tasks from ``source`` into Harbor task folders under ``out_dir``.
 
     ``source`` is a Python task source or a JSON/JSONL taskset next to its
     authored environment and Dockerfile. Each task becomes one self-contained
@@ -201,7 +204,7 @@ async def export(
 
             (env_out / "hud_entrypoint.sh").write_text(
                 ENTRYPOINT_SH.format(
-                    port=CONTROL_PORT,
+                    port=DEFAULT_PORT,
                     serve_target=shlex.quote(f"{serve_source}:{env.name}"),
                     task=shlex.quote(task.id),
                     args_json=shlex.quote(args_json),
@@ -221,7 +224,7 @@ async def export(
             )
             (tests_dir / "test.sh").write_text(
                 TEST_SH.format(
-                    port=CONTROL_PORT,
+                    port=DEFAULT_PORT,
                     task=shlex.quote(task.id),
                     args_json=shlex.quote(args_json),
                     answer_file=shlex.quote(answer_file),

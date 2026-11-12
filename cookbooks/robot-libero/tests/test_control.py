@@ -1,4 +1,4 @@
-"""The `move_to` / `wait` tools on the absolute contract, driven by a fake arm (no MuJoCo)."""
+"""The ``move_to`` / ``wait`` tools on the absolute contract, driven by a fake arm (no MuJoCo)."""
 
 from __future__ import annotations
 
@@ -8,16 +8,17 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pytest
+from hud import Environment, Task
 from hud.agents.base import Agent
-from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 from hud.settings import settings
 
 if TYPE_CHECKING:
+    from hud import Run
     from hud.capabilities import MCPClient
-    from hud.eval.run import Run
-    from hud.types import MCPToolResult
+    from hud.types import ToolResult
     from numpy.typing import NDArray
 
 ROOT = Path(__file__).parents[1]
@@ -55,7 +56,7 @@ class ToolAgent(Agent):
 
     def __init__(self) -> None:
         super().__init__()
-        self.results: list[MCPToolResult] = []
+        self.results: list[ToolResult] = []
 
     async def __call__(self, run: Run) -> None:
         client = cast("MCPClient", await run.client.open("control"))
@@ -93,7 +94,6 @@ async def test_moving_and_gripping_through_the_tools_solves_the_task_and_returns
     DirectControl(
         reference=lambda data: np.r_[np.asarray(data["observation/state"]).reshape(-1)[:6], -1.0],
         max_step={"gripper.open_close": 2.0},
-        time_limit=20,
     ).attach(endpoint)
 
     @env.initialize
@@ -114,7 +114,9 @@ async def test_moving_and_gripping_through_the_tools_solves_the_task_and_returns
 
     agent = ToolAgent()
     try:
-        run = await rollout(Task(env="robot-libero", id="grasp"), agent, runtime=LocalRuntime(env))
+        trace = await rollout(
+            Task(env="robot-libero", id="grasp"), agent, runtime=LocalRuntime(env)
+        )
         assert {(cap.name, cap.protocol) for cap in env.capabilities} == {
             ("robot", "openpi/0"),
             ("control", "mcp/2025-11-25"),
@@ -124,7 +126,7 @@ async def test_moving_and_gripping_through_the_tools_solves_the_task_and_returns
         server.close()
         await sim.stop()
 
-    assert run.reward == 1.0
+    assert trace.reward == 1.0
     assert len(agent.results) == 3
     for result in agent.results:
         assert not result.isError

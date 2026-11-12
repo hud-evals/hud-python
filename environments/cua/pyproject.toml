@@ -2,7 +2,7 @@
 name = "cua-env"
 version = "0.1.0"
 description = "CUA environment: a virtual desktop served over an rfb capability for computer-use agents (HUD v6)"
-# v6 SDK caps Python at <3.13; pin the upper bound so uv does not pick 3.13 and fail to resolve.
+# hud requires Python <3.13; without the upper bound uv tries 3.13 and fails to resolve.
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "hud>=0.6.13",

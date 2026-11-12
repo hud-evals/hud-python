@@ -9,7 +9,7 @@ One provider-neutral script answers the four wire protocols hud's agents speak:
 - Gemini: ``POST /v1beta/models/{model}:generateContent``, or ``:streamGenerateContent``
   as server-sent events
 
-A script is a list of turns, or a function from :class:`ModelRequest` to a turn.
+A script is a list of turns, or a function from ``ModelRequest`` to a turn.
 The turn a request gets is read from the conversation the request carries (how
 many assistant turns it already holds), so one script serves many concurrent
 rollouts. Agents reach the script through ``HUD_GATEWAY_URL`` or a ``base_url``.
@@ -166,7 +166,7 @@ class ModelRequest:
 
 
 class Models:
-    """The scripted providers on a :class:`FakeServices` gateway. Use the ``models`` fixture."""
+    """The scripted providers on a ``FakeServices`` gateway. Use the ``models`` fixture."""
 
     def __init__(self, services: FakeServices) -> None:
         self._services = services
@@ -209,8 +209,6 @@ class Models:
     def requests(self) -> list[ModelRequest]:
         """Every model request so far, decoded, in arrival order."""
         return [self._decode(request) for request in self._services.requests("gateway", "POST")]
-
-    # ─── protocol endpoints ───────────────────────────────────────────
 
     def _next(self, request: ModelRequest) -> Turn:
         if self._policy is not None:

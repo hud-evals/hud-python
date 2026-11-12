@@ -2,14 +2,13 @@
 
 Usage:
     # Terminal 1: run A2A server
-    HUD_ENV=my-hud-environment HUD_TASK=analysis_chat \
-        uv run server.py
+    uv run server.py
 
     # Terminal 2: run this client
     uv run llm_client.py
 
-This example is intentionally more advanced than `03`: an LLM sits in front
-of the A2A server and decides when to call it as a tool.
+An LLM sits in front of the A2A server and decides when to call it as a tool;
+``client.py`` is the plain version.
 """
 
 from __future__ import annotations

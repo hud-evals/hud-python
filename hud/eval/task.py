@@ -10,34 +10,26 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    PrivateAttr,
     SerializationInfo,
     field_serializer,
     field_validator,
 )
 
 from hud.environment.env import Environment
-
-from .runtime import RuntimeConfig
+from hud.runtime.core import RuntimeConfig
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
+    from hud.runtime.core import Provider
+    from hud.runtime.hosted import HostedRuntime
 
     from .job import Job
-    from .runtime import HostedRuntime, Provider
 
 
 class Task(BaseModel):
-    """One concrete task: an env name plus data (id, args, metadata).
+    """A task row: env name, task id and arguments, shared across rollouts."""
 
-    Its fields are pure data, so one ``Task`` can drive many concurrent
-    rollouts. ``run`` it for a graded :class:`~hud.eval.job.Job`; placement
-    comes from ``runtime=`` or the environment that created it.
-    """
-
-    model_config = ConfigDict(validate_assignment=True)
-
-    _env: Environment | None = PrivateAttr(default=None)
+    model_config = ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
 
     env: str = Field(min_length=1)
     id: str = Field(min_length=1)
@@ -59,17 +51,14 @@ class Task(BaseModel):
     )
     validation: list[dict[str, Any]] | None = None
     agent_config: dict[str, Any] | None = None
-    #: Arbitrary metadata fields surfaced as filterable columns / leaderboard
-    #: facets on the platform (e.g. ``{"difficulty": "easy", "suite": "coding"}``).
+    # Filter columns and leaderboard facets on the platform.
     columns: dict[str, Any] | None = None
-    #: Optional row-level runtime construction input. Runtime adapters apply the
-    #: supported subset into their native launch shape or reject it.
     runtime_config: RuntimeConfig | None = None
-    #: Optional agent-less task whose evaluation is the grade of record. The
-    #: rollout completes this task first, then starts and grades the verifier
-    #: with the same answer. Placement may reuse the live substrate when both
-    #: tasks name the same environment.
+    # An agent-less task graded after this one, with the same answer; its grade is the record.
     verifier: Task | None = None
+    # The live Environment whose template minted this row; rows read from files or the
+    # platform have none, and it is never serialized.
+    environment: Environment | None = Field(default=None, exclude=True, repr=False)
 
     @field_validator("verifier")
     @classmethod
@@ -80,7 +69,6 @@ class Task(BaseModel):
 
     @property
     def shares_verifier_runtime(self) -> bool:
-        """The verifier runs on this task's substrate: same env, no runtime of its own."""
         return (
             self.verifier is not None
             and self.verifier.env == self.env
@@ -103,8 +91,6 @@ class Task(BaseModel):
             else None
         )
 
-    # ─── execution ────────────────────────────────────────────────────
-
     async def run(
         self,
         agent: Agent,
@@ -115,15 +101,7 @@ class Task(BaseModel):
         job: Job | None = None,
         rollout_timeout: float | None = None,
     ) -> Job:
-        """Run this task with ``agent``: the single-task form of ``Taskset.run``.
-
-        Identical scheduling semantics — one HUD job as the receipt (or an
-        open ``job`` from :meth:`Job.start` to accumulate into), ``group``
-        repeats sharing a group_id, ``max_concurrent`` capping parallelism —
-        over a taskset of one. A task created by ``@env.template`` runs against
-        that environment by default. Other rows require an explicit placement,
-        such as ``runtime=LocalRuntime("env.py")``.
-        """
+        """Run this task as a taskset of one (see ``Taskset.run``)."""
         from .taskset import Taskset  # circular: taskset -> sync -> task
 
         taskset = Taskset(self.slug, [self])
@@ -135,6 +113,3 @@ class Task(BaseModel):
             job=job,
             rollout_timeout=rollout_timeout,
         )
-
-
-__all__ = ["RuntimeConfig", "Task"]

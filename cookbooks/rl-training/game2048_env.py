@@ -6,10 +6,9 @@ the agent calls it each turn and sees the updated board. The task template yield
 the opening prompt, lets the agent run its tool loop, then grades from the final
 board (max tile reached) — it does not read the agent's text answer.
 
-Multi-turn note: each ``move`` is one agent turn, so a rollout produces a
-multi-turn trajectory; with ``return_token_ids`` every turn carries a token-level
-``Sample``, which is exactly the trainable unit (``turns_to_trajectory`` builds a
-multi-transition trajectory from it).
+Each ``move`` is one agent turn, so a rollout is a multi-turn trajectory; with
+``return_token_ids`` every turn carries a token-level ``Sample``, the unit
+``TrainingClient`` trains on.
 
 Run a single game with ``play_2048.py``, or serve standalone: ``hud serve game2048_env.py``.
 """
@@ -25,7 +24,7 @@ import time
 from fastmcp import FastMCP
 
 from hud.capabilities import Capability
-from hud.environment import Environment
+from hud import Environment
 from hud.graders import EvaluationResult
 
 _SIZE = 4

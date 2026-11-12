@@ -1,7 +1,7 @@
 """Shared scaffolding for the RL-training cookbook scripts.
 
 The training loop is agnostic to where rollouts come from — it only consumes
-``job.runs`` (each carrying a trajectory + reward). So the real setup and the
+``job.traces`` (each carrying a trajectory + reward). So the real setup and the
 local quickstart differ only in *which taskset* and *which runtime* you hand to
 ``Taskset.run``; the training code never changes.
 
@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import random
 
-from hud.eval import HUDRuntime, LocalRuntime, Provider, Taskset
+from hud import Taskset
+from hud.runtime import HUDRuntime, LocalRuntime, Provider
 
 from env import multiply
 
@@ -33,10 +34,8 @@ def load_taskset_and_runtime() -> tuple[Taskset, Provider | HUDRuntime]:
     if TASKSET:
         return Taskset.from_api(TASKSET), HUDRuntime()
 
-    # Three-digit x two-digit multiplication *with* reasoning: hard enough that a
-    # 4B reasoner is right only sometimes (a sub-1.0 baseline with within-group
-    # variance — the GRPO signal). 2x2-with-CoT was ~100% and no-CoT was ~0%;
-    # neither left a gradient, so we land in between.
+    # Three-digit x two-digit multiplication with reasoning: a small reasoner gets it
+    # right only sometimes, which gives the within-group reward variance GRPO learns from.
     rng = random.Random(0)
     local = Taskset(
         "mult",

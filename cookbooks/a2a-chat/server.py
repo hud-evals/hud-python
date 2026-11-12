@@ -1,6 +1,6 @@
 """Serve a HUD chat task over the A2A protocol.
 
-A2A (and any other wire protocol) is a frontend over :class:`hud.Chat`: the
+A2A (and any other wire protocol) is a frontend over ``hud.Chat``: the
 executor below translates A2A requests into ``chat.send()`` calls, keeping an
 independent ``Chat`` (and so an independent conversation) per A2A context.
 
@@ -38,18 +38,18 @@ from a2a.types import (
     TextPart,
 )
 
-from hud import Chat, Runtime, LocalRuntime
+from hud import Chat, Task
 from hud.agents import create_agent
 from hud.agents.types import AgentStep
-from hud.eval import Task
+from hud.runtime import LocalRuntime, Runtime
 
 if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
 
     from hud.agents.base import Agent
-    from hud.eval import Provider
-    from hud.types import Trace
+    from hud.runtime import Provider
+    from hud import Trace
 
 LOGGER = logging.getLogger("a2a_chat_server")
 
@@ -98,7 +98,7 @@ def _citations_event(context_id: str, task_id: str, trace: Trace) -> TaskArtifac
 class ChatExecutor(AgentExecutor):
     """A2A adapter: one ``Chat`` (conversation) per A2A context id."""
 
-    def __init__(self, task: Task, agent: Agent, *, runtime: Provider | None = None) -> None:
+    def __init__(self, task: Task, agent: Agent, *, runtime: Provider) -> None:
         self._task = task
         self._agent = agent
         self._runtime = runtime
@@ -160,7 +160,7 @@ class ChatExecutor(AgentExecutor):
         )
 
 
-def serve(task: Task, agent: Agent, *, runtime: Provider | None, host: str, port: int) -> None:
+def serve(task: Task, agent: Agent, *, runtime: Provider, host: str, port: int) -> None:
     name = task.id or "chat"
     url = f"http://{host}:{port}/"
     app = A2AStarletteApplication(
@@ -184,10 +184,11 @@ def serve(task: Task, agent: Agent, *, runtime: Provider | None, host: str, port
 
 
 def main() -> None:
-    """Serve `HUD_TASK` (default: this directory's chat_env.py) over A2A.
+    """Serve ``HUD_TASK`` (default ``chat_full``) over A2A.
 
-    Placement: `HUD_ENV_URL` attaches each turn to an already-served control
-    channel; otherwise every turn spawns `HUD_SOURCE` locally.
+    ``HUD_ENV_URL`` attaches each turn to an already-served control channel;
+    otherwise every turn spawns ``HUD_SOURCE`` (default: this directory's
+    ``chat_env.py``) locally.
     """
     task_id = os.getenv("HUD_TASK", "chat_full").strip()
     env_name = os.getenv("HUD_ENV", "chat").strip()
@@ -202,7 +203,7 @@ def main() -> None:
             max_steps=int(os.getenv("HUD_MAX_STEPS", "50")),
         ),
         runtime=placement,
-        host=os.getenv("HUD_A2A_HOST", "0.0.0.0"),  # noqa: S104
+        host=os.getenv("HUD_A2A_HOST", "0.0.0.0"),
         port=int(os.getenv("HUD_A2A_PORT", "9999")),
     )
 

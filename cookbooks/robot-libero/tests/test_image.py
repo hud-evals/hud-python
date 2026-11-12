@@ -7,23 +7,25 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from hud import Task
 from hud.agents.base import Agent
-from hud.eval import DockerRuntime, Task, rollout
+from hud.eval.run import rollout
+from hud.runtime import DockerRuntime
 
 if TYPE_CHECKING:
+    from hud import Run
     from hud.capabilities import MCPClient
-    from hud.eval.run import Run
-    from hud.types import MCPToolResult
+    from hud.types import ToolResult
 
 TAG = "robot-libero:test"
 
 
 class OneMove(Agent):
-    """Lowers the gripper once through the `move_to` tool."""
+    """Lowers the gripper once through the ``move_to`` tool."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.result: MCPToolResult | None = None
+        self.result: ToolResult | None = None
 
     async def __call__(self, run: Run) -> None:
         client = cast("MCPClient", await run.client.open("control"))
@@ -46,7 +48,7 @@ async def test_the_image_builds_and_plays_a_libero_task() -> None:
     )
     agent = OneMove()
 
-    run = await rollout(
+    trace = await rollout(
         Task(env="robot-libero", id="libero_spatial", args={"libero_task_id": 0}),
         agent,
         runtime=DockerRuntime(TAG),
@@ -55,4 +57,4 @@ async def test_the_image_builds_and_plays_a_libero_task() -> None:
     assert agent.result is not None
     assert not agent.result.isError
     assert sum(block.type == "image" for block in agent.result.content) == 2
-    assert not run.grade.is_error  # graded; a single move does not solve the task
+    assert not trace.grade.is_error  # graded; a single move does not solve the task

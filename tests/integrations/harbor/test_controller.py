@@ -21,7 +21,6 @@ at the top level or per ``[[case]]`` (a case adds to the top level):
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,14 +30,13 @@ import pytest
 
 from hud.agents.base import Agent
 from hud.capabilities import MCPClient, SSHClient
-from hud.eval import DockerRuntime, Shared
-from hud.eval.runtime import DockerBindMount
 from hud.integrations import harbor
+from hud.runtime import DockerBindMount, DockerRuntime, Shared
 from tests.integrations.harbor.cases import assemble_case, read_expected
 
 if TYPE_CHECKING:
-    from hud.eval import Provider
-    from hud.eval.run import Run
+    from hud import Run, Trace
+    from hud.runtime import Provider
 
 TASKS = Path(__file__).parent / "tasks"
 
@@ -140,15 +138,15 @@ def adapted(case: Case, sdk_wheel: Path, tmp_path: Path) -> harbor.AdaptResult:
     return result
 
 
-def report(run: Run) -> str:
-    """Everything a failed run says about why, for assertions and their messages."""
-    evaluation = run.evaluation
+def report(trace: Trace) -> str:
+    """Everything a failed trace says about why, for assertions and their messages."""
+    evaluation = trace.evaluation
     info = evaluation.get("info") or {}
     return "\n".join(
         str(part)
         for part in (
-            run.trace.content,
-            run.trace.error,
+            trace.content,
+            trace.error,
             evaluation.get("content"),
             info.get("stdout"),
             info.get("stderr"),
@@ -172,45 +170,26 @@ async def test_a_harbor_task_grades_as_its_fixture_expects(
 
     job = await taskset.run(oracle, runtime=runtime, group=case.group, max_concurrent=1)
 
-    assert len(job.runs) == (case.group or 1)
-    for run in job.runs:
-        detail = report(run)
-        assert run.reward == case.reward, detail
+    assert len(job.traces) == (case.group or 1)
+    for trace in job.traces:
+        detail = report(trace)
+        assert trace.reward == case.reward, detail
         if case.error is not None:
             assert case.error in detail
     if case.probe is not None:
-        assert oracle.probed == [sorted(case.probe["tools"])] * len(job.runs)
+        assert oracle.probed == [sorted(case.probe["tools"])] * len(job.traces)
 
 
 @pytest.mark.parametrize("case", REFUSED, ids=[case.id for case in REFUSED])
-def test_a_controller_with_an_unusable_configuration_refuses_to_serve(
+async def test_a_controller_with_an_unusable_configuration_refuses_to_serve(
     case: Case, sdk_wheel: Path, tmp_path: Path
 ) -> None:
-    # Providers yield once the control port is published, before the serve
-    # process proves itself, so the refusal is observed by running the main
-    # service of the adapted project in the foreground.
     (row,) = adapted(case, sdk_wheel, tmp_path).taskset
-    assert row.runtime_config is not None and row.runtime_config.compose is not None
-    compose = row.runtime_config.compose.document
-    assert isinstance(compose, Path)
+    docker = DockerRuntime(env_vars=case.env_vars, bind_mounts=case.bind_mounts)
 
-    def compose_command(*args: str, timeout: float) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["docker", "compose", "--file", str(compose), *args],
-            cwd=compose.parent,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+    with pytest.raises(RuntimeError) as refused:
+        async with docker(row):
+            pass
 
-    try:
-        built = compose_command("build", timeout=1200)
-        assert built.returncode == 0, built.stderr[-4000:]
-        served = compose_command("run", "--rm", "main", timeout=120)
-    finally:
-        compose_command("down", "--volumes", "--remove-orphans", timeout=120)
-
-    assert served.returncode != 0
     assert case.startup_error is not None
-    assert case.startup_error in served.stdout + served.stderr
+    assert case.startup_error in str(refused.value)

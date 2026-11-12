@@ -1,16 +1,4 @@
-"""Robot trace recording: numeric state, per-camera H.264 video, action chunks.
-
-Shared by both sides of the robot stack (the agent harness, ``wrap``, the
-gym bridges), so it lives under telemetry rather than either side:
-
-- :class:`TraceRecorder` — one trace. Emits spans with an explicit ``trace_id``
-  (no rollout contextvar needed, works from any thread), or through a ``Run``
-  so steps also land on ``run.trace`` for training. Span emission only —
-  trace lifecycle (enter/exit) is the caller's job.
-- :class:`JobRecorder` — a whole vectorized env as one **Job** of per-episode
-  traces: one :class:`TraceRecorder` per recorded slot; ``done[i]`` closes that
-  slot's trace (reporting its exit) and opens a fresh one for the next episode.
-"""
+"""Robot trace recording: numeric state, per-camera H.264 video, action chunks."""
 
 from __future__ import annotations
 
@@ -21,8 +9,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from hud.agents.types import InferenceStep, ObservationStep, StateFeature
+from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
+from hud.telemetry.exporter import flush
+from hud.telemetry.robot.steps import InferenceStep, ObservationStep, StateFeature
 from hud.types import PromptMessage, Step, TextContent
 from hud.utils.platform import PlatformClient
 
@@ -46,11 +36,8 @@ def to_numpy(x: Any) -> NDArray[Any]:
 
 
 def _report_sync(path: str, payload: dict[str, Any]) -> None:
-    """Best-effort sync POST to the platform (job/trace lifecycle). No-op without an
-    API key; never fails the run when the platform is unreachable."""
-    from hud.settings import settings
-
-    if not (settings.telemetry_enabled and settings.api_key):
+    """Best-effort job/trace lifecycle POST; a no-op without telemetry and an API key."""
+    if not settings.reporting_enabled:
         return
     body = {k: v for k, v in payload.items() if v is not None}
     try:
@@ -68,7 +55,7 @@ class TraceRecorder:
     ``state_names``/``action_names`` are the contract-free fallback labels.
     ``sim_clock`` stamps each observation at ``tick / fps`` after the first, so the
     viewer's clock follows the video even when the sim idles between ticks.
-    ``lossless_video`` makes ``record_observation`` wait for the encoder instead of
+    ``keep_every_video_frame`` makes ``record_observation`` wait for the encoder instead of
     dropping frames, so video frame N is always tick N.
     """
 
@@ -83,23 +70,21 @@ class TraceRecorder:
         action_names: list[str] | None = None,
         state_names: dict[str, list[str]] | None = None,
         sim_clock: bool = False,
-        lossless_video: bool = False,
+        keep_every_video_frame: bool = False,
     ) -> None:
         assert trace_id or run, "TraceRecorder needs a trace_id or a run"
         self._run = run
-        # Video encodes on a background thread, so it always needs an explicit id;
-        # a live run's id is the ambient rollout context.
-        self.trace_id = trace_id or (run.trace_id if run else None) or get_current_trace_id()
+        # Video encodes on a background thread without the trace context, so resolve the id now.
+        self.trace_id = trace_id or (run.trace.trace_id if run else None) or get_current_trace_id()
         self._fps = fps
         self._obs_space = obs_space
         self._action_names = action_names or []
         self._state_names = state_names or {}
         self._sim_clock = sim_clock
         self._clock_start: datetime | None = None
-        self._lossless_video = lossless_video
+        self._keep_every_video_frame = keep_every_video_frame
         self.reward = 0.0
         self._video: VideoStreamer | None = None  # lazy, one per trace
-        # The task instruction as an opening user step (shows on the timeline).
         # A Run records its own prompt step, so only the bare-trace path emits one.
         if prompt and run is None:
             self._emit(
@@ -123,7 +108,7 @@ class TraceRecorder:
         ``data`` maps feature names to per-env arrays; camera frames (``HxWxC``)
         go to the video path, flat numeric vectors become labelled state.
         """
-        if self._obs_space is not None:  # contract-aware labeling/slicing
+        if self._obs_space is not None:
             step = ObservationStep.from_obs({"data": data}, tick=tick, obs_space=self._obs_space)
         else:
             state: dict[str, StateFeature] = {}
@@ -145,13 +130,12 @@ class TraceRecorder:
         self._emit(step)
         if self._video is None:
             self._video = VideoStreamer(
-                fps=self._fps, trace_id=self.trace_id, lossless=self._lossless_video
+                fps=self._fps, trace_id=self.trace_id, keep_every_frame=self._keep_every_video_frame
             )
         self._video.record({"data": data})
 
     def record_inference(self, chunk: Any, *, tick: int) -> None:
-        """One inference: the freshly inferred ``[T, A]`` chunk (an executed
-        single action is a length-1 chunk)."""
+        """Record one inference's ``[T, A]`` action chunk; a single action is a length-1 chunk."""
         rows = np.atleast_2d(to_numpy(chunk).astype(float))
         self._emit(
             InferenceStep(
@@ -171,15 +155,12 @@ class TraceRecorder:
 
 
 class JobRecorder:
-    """Records a vectorized env as one Job of per-episode traces.
+    """Records a vectorized env as one job of per-episode traces.
 
-    Construct once with the batch size, call :meth:`record` after every
-    ``env.step`` with the batched tensors, :meth:`close` at the end. A subset of
-    slots (``record_indices``) gets rich traces; each ``done[i]`` closes that
-    slot's trace (reporting reward — env-reported ``success`` outranks
-    accumulated shaped reward) and opens a fresh one, all under one Job.
-
-    ``job_id`` is an existing HUD Job UUID to share; omit it to mint one.
+    Call ``record`` after every ``env.step`` and ``close`` at the end. Only the
+    ``record_indices`` slots are traced; ``done[i]`` closes that slot's trace, scored
+    by ``success`` when given and by summed reward otherwise, and opens the next.
+    Pass ``job_id`` (a UUID) to record into an existing job.
     """
 
     def __init__(
@@ -213,8 +194,7 @@ class JobRecorder:
         self._prompt = prompt
         self._action_names = action_names
         self._state_names = state_names
-        #: Extra metadata merged into each newly opened trace (e.g. the episode's
-        #: task parametrization). Mutable: set it before the episode's traces open.
+        # Merged into each newly opened trace's metadata; set it before the episode's traces open.
         self.extra_metadata: dict[str, Any] = {}
         if record_indices is None:
             record_indices = list(range(min(num_envs, 4)))  # a few representative slots
@@ -228,8 +208,6 @@ class JobRecorder:
 
     @property
     def job_url(self) -> str:
-        from hud.settings import settings
-
         return f"{settings.hud_web_url}/jobs/{self.job_id}"
 
     def _open(self, i: int) -> TraceRecorder:
@@ -296,7 +274,7 @@ class JobRecorder:
             if reward_np is not None:
                 rec.add_reward(float(reward_np[i]))
             done_i = done_np is not None and bool(done_np[i])
-            if not done_i:  # a done step's returned obs is the next episode's
+            if not done_i:
                 data: dict[str, Any] = {}
                 if obs is not None:
                     sliced = obs if isinstance(obs, dict) else {"obs": obs}
@@ -320,8 +298,6 @@ class JobRecorder:
     def close(self) -> None:
         """Close open traces and flush all telemetry to the platform."""
         self.close_slots()
-        from hud.telemetry.exporter import flush
-
         flush()
 
     def __enter__(self) -> Self:
@@ -329,6 +305,3 @@ class JobRecorder:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
-
-
-__all__ = ["JobRecorder", "TraceRecorder", "to_numpy"]

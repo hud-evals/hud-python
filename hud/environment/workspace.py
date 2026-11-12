@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import secrets
+import shlex
 import shutil
 import socket
 import struct
@@ -17,10 +18,11 @@ import sys
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import asyncssh
 
+from hud.capabilities.base import Capability
 from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST
 from hud.environment.egress import (
     VISITOR_PORT,
@@ -30,6 +32,7 @@ from hud.environment.egress import (
     hosts_text,
     proxy_environment,
 )
+from hud.environment.file_tracker import FileTracker, serve_file_tracking
 from hud.environment.namespace import (
     NamespaceHost,
     NamespaceProcess,
@@ -50,13 +53,10 @@ if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
 
-    from hud.capabilities import Capability
-
-    from .file_tracker import FileTracker
-
 LOGGER = logging.getLogger("hud.environment.workspace")
 
 _PROCESS_CLOSE_TIMEOUT_S = 5.0
+_SANDBOX_TMP = "/tmp"  # noqa: S108
 _CREATE_SUSPENDED = 0x00000004
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
@@ -90,8 +90,10 @@ def _guarded_process_argv(
     *,
     identity: tuple[int, int] | None,
 ) -> list[str]:
-    """*argv* under the process-connection guard, which drops it to *identity* once
-    guarded: the guard itself stays out of reach of the identity it drops to."""
+    """``argv`` under the process-connection guard, which drops it to ``identity`` once guarded.
+
+    The guard itself stays out of reach of the identity it drops to.
+    """
     return [
         interpreter,
         guard.sandbox_helper,
@@ -248,16 +250,17 @@ class _WindowsJob:
 class Bubblewrap:
     path: str
     pid_unshare: str | None = None
-    #: Whether ``--perms`` can set a tmpfs mode (bubblewrap 0.5+).
+    # Whether ``--perms`` can set a tmpfs mode (bubblewrap 0.5+).
     tmpfs_modes: bool = False
 
 
-# Set once the first Workspace probes the substrate (avoid per-instance work).
+# Cached probe of this host: a ``Bubblewrap`` launch mode, or the failure reason
+# when none works.
 _bwrap_usable: Bubblewrap | str | None = None
 
 
 def usable_bwrap() -> Bubblewrap | None:
-    """A working bubblewrap launch mode for this substrate, if one exists."""
+    """A working bubblewrap launch mode for this host, if one exists."""
     global _bwrap_usable
     if isinstance(_bwrap_usable, Bubblewrap):
         return _bwrap_usable
@@ -322,7 +325,7 @@ def usable_bwrap() -> Bubblewrap | None:
             )
             if probe.returncode == 0:
                 separator = argv.index("--")
-                mode_probe = [*argv[:separator], "--perms", "1777", "--tmpfs", "/tmp"]  # noqa: S108
+                mode_probe = [*argv[:separator], "--perms", "1777", "--tmpfs", _SANDBOX_TMP]
                 modes = subprocess.run(
                     [*mode_probe, *argv[separator:]],
                     capture_output=True,
@@ -333,7 +336,8 @@ def usable_bwrap() -> Bubblewrap | None:
                 if not _bwrap_usable.tmpfs_modes:
                     LOGGER.warning(
                         "bwrap cannot set tmpfs modes (bubblewrap 0.5+ is required); "
-                        "the sandbox /tmp is not writable by unprivileged agent sessions."
+                        "the /tmp of commands the environment runs is not writable by "
+                        "unprivileged users."
                     )
                 return _bwrap_usable
             detail = probe.stderr.decode("utf-8", "replace").strip()[:120]
@@ -356,31 +360,35 @@ def _is_root() -> bool:
     return sys.platform != "win32" and hasattr(os, "geteuid") and os.geteuid() == 0
 
 
-# ─────────────────────────── mount declarations ───────────────────────────
-
-
 MountKind = Literal["ro", "rw", "tmpfs", "symlink", "proc", "dev"]
 
-# kind -> (normal flag, optional modifier, takes source)
-_MOUNT_FLAGS: dict[MountKind, tuple[str, str | None, bool]] = {
-    "ro": ("--ro-bind", "--ro-bind-try", True),
-    "rw": ("--bind", "--bind-try", True),
-    "symlink": ("--symlink", None, True),
-    "tmpfs": ("--tmpfs", None, False),
-    "proc": ("--proc", None, False),
-    "dev": ("--dev", None, False),
+
+class _MountFlags(NamedTuple):
+    flag: str
+    # The flag that skips a missing source, for kinds that have one.
+    optional_flag: str | None
+    takes_source: bool
+
+
+_MOUNT_FLAGS: dict[MountKind, _MountFlags] = {
+    "ro": _MountFlags("--ro-bind", "--ro-bind-try", takes_source=True),
+    "rw": _MountFlags("--bind", "--bind-try", takes_source=True),
+    "symlink": _MountFlags("--symlink", None, takes_source=True),
+    "tmpfs": _MountFlags("--tmpfs", None, takes_source=False),
+    "proc": _MountFlags("--proc", None, takes_source=False),
+    "dev": _MountFlags("--dev", None, takes_source=False),
 }
 
 
 @dataclass(slots=True, frozen=True)
 class Mount:
-    """One bwrap mount entry: ``Mount(kind, src=..., dst=..., optional=...)``."""
+    """One bubblewrap mount in the workspace sandbox; an ``optional`` bind skips missing sources."""
 
     kind: MountKind
     src: str = ""
     dst: str = ""
     optional: bool = False
-    #: Permission bits for a ``tmpfs`` mount, applied where bwrap supports ``--perms``.
+    # Permission bits for a ``tmpfs`` mount, applied where bwrap supports ``--perms``.
     mode: int | None = None
 
     def to_bwrap_args(self, *, bind_devices: bool = False, tmpfs_modes: bool = False) -> list[str]:
@@ -388,13 +396,12 @@ class Mount:
             return ["--dev-bind", "/dev", self.dst]
         if self.kind == "tmpfs" and self.mode is not None and tmpfs_modes:
             return ["--perms", f"{self.mode:04o}", "--tmpfs", self.dst]
-        normal, optional_flag, takes_src = _MOUNT_FLAGS[self.kind]
-        flag = optional_flag if (self.optional and optional_flag) else normal
-        return [flag, self.src, self.dst] if takes_src else [flag, self.dst]
+        flags = _MOUNT_FLAGS[self.kind]
+        flag = flags.optional_flag if (self.optional and flags.optional_flag) else flags.flag
+        return [flag, self.src, self.dst] if flags.takes_source else [flag, self.dst]
 
 
-# Most slim Linux distros merge ``/lib`` into ``/usr/lib`` via symlinks;
-# we mirror that inside the namespace.
+# Slim distros merge ``/lib`` into ``/usr/lib`` with symlinks; the sandbox mirrors them.
 DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
     Mount("ro", src="/usr", dst="/usr"),
     Mount("ro", src="/etc", dst="/etc"),
@@ -405,26 +412,23 @@ DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
     Mount("proc", dst="/proc"),
     Mount("dev", dst="/dev"),
     # World-writable like a host /tmp, so unprivileged sessions get scratch space.
-    Mount("tmpfs", dst="/tmp", mode=0o1777),  # noqa: S108 — namespace-local tmpfs, not a host tempdir
+    Mount("tmpfs", dst=_SANDBOX_TMP, mode=0o1777),
 )
-
-
-# ─────────────────────────── the workspace ───────────────────────────
 
 
 _DEFAULT_USER = "agent"
 
-#: What the sandbox runs so it stays alive between sessions. It must outlast
-#: every rollout without waking (a sandbox is discarded, never expired) and
-#: come from the task's own image, since the serving venv is masked inside.
-#: bwrap's reaper is pid 1 above it, so processes the agent orphans are reaped
-#: rather than accumulating for the life of the sandbox.
-#:
-#: The line it prints first is the readiness signal, and it has to come from
-#: in here: bwrap reports the child pid before that child has finished
-#: building its mount namespace, so a session joining on the strength of the
-#: pid alone can land in a root that is still half-assembled. The payload runs
-#: only once setup is done, so its own output is the proof.
+# What the sandbox runs so it stays alive between sessions. It must outlast
+# every rollout without waking (a sandbox is discarded, never expired) and
+# come from the task's own image, since the serving venv is masked inside.
+# bwrap's reaper is pid 1 above it, so processes the agent orphans are reaped
+# rather than accumulating for the life of the sandbox.
+#
+# The line it prints first is the readiness signal, and it has to come from
+# in here: bwrap reports the child pid before that child has finished
+# building its mount namespace, so a session joining on the strength of the
+# pid alone can land in a root that is still half-assembled. The payload runs
+# only once setup is done, so its own output is the proof.
 _SANDBOX_HOLDER = ["sh", "-c", "echo ready; exec sleep 2147483647"]
 _SANDBOX_READY = b"ready\n"
 
@@ -508,29 +512,26 @@ def _payload_argv(
 
 
 class Workspace:
-    """Directory + bwrap-isolated SSH.
+    """A directory served over bubblewrap-isolated SSH as an ``ssh/2`` capability.
 
-    The standard shell daemon: ``env.workspace(root)`` attaches one to an
-    :class:`~hud.environment.Environment`, which starts it and publishes its
-    concrete ``ssh/2`` capability when the env serves. Construction is pure
-    data — keys, sockets, and the root directory materialize only at serve
-    time. Drive it directly (``start()`` / :meth:`capability` / ``stop()``)
-    to publish the capability yourself.
+    ``env.workspace(root)`` attaches one to an ``Environment``, which starts it and
+    publishes the capability when the env serves. Construction writes nothing:
+    keys, sockets and the root directory are created on first use. Drive it
+    directly with ``start()``, ``capability()`` and ``stop()`` to publish the
+    capability yourself.
 
-    ``shell_uid`` and ``shell_gid`` drop agent sessions to that identity
-    when the serving process is root — the privilege wall for
-    substrates where bwrap is unavailable and the env process holds secrets
-    the agent must not read.
-    No-op off root. Only the workspace directory itself is handed to the uid
-    at start (O(1), on the serving path); pre-staged content is the author's
-    to own via ``COPY --chown`` or task setup.
+    When the server runs as root on Linux, ``shell_uid`` and ``shell_gid`` drop
+    agent sessions to that identity: the privilege wall for hosts where bwrap
+    is unavailable and the env process holds secrets the agent must not read. Off
+    root they do nothing; as root on another platform, ``start`` refuses. Unless
+    ``hand_over_root`` is false, only the root directory itself is handed to that
+    uid; content staged in the image is the author's to chown.
     """
 
     def __init__(
         self,
         root: Path | str,
         *,
-        # bwrap configuration
         mounts: Sequence[Mount] = (),
         network: bool = False,
         allowed_hosts: Collection[str] | None = None,
@@ -540,7 +541,6 @@ class Workspace:
         env: Mapping[str, str] | None = None,
         system_mounts: Sequence[Mount] | None = None,
         guest_path: str = "/workspace",
-        # ssh server configuration
         host: str = "127.0.0.1",
         port: int = 0,
         user: str = _DEFAULT_USER,
@@ -555,7 +555,6 @@ class Workspace:
         hand_over_root: bool = True,
     ) -> None:
         self.root: Path = Path(root).resolve()
-        # Per-instance credential dir, materialized lazily (see _credentials_dir).
         self._cred_dir: Path | None = None
         self._configured_cred_dir = Path(credentials_dir) if credentials_dir else None
         self._configured_hosts_path = Path(hosts_path) if hosts_path else None
@@ -565,29 +564,28 @@ class Workspace:
         # need in-/out-of-sandbox paths to match (e.g. Harbor challenge dirs).
         self._guest_path = guest_path
 
-        # bwrap state
         self.mounts: tuple[Mount, ...] = tuple(mounts)
         self.network = network
-        #: Which hosts a session may reach. ``None`` leaves the network as the
-        #: substrate's — sessions share it, and so can reach whatever else is
-        #: listening there, the control channel included. A set (``{ANY_HOST}``
-        #: for everything) gives the workspace its own network namespace whose
-        #: only route out is the policy: nothing else on the substrate is
-        #: addressable from inside, and no session can reach a host the task
-        #: did not declare.
+        # Which hosts a session may reach. ``None`` leaves the network as the
+        # host's — sessions share it, and so can reach whatever else is
+        # listening there, the control channel included. A set (``{ANY_HOST}``
+        # for everything) gives the workspace its own network namespace whose
+        # only route out is the policy: nothing else on the host is
+        # addressable from inside, and no session can reach a host the task
+        # did not declare.
         self.allowed_hosts = None if allowed_hosts is None else frozenset(allowed_hosts)
-        #: Substrate services the workspace may reach, each at the address the
-        #: task expects. A workspace with a network of its own cannot address
-        #: the substrate at all, so anything the environment itself runs — a
-        #: database the task depends on, an API it is meant to call — has to be
-        #: named here to exist for it. Nothing to do where sessions share the
-        #: substrate's network: the services are already at those addresses.
+        # Host services the workspace may reach, each at the address the
+        # task expects. A workspace with a network of its own cannot address
+        # the host at all, so anything the environment itself runs — a
+        # database the task depends on, an API it is meant to call — has to be
+        # named here to exist for it. Nothing to do where sessions share the
+        # host's network: the services are already at those addresses.
         self.peers: tuple[Peer, ...] = tuple(peers)
         self._process_connections: dict[str, Peer] = {}
         self.local_aliases = frozenset(local_aliases)
         self.ports = frozenset(ports)
         self._egress: Egress | None = None
-        # The workspace's own /etc/hosts (the substrate's, plus its peers),
+        # The workspace's own /etc/hosts (the host's, plus its peers),
         # materialized alongside the session keys when there is one to write.
         self._hosts_path: Path | None = None
         self.env: dict[str, str] = dict(env or {})
@@ -601,7 +599,6 @@ class Workspace:
         # Only override the default; respect an explicit guest_path.
         if self._bwrap is None and guest_path == "/workspace":
             self._guest_path = self.root.as_posix()
-        # ssh config
         self._ssh_host = host
         self._ssh_port = port
         self._ssh_user = user
@@ -635,7 +632,7 @@ class Workspace:
         self._sandbox_init: int | None = None
         self._namespace: NamespaceHost | None = None
         self._bridge: NamespaceProcess | None = None
-        #: The ``(host, port)`` addresses the bridge listens on.
+        # The ``(host, port)`` addresses the bridge listens on.
         self._listening: set[tuple[str, int]] = set()
         # Sessions start concurrently (an agent can issue parallel tool calls),
         # and two that each started a sandbox would not share one.
@@ -691,15 +688,17 @@ class Workspace:
 
         True when the task severed the network, and true when it declared what
         may be reached — a policy needs somewhere to apply. False leaves
-        sessions on the substrate's network, where they can address whatever
+        sessions on the host's network, where they can address whatever
         else is listening on it.
         """
         return not self.network or self.allowed_hosts is not None
 
     async def add_peer(self, peer: Peer, *, first: bool = False) -> None:
-        """Add a substrate service, to a running sandbox too: its address answers and
-        its name resolves before this returns, and every other peer keeps the address
-        it was bound at."""
+        """Add a host service, to a running sandbox too.
+
+        Its address answers and its name resolves before this returns, and every
+        other peer keeps the address it was bound at.
+        """
         async with self._sandbox_lock:
             if self._egress is not None:
                 host, port, path = self._egress.add_peer(peer)
@@ -714,9 +713,11 @@ class Workspace:
                 self._hosts_path = self._write_hosts()
 
     def remove_peer(self, peer: Peer) -> None:
-        """Remove a substrate service, from a running sandbox too: its name stops
-        resolving and its address stops answering, while every other peer keeps
-        the address it was bound at."""
+        """Remove a host service, from a running sandbox too.
+
+        Its name stops resolving and its address stops answering, while every other
+        peer keeps the address it was bound at.
+        """
         self.peers = tuple(candidate for candidate in self.peers if candidate != peer)
         if self._egress is not None and peer in self._egress.peers:
             self._egress.remove_peer(peer)
@@ -725,8 +726,11 @@ class Workspace:
 
     @property
     def addresses(self) -> Mapping[str, str]:
-        """Which loopback address each peer name answers on inside the workspace: where
-        the running sandbox's bridge bound it, or where the next sandbox will."""
+        """The loopback address each peer name answers on inside the workspace.
+
+        That is where the running sandbox's bridge bound it, or where the next
+        sandbox will.
+        """
         if self._egress is not None:
             return self._egress.addresses
         return bind_addresses(self.peers, reserved_ports=self.ports)
@@ -787,15 +791,10 @@ class Workspace:
                 )
         self.root.mkdir(parents=True, exist_ok=True)
         if (identity := self._shell_identity()) is not None and self._hand_over_root:
-            # Make the workspace dir itself writable by the dropped uid so a
-            # fresh workspace is usable out of the box. This is O(1) and must
-            # stay that way: it runs on the serving path, before the control
-            # port binds. We deliberately do NOT recurse — a baked tree
-            # (node_modules, a venv, a dataset) can hold hundreds of thousands
-            # of files, and walking it here delays the bind past the deploy
-            # readiness probe. Ownership of pre-staged content is the env
-            # author's job, done where it's cheap and scoped: at build time
-            # (`COPY --chown`) or in task setup over just what was staged.
+            # The root only, never recursively: this runs before the control port
+            # binds, and walking a baked tree (node_modules, a venv, a dataset) can
+            # push the bind past the readiness probe. Pre-staged content is chowned
+            # at build time (``COPY --chown``) or in task setup.
             os.lchown(self.root, *identity)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
@@ -812,8 +811,6 @@ class Workspace:
             self._ssh_user,
             self._client_key_path,
         )
-
-    # ─── lifecycle ────────────────────────────────────────────────────
 
     async def start(self) -> None:
         """Ensure the SSH accept loop is running. Idempotent.
@@ -850,8 +847,6 @@ class Workspace:
 
     async def _start_file_tracking(self) -> None:
         """Take the baseline snapshot and bind the filetracking/1 server."""
-        from .file_tracker import FileTracker, serve_file_tracking
-
         tracker = FileTracker(self.root)
         # The baseline walk is CPU-bound; keep it off the event loop.
         await asyncio.get_running_loop().run_in_executor(None, tracker.take_baseline)
@@ -862,7 +857,7 @@ class Workspace:
     async def stop(self) -> None:
         """Stop accepting SSH sessions and release the socket.
 
-        Credentials stay on disk; a later :meth:`start` re-binds (fresh port
+        Credentials stay on disk; a later ``start`` re-binds (fresh port
         unless one was pinned) and reuses them.
         """
         await self.discard_sandbox()
@@ -893,8 +888,6 @@ class Workspace:
             shutil.rmtree(self._cred_dir, ignore_errors=True)
             self._cred_dir = None
 
-    # ─── ssh accessors / capability ───────────────────────────────────
-
     @property
     def ssh_url(self) -> str:
         """``ssh://host:port`` — prepared lazily on first access."""
@@ -918,7 +911,6 @@ class Workspace:
 
     @property
     def ssh_user(self) -> str:
-        """SSH username."""
         return self._ssh_user
 
     def capability(self, name: str = "shell") -> Capability:
@@ -928,8 +920,6 @@ class Workspace:
         authenticates from anywhere the daemon is reachable — including a
         client on the other side of a container boundary.
         """
-        from hud.capabilities import Capability
-
         key_path = self.ssh_client_key_path
         return Capability.ssh(
             name=name,
@@ -950,8 +940,6 @@ class Workspace:
 
     def file_tracking_capability(self, name: str = "filetracking") -> Capability:
         """The concrete ``filetracking/1`` capability (requires ``track_files=True``)."""
-        from hud.capabilities import Capability
-
         if self._ft_host is None or self._ft_port is None:
             raise RuntimeError("file tracking not started; call start() with track_files=True")
         return Capability(
@@ -1105,8 +1093,6 @@ class Workspace:
             privileges=self._privileges(identity, no_new_privs=no_new_privs),
         )
 
-    # ─── sandbox ──────────────────────────────────────────────────────
-
     @property
     def bwrap_available(self) -> bool:
         return self._bwrap is not None
@@ -1121,12 +1107,16 @@ class Workspace:
         isolate_users: bool = True,
         bind_devices: bool | None = None,
         mounts: Sequence[Mount] | None = None,
+        session: bool = False,
     ) -> list[str]:
         """Argv for a bwrap that builds a view and holds it with ``_SANDBOX_HOLDER``.
 
         Nothing else runs under bwrap: processes enter the view with
-        :func:`~hud.environment.namespace.entry_argv`.
-        Every option here is one bubblewrap 0.4 understands.
+        ``entry_argv``. A ``session`` view mounts the sandbox's shared tmpfs
+        directories in place of fresh tmpfs mounts, so every agent session sees
+        one ``/tmp``; views for commands the environment runs keep fresh ones, so
+        nothing an agent leaves there reaches them. Every option here is one
+        bubblewrap 0.4 understands.
         """
         if self._bwrap is None:
             raise RuntimeError("bwrap not available on this host")
@@ -1150,6 +1140,9 @@ class Workspace:
         bind_host_devices = not isolate_users if bind_devices is None else bind_devices
         tmpfs_modes = self._bwrap.tmpfs_modes
         for mount in self._system_mounts:
+            if session and mount.kind == "tmpfs":
+                argv.extend(["--bind", str(self._shared_tmpfs(mount)), mount.dst])
+                continue
             argv.extend(
                 mount.to_bwrap_args(bind_devices=bind_host_devices, tmpfs_modes=tmpfs_modes)
             )
@@ -1183,8 +1176,11 @@ class Workspace:
     def _command_env(
         self, env: Mapping[str, str] | None = None, *, inherit_workspace_env: bool = True
     ) -> dict[str, str]:
-        """The environment a workspace command starts from: the serving process's, less
-        HUD's own; then the workspace's own, unless left out; then *env*."""
+        """The environment a workspace command starts from.
+
+        The serving process's minus ``HUD_`` variables, then the workspace's own
+        unless ``inherit_workspace_env`` is false, then ``env``.
+        """
         workspace_env = self.env if inherit_workspace_env else {}
         return {**_without_harness_config(os.environ), **workspace_env, **(env or {})}
 
@@ -1229,13 +1225,11 @@ class Workspace:
             raise RuntimeError("running a workspace command as another user requires a root server")
         return Privileges(no_new_privs=no_new_privs)
 
-    # ─── the sandbox sessions share ───────────────────────────────────────
-
     async def sandbox_pid(self) -> int | None:
         """The live sandbox's init pid, starting one if none is running.
 
-        ``None`` where bwrap cannot sandbox: sessions then run directly, as
-        they always have, and nothing persists between them beyond the files.
+        ``None`` where bwrap cannot sandbox: sessions then run directly, and
+        nothing persists between them beyond the files.
         """
         if self._bwrap is None:
             return None
@@ -1270,7 +1264,10 @@ class Workspace:
                 )
                 self._egress.start()
             staged = bwrap.pid_unshare is not None
-            holder_argv = self._view_argv(network=True, isolate_users=staged, bind_devices=True)
+            self._create_shared_tmpfs()
+            holder_argv = self._view_argv(
+                network=True, isolate_users=staged, bind_devices=True, session=True
+            )
             socket_path = self._credentials_dir() / "namespace.sock"
             host_argv = [
                 sys.executable,
@@ -1355,7 +1352,7 @@ class Workspace:
             raise
 
     async def _route_out(self, routes: bytes) -> None:
-        """Have the bridge listen on *routes*, one line of its stdin."""
+        """Have the bridge listen on ``routes``, one line of its stdin."""
         assert self._bridge is not None
         self._bridge.stdin.write(routes)
         await self._bridge.stdin.drain()
@@ -1398,24 +1395,57 @@ class Workspace:
             self._egress.stop()
             self._egress = None
         sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
-        if sandbox is None or sandbox.returncode is not None:
+        if sandbox is not None and sandbox.returncode is None:
+            sandbox.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(sandbox.wait(), 10.0)
+        if self._cred_dir is not None:
+            self._remove_shared_tmpfs()
+
+    def _remove_shared_tmpfs(self) -> None:
+        """Delete the sandbox's shared tmpfs directories, whatever modes the agent left.
+
+        A rootless server owns what the sandbox wrote but cannot delete from a directory
+        it may not write, so every directory is made owner-writable first. Only called
+        once the sandbox's processes are gone, so nothing swaps a directory for a link.
+        """
+        root = self._credentials_dir() / "tmpfs"
+        if not root.exists():
             return
-        sandbox.kill()
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(sandbox.wait(), 10.0)
+        root.chmod(0o700)
+        for directory, subdirectories, _ in os.walk(root):
+            for name in subdirectories:
+                path = Path(directory, name)
+                if not path.is_symlink():
+                    path.chmod(0o700)
+        shutil.rmtree(root)
+
+    def _shared_tmpfs(self, mount: Mount) -> Path:
+        """The host directory backing ``mount`` in every session view of the sandbox."""
+        return self._credentials_dir() / "tmpfs" / mount.dst.strip("/").replace("/", "-")
+
+    def _create_shared_tmpfs(self) -> None:
+        """Fresh, empty directories for the sandbox's tmpfs mounts, with their declared modes.
+
+        A ``credentials_dir`` the caller configured can hold a previous process's.
+        """
+        self._remove_shared_tmpfs()
+        for mount in self._system_mounts:
+            if mount.kind == "tmpfs":
+                directory = self._shared_tmpfs(mount)
+                directory.mkdir(parents=True)
+                directory.chmod(0o755 if mount.mode is None else mount.mode)
 
     async def terminate_sessions(self) -> None:
         """Terminate session-owned processes while preserving the workload."""
         if self._namespace is not None:
             await self._namespace.terminate_sessions()
 
-    # ─── ssh server internals ─────────────────────────────────────────
-
     def _credentials_dir(self) -> Path:
-        """Key material lives outside the served root: the root is the agent's
-        shell cwd and diff-tracking surface, so secrets don't belong in it.
+        """The private directory holding the workspace's keys, outside the served root.
 
-        ``mkdtemp`` creates a fresh 0700 directory with an unpredictable name
+        The root is the agent's shell cwd and diff-tracking surface, so secrets
+        don't belong in it. ``mkdtemp`` creates a fresh 0700 directory with an unpredictable name
         atomically, so a local user can't pre-place a symlink at the path to
         redirect the private keys the server writes here. A caller that masks
         part of the filesystem from sessions should pass ``credentials_dir``
@@ -1428,19 +1458,20 @@ class Workspace:
                 self._configured_cred_dir.chmod(0o700)
                 self._cred_dir = self._configured_cred_dir
             else:
-                # Named for what it holds, not for what put it there.
+                # No ``hud`` in the name: a session that can list the temp directory
+                # should not learn what runs it.
                 self._cred_dir = Path(tempfile.mkdtemp(prefix="ssh-"))
         return self._cred_dir
 
     def _write_hosts(self) -> Path:
-        """The workspace's own ``/etc/hosts``: the substrate's, plus its peers.
+        """The workspace's own ``/etc/hosts``: the host's, plus its peers.
 
         It is bound read-only over ``/etc/hosts`` inside the sandbox, where
         every session resolves names from it. Callers which protect credentials
         at a recognizable path can place this non-secret file separately so
         process arguments do not disclose that path.
         """
-        substrate = Path("/etc/hosts")
+        hosts_file = Path("/etc/hosts")
         local_aliases = {*self.local_aliases, socket.gethostname()}
         peer_names = {peer.name for peer in self.peers}
         if collision := local_aliases & peer_names:
@@ -1450,7 +1481,7 @@ class Workspace:
         path.write_text(
             hosts_text(
                 self.addresses,
-                substrate.read_text() if substrate.is_file() else "",
+                hosts_file.read_text() if hosts_file.is_file() else "",
                 local_aliases=sorted(local_aliases),
             ),
             encoding="utf-8",
@@ -1519,6 +1550,114 @@ class Workspace:
             for peer in (self._process_connections[name],)
         )
 
+    async def _run_windows_session(
+        self, process: asyncssh.SSHServerProcess[bytes], env: dict[str, str]
+    ) -> None:
+        """Run a session command on Windows in a worker thread, inside a job object."""
+        # On Windows, asyncio.create_subprocess_exec uses the ProactorEventLoop's
+        # IOCP machinery for process-exit notification.  When the IOCP event fires
+        # after the subprocess coroutine has already returned (a race that can
+        # happen even when communicate() calls wait() internally), it corrupts
+        # asyncssh's IOCP state and permanently breaks the SSH session.
+        # Running a blocking subprocess in a worker thread sidesteps IOCP
+        # entirely: the blocking WaitForSingleObject in the worker thread drains
+        # the process exit before the Future resolves, leaving no pending events.
+        #
+        # The command is split into an argv with shlex.split. cmd.exe launched
+        # via CreateProcess does NOT search the CWD for batch files (only PATH),
+        # so relative .bat paths are resolved to absolute below.
+        if process.command:
+            try:
+                win_argv: list[str] = shlex.split(process.command, posix=False)
+            except ValueError:
+                win_argv = ["cmd.exe", "/c", process.command]
+            if win_argv and win_argv[0].lower() in ("cmd", "cmd.exe"):
+                win_argv = [
+                    str(self.root / arg)
+                    if (arg.lower().endswith(".bat") and not os.path.isabs(arg))
+                    else arg
+                    for arg in win_argv
+                ]
+        else:
+            win_argv = ["cmd.exe"]
+
+        def spawn() -> tuple[subprocess.Popen[bytes], _WindowsJob]:
+            job = _WindowsJob()
+            try:
+                child = subprocess.Popen(
+                    win_argv,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=str(self.root),
+                    env=env,
+                    creationflags=_CREATE_SUSPENDED,
+                )
+                try:
+                    job.assign(child)
+                    job.resume(child)
+                except BaseException:
+                    child.kill()
+                    child.wait()
+                    raise
+            except BaseException:
+                job.close()
+                raise
+            return child, job
+
+        try:
+            loop = asyncio.get_running_loop()
+            child, job = await loop.run_in_executor(None, spawn)
+        except FileNotFoundError as exc:
+            process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
+            process.exit(127)
+            return
+        except OSError as exc:
+            process.stderr.write(f"workspace: cannot own shell process tree: {exc}\n".encode())
+            process.exit(1)
+            return
+
+        communicate_task = asyncio.create_task(asyncio.to_thread(child.communicate))
+        channel_closed_task = asyncio.create_task(process.channel.wait_closed())
+        try:
+            done, _ = await asyncio.wait(
+                (communicate_task, channel_closed_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if channel_closed_task in done and not communicate_task.done():
+                return
+            stdout, stderr = await communicate_task
+        finally:
+            if not communicate_task.done():
+                job.close()
+                try:
+                    async with asyncio.timeout(_PROCESS_CLOSE_TIMEOUT_S):
+                        await asyncio.shield(communicate_task)
+                except TimeoutError:
+                    for pipe in (child.stdout, child.stderr):
+                        if pipe is not None:
+                            with contextlib.suppress(OSError):
+                                pipe.close()
+                    communicate_task.cancel()
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(
+                            asyncio.gather(communicate_task, return_exceptions=True),
+                            _PROCESS_CLOSE_TIMEOUT_S,
+                        )
+            else:
+                job.close()
+            channel_closed_task.cancel()
+            await asyncio.gather(channel_closed_task, return_exceptions=True)
+
+        if process.channel.is_closing():
+            return
+        if stdout:
+            process.stdout.write(stdout)
+        if stderr:
+            process.stderr.write(stderr)
+        assert child.returncode is not None
+        process.exit(child.returncode)
+
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
         guard: ProcessConnectionGuard | None = None
         mount_view: Literal["workspace"] | list[str] = "workspace"
@@ -1569,6 +1708,7 @@ class Workspace:
                         *self.mounts,
                         Mount("ro", src=str(guard.directory), dst=sandbox_directory),
                     ),
+                    session=True,
                 )
             else:
                 # The session env reaches the shell only after any drop: an LD_PRELOAD
@@ -1597,115 +1737,7 @@ class Workspace:
             return
 
         if sys.platform == "win32":
-            # On Windows, asyncio.create_subprocess_exec uses the ProactorEventLoop's
-            # IOCP machinery for process-exit notification.  When the IOCP event fires
-            # after the subprocess coroutine has already returned (a race that can
-            # happen even when communicate() calls wait() internally), it corrupts
-            # asyncssh's IOCP state and permanently breaks the SSH session.
-            # Running a blocking subprocess in a worker thread sidesteps IOCP
-            # entirely: the blocking WaitForSingleObject in the worker thread drains
-            # the process exit before the Future resolves, leaving no pending events.
-            #
-            # The command is split into an argv with shlex.split. cmd.exe launched
-            # via CreateProcess does NOT search the CWD for batch files (only PATH),
-            # so relative .bat paths are resolved to absolute below.
-            import shlex
-            import subprocess as _subprocess
-
-            if process.command:
-                try:
-                    win_argv: list[str] = shlex.split(process.command, posix=False)
-                except ValueError:
-                    win_argv = ["cmd.exe", "/c", process.command]
-                # cmd.exe launched via CreateProcess/subprocess does NOT search
-                # the CWD for batch files — only directories on PATH. Resolve
-                # relative .bat paths to absolute so cmd.exe finds them.
-                if win_argv and win_argv[0].lower() in ("cmd", "cmd.exe"):
-                    win_argv = [
-                        str(self.root / arg)
-                        if (arg.lower().endswith(".bat") and not os.path.isabs(arg))
-                        else arg
-                        for arg in win_argv
-                    ]
-            else:
-                win_argv = ["cmd.exe"]
-
-            def spawn() -> tuple[_subprocess.Popen[bytes], _WindowsJob]:
-                job = _WindowsJob()
-                try:
-                    child = _subprocess.Popen(
-                        win_argv,
-                        stdin=_subprocess.DEVNULL,
-                        stdout=_subprocess.PIPE,
-                        stderr=_subprocess.PIPE,
-                        cwd=str(self.root),
-                        env=proc_env,
-                        creationflags=_CREATE_SUSPENDED,
-                    )
-                    try:
-                        job.assign(child)
-                        job.resume(child)
-                    except BaseException:
-                        child.kill()
-                        child.wait()
-                        raise
-                except BaseException:
-                    job.close()
-                    raise
-                return child, job
-
-            try:
-                loop = asyncio.get_running_loop()
-                child, job = await loop.run_in_executor(None, spawn)
-            except FileNotFoundError as exc:
-                process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
-                process.exit(127)
-                return
-            except OSError as exc:
-                process.stderr.write(f"workspace: cannot own shell process tree: {exc}\n".encode())
-                process.exit(1)
-                return
-
-            communicate_task = asyncio.create_task(asyncio.to_thread(child.communicate))
-            channel_closed_task = asyncio.create_task(process.channel.wait_closed())
-            try:
-                done, _ = await asyncio.wait(
-                    (communicate_task, channel_closed_task),
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if channel_closed_task in done and not communicate_task.done():
-                    return
-                stdout, stderr = await communicate_task
-            finally:
-                if not communicate_task.done():
-                    job.close()
-                    try:
-                        async with asyncio.timeout(_PROCESS_CLOSE_TIMEOUT_S):
-                            await asyncio.shield(communicate_task)
-                    except TimeoutError:
-                        for pipe in (child.stdout, child.stderr):
-                            if pipe is not None:
-                                with contextlib.suppress(OSError):
-                                    pipe.close()
-                        communicate_task.cancel()
-                        with contextlib.suppress(TimeoutError):
-                            await asyncio.wait_for(
-                                asyncio.gather(communicate_task, return_exceptions=True),
-                                _PROCESS_CLOSE_TIMEOUT_S,
-                            )
-                else:
-                    job.close()
-                channel_closed_task.cancel()
-                await asyncio.gather(channel_closed_task, return_exceptions=True)
-
-            if process.channel.is_closing():
-                return
-            if stdout:
-                process.stdout.write(stdout)
-            if stderr:
-                process.stderr.write(stderr)
-            assert child.returncode is not None
-            process.exit(child.returncode)
+            await self._run_windows_session(process, proc_env)
             return
 
         pty_pair = _open_pty(process) if wants_tty and pid is None else None
@@ -1892,12 +1924,3 @@ class Workspace:
             return
         assert returncode is not None
         process.exit(returncode)
-
-
-__all__ = [
-    "DEFAULT_SYSTEM_MOUNTS",
-    "Mount",
-    "MountKind",
-    "Peer",
-    "Workspace",
-]

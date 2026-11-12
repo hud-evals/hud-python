@@ -33,6 +33,9 @@ if TYPE_CHECKING:
 
 
 _COMPOSE_VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Applied to every HUD environment, and default-allow on purpose: Workspace's bwrap
+# sessions need the namespace and mount syscalls; unrelated kernel interfaces stay denied.
+SECCOMP_PROFILE = Path(__file__).parent / "docker-seccomp.json"
 
 
 class ComposeUnboundVariableError(ValueError):
@@ -293,7 +296,7 @@ class ComposeConfig(BaseModel):
     networks: dict[str, dict[str, Any] | None] = Field(default_factory=dict)
 
     def network_owner(self, service: str) -> str:
-        """Service whose network namespace and published ports *service* uses."""
+        """Service whose network namespace and published ports ``service`` uses."""
         seen: set[str] = set()
         current = service
         while True:
@@ -670,13 +673,3 @@ class ComposeProject(BaseModel):
                 ports=ports,
                 archive=archive_path,
             )
-
-
-__all__ = [
-    "ComposeConfig",
-    "ComposeHealthcheck",
-    "ComposePort",
-    "ComposeProject",
-    "ComposeProjectRef",
-    "ComposeService",
-]

@@ -25,7 +25,7 @@ name; other Compose-like filenames remain ordinary environment files.
 
 ```python
 from hud.integrations import harbor
-from hud.eval import DockerRuntime
+from hud.runtime import DockerRuntime
 
 result = harbor.adapt("./terminal-bench")
 job = await result.taskset.run(agent, runtime=DockerRuntime())

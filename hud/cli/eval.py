@@ -1,7 +1,4 @@
-"""``hud eval`` — run an agent over a taskset and report the graded job.
-
-Config precedence: CLI arguments > ``.hud_eval.toml`` > defaults.
-"""
+"""``hud eval`` — run an agent over a taskset; CLI arguments override ``.hud_eval.toml``."""
 
 from __future__ import annotations
 
@@ -20,16 +17,14 @@ from rich import box
 from rich.table import Table
 
 from hud.cli import CLI, CliError, Result, parse_key_value
-from hud.eval import (
-    DaytonaRuntime,
-    DockerRuntime,
-    HostedRuntime,
-    HUDRuntime,
-    ModalRuntime,
-    Runtime,
-    SubprocessRuntime,
-    Taskset,
-)
+from hud.eval.taskset import Taskset
+from hud.runtime.core import Runtime
+from hud.runtime.daytona import DaytonaRuntime
+from hud.runtime.docker import DockerRuntime
+from hud.runtime.hosted import HostedRuntime
+from hud.runtime.hud import HUDRuntime
+from hud.runtime.local import SubprocessRuntime
+from hud.runtime.modal import ModalRuntime
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
@@ -40,7 +35,8 @@ from hud.utils.process import run_until_terminated
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
-    from hud.eval import Provider, Task
+    from hud.eval.task import Task
+    from hud.runtime.core import Provider
     from hud.utils.gateway import GatewayModelInfo
 
 hud_console = HUDConsole()
@@ -51,7 +47,7 @@ _CONFIG_PATH = Path(".hud_eval.toml")
 class Placement(StrEnum):
     """Named ``--runtime`` choices; a ``tcp://`` url attaches to a served env instead.
 
-    ``LOCAL`` is composed per row in the command; every other name is a provider
+    ``LOCAL`` starts each row in Docker or a subprocess; the other names are providers
     each row's ``runtime_config`` is handed to as-is.
     """
 
@@ -99,10 +95,6 @@ class EvalConfig(BaseModel):
     auto_respond: bool = False
     group_size: int = 1
     gateway: bool = False
-    #: ``LOCAL`` spawns each row's env (Docker for container rows, a subprocess
-    #: loading the task source otherwise); other names hand rows to that
-    #: provider; a ``tcp://`` url attaches to an already-served env. ``None``
-    #: infers from the source: a file on disk runs locally, a platform taskset hosted.
     runtime: Placement | TcpUrl | None = None
     agent_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
@@ -142,18 +134,17 @@ def eval_command(
     source: str | None = typer.Argument(None, help="Tasks file (.py, .json) or platform taskset"),
     agent: str | None = typer.Argument(
         None,
-        help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, openai, gemini, openai_compatible)",  # noqa: E501
+        help=f"Model name (e.g. claude-sonnet-4-6) or agent type ({', '.join(AgentType)})",
     ),
-    all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
+    all: bool = typer.Option(False, "--all", help="Run every task instead of only the first."),
     full: bool = typer.Option(
         False,
         "--full",
-        help="Run the entire dataset. Shortcut for --all --auto-respond --max-steps 100",
+        help="Run every task with --auto-respond and --max-steps 100 (an explicit --max-steps "
+        "wins).",
     ),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
-    config: list[str] | None = typer.Option(  # noqa: B008
-        None, "--config", "-c", help="Agent config: key=value"
-    ),
+    config: list[str] | None = typer.Option(None, "--config", "-c", help="Agent config: key=value"),
     max_concurrent: int | None = typer.Option(
         None, "--max-concurrent", help="Max concurrent tasks"
     ),
@@ -196,7 +187,7 @@ def eval_command(
         help="Run the whole rollout on the HUD platform (same as --runtime hosted)",
     ),
 ) -> dict[str, Any] | Result:
-    """Run evaluation on datasets or individual tasks with agents.
+    """Run an agent over a tasks file or a platform taskset.
 
     A tasks file (tasks.py, a directory, or JSON/JSONL beside its env source) runs
     locally, each rollout in a fresh subprocess; a platform taskset runs hosted.
@@ -365,7 +356,6 @@ def eval_command(
 
     agent_type, source = cfg.agent_type, cfg.source
     assert agent_type is not None and source is not None
-    # A file on disk spawns locally; a platform taskset runs on the platform.
     if cfg.runtime is None:
         is_file = Path(source).exists()
         cfg = cfg.merge({"runtime": Placement.LOCAL if is_file else Placement.HOSTED})
@@ -441,7 +431,7 @@ def eval_command(
                 config = task.runtime_config
                 if config and (config.image or config.compose):
                     return docker(task)
-                if task._env is not None:
+                if task.environment is not None:
                     return SubprocessRuntime(source_path)(task)
                 return beside(task)
 
@@ -459,7 +449,6 @@ def eval_command(
         case _:
             assert_never(cfg.runtime)
 
-    # The agent's config kwargs: its TOML section, then --model on top.
     agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
     if cfg.model:
         agent_kwargs["model"] = cfg.model
@@ -533,57 +522,61 @@ def eval_command(
         job_logger.setLevel(previous_level)
         job_logger.propagate = previous_propagate
     elapsed = time.monotonic() - started
+    task_id_by_slug = {task.slug: task.id for task in taskset}
 
     errors = set(map(id, job.errors))
-    if job.runs:
+    if job.traces:
         hud_console.print(f"\n[bold]'{cfg.source}' Results[/bold]")
-        hud_console.print(f"  [dim]Runs:[/dim] {len(job.runs)}")
+        hud_console.print(f"  [dim]Runs:[/dim] {len(job.traces)}")
         hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s")
         hud_console.print(f"  [dim]Mean reward:[/dim] [green]{job.reward:.3f}[/green]")
         if errors:
             hud_console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
-        failed_mid_run = sum(run.trace.is_error and not run.grade.is_error for run in job.runs)
+        failed_mid_run = sum(trace.is_error and not trace.grade.is_error for trace in job.traces)
         if failed_mid_run:
             hud_console.print(
                 f"  [dim]Failed mid-run, graded:[/dim] [yellow]{failed_mid_run}[/yellow]"
             )
-        if len(job.runs) <= 50:
+        if len(job.traces) <= 50:
             details = Table(title="Details", show_header=True, header_style="bold")
             details.add_column("#", style="dim", justify="right", width=4)
             details.add_column("Prompt", style="dim", max_width=35)
             details.add_column("Answer", style="dim", max_width=35)
             details.add_column("Reward", justify="right", style="green", width=8)
-            for index, run in enumerate(job.runs):
+            for index, trace in enumerate(job.traces):
                 cells = []
-                for text in (run.prompt, run.trace.content):
+                for text in (trace.prompt_text, trace.content):
                     flat = str(text).replace("\n", " ").strip() if text else ""
                     cells.append((flat[:33] + ".." if len(flat) > 35 else flat) or "—")
                 details.add_row(
                     str(index),
                     *cells,
-                    "[red]error[/red]" if id(run) in errors else f"{run.reward:.3f}",
+                    "[red]error[/red]" if id(trace) in errors else f"{trace.reward:.3f}",
                 )
             hud_console.print(details)
         hud_console.print()
 
+    runs = []
+    for trace in job.traces:
+        assert trace.slug is not None  # a rollout's trace carries its task's slug
+        runs.append(
+            {
+                "task_id": task_id_by_slug[trace.slug],
+                "slug": trace.slug,
+                "reward": trace.reward,
+                "is_error": id(trace) in errors,
+                "trace_error": trace.error if trace.is_error else None,
+                "trace_id": trace.trace_id,
+            }
+        )
     result = {
         "job_id": job.id,
         "source": cfg.source,
-        "run_count": len(job.runs),
+        "run_count": len(job.traces),
         "mean_reward": job.reward,
         "error_count": len(errors),
         "elapsed_seconds": elapsed,
-        "runs": [
-            {
-                "task_id": run.task_id,
-                "slug": run.slug,
-                "reward": run.reward,
-                "is_error": id(run) in errors,
-                "trace_error": run.trace.error if run.trace.is_error else None,
-                "trace_id": run.trace_id,
-            }
-            for run in job.runs
-        ],
+        "runs": runs,
     }
     # Errored runs among graded ones still leave a measurement; none graded leaves nothing.
-    return Result(result) if len(errors) == len(job.runs) else result
+    return Result(result) if len(errors) == len(job.traces) else result

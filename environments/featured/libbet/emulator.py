@@ -76,14 +76,11 @@ class GameBoyEmulator:
         self.pyboy: PyBoy | None = None
         self.render = render
 
-    # -- lifecycle ----------------------------------------------------------
     def load_game(self, rom_path: str, boot_frames: int = 600) -> None:
-        """Boot a ROM and run past the BIOS/boot logo.
+        """Boot the ``.gb``/``.gbc`` ROM at ``rom_path`` and run past the boot logo.
 
-        Args:
-            rom_path: Path to a ``.gb`` / ``.gbc`` ROM.
-            boot_frames: Number of frames to tick after boot to clear the
-                Nintendo logo (and, for some titles, the attract loop).
+        ``boot_frames`` is how many frames to tick after boot to clear the Nintendo logo
+        (and, for some titles, the attract loop).
         """
         if not os.path.exists(rom_path):
             raise FileNotFoundError(
@@ -110,7 +107,6 @@ class GameBoyEmulator:
             raise RuntimeError("No ROM loaded — call load_game() first.")
         return self.pyboy
 
-    # -- stepping -----------------------------------------------------------
     def step(self, action: dict[str, bool], frames: int = 15) -> None:
         """Hold the pressed buttons for ``frames`` frames, then advance.
 
@@ -131,7 +127,6 @@ class GameBoyEmulator:
         pb = self._require()
         pb.tick(max(1, frames), render=True, sound=False)
 
-    # -- observation --------------------------------------------------------
     def get_screen(self) -> Image.Image:
         """Current frame as an RGB PIL image (160x144)."""
         pb = self._require()
@@ -154,7 +149,6 @@ class GameBoyEmulator:
         cells = pb.memory[sl] if bank is None else pb.memory[bank, sl]
         return [int(b) for b in cells]
 
-    # -- save states (fast reset / skip-intro) ------------------------------
     def save_state(self, path: str) -> None:
         pb = self._require()
         with open(path, "wb") as f:
@@ -166,7 +160,6 @@ class GameBoyEmulator:
             pb.load_state(f)
         pb.tick(30, render=True, sound=False)  # unstick after a state restore
 
-    # -- preload (menu/difficulty setup) ------------------------------------
     def pre_load_file(self, preload_path: str) -> None:
         """Execute a VideoGameBench-style preload script.
 

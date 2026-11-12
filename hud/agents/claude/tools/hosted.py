@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from anthropic.types.beta import (
     BetaToolSearchToolBm25_20251119Param,
@@ -12,10 +12,10 @@ from anthropic.types.beta import (
     BetaWebSearchTool20250305Param,
 )
 
-if TYPE_CHECKING:
-    BetaUserLocationParam = Any
+from hud.agents.tools.hosted import HostedTool
 
-from hud.agents.tools import HostedTool
+if TYPE_CHECKING:
+    from anthropic.types.beta import BetaUserLocationParam
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -25,8 +25,6 @@ class ClaudeHostedTool(HostedTool[BetaToolUnionParam]):
 
 @dataclass(frozen=True, kw_only=True)
 class ClaudeWebSearchTool(ClaudeHostedTool):
-    """Claude web search."""
-
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
     blocked_domains: list[str] | None = None
@@ -51,8 +49,6 @@ class ClaudeWebSearchTool(ClaudeHostedTool):
 
 @dataclass(frozen=True, kw_only=True)
 class ClaudeWebFetchTool(ClaudeHostedTool):
-    """Claude web fetch."""
-
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
     blocked_domains: list[str] | None = None

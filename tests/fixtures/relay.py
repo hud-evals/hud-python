@@ -1,11 +1,11 @@
 """A TCP relay in front of one upstream that can sever, refuse and stall connections.
 
 Clients that reconnect (``SSHClient``, the control-channel tunnels) are driven
-through :func:`relay` to fake an unreliable network between them and a real
-server: :meth:`FlakyRelay.sever` drops every relayed connection,
-:meth:`FlakyRelay.refuse` closes the next connections as soon as they are
-accepted, and :meth:`FlakyRelay.stall` holds new connections without
-forwarding them until :meth:`FlakyRelay.release`.
+through ``relay`` to fake an unreliable network between them and a real
+server: ``FlakyRelay.sever`` drops every relayed connection,
+``FlakyRelay.refuse`` closes the next connections as soon as they are
+accepted, and ``FlakyRelay.stall`` holds new connections without
+forwarding them until ``FlakyRelay.release``.
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ if TYPE_CHECKING:
 
 
 class FlakyRelay:
-    """The relay's controls. Use :func:`relay`."""
+    """The relay's controls. Use ``relay``."""
 
     def __init__(self, upstream: tuple[str, int]) -> None:
         self.upstream = upstream
         self.port = 0
-        #: Connections accepted so far, refused and stalled ones included.
+        # Connections accepted so far, refused and stalled ones included.
         self.accepted = 0
         self._refusals = 0
         self._released = asyncio.Event()
@@ -42,7 +42,7 @@ class FlakyRelay:
 
     @property
     def stalled(self) -> int:
-        """Connections waiting for :meth:`release`."""
+        """Connections waiting for ``release``."""
         return self._stalled
 
     def sever(self) -> None:
@@ -55,7 +55,7 @@ class FlakyRelay:
         self._refusals = count
 
     def stall(self) -> None:
-        """Hold new connections open without forwarding them until :meth:`release`."""
+        """Hold new connections open without forwarding them until ``release``."""
         self._released.clear()
 
     def release(self) -> None:
@@ -125,7 +125,7 @@ async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
 
 @asynccontextmanager
 async def relay(host: str, port: int) -> AsyncGenerator[FlakyRelay]:
-    """Serve a :class:`FlakyRelay` to ``host:port`` on a loopback port for the block."""
+    """Serve a ``FlakyRelay`` to ``host:port`` on a loopback port for the block."""
     controls = FlakyRelay((host, port))
     server = await asyncio.start_server(controls.handle, "127.0.0.1", 0)
     controls.port = server.sockets[0].getsockname()[1]

@@ -1,4 +1,4 @@
-"""Shared env helpers: JSON-RPC framing + byte splicing for the control channel."""
+"""JSON-RPC framing and byte splicing shared by the environment's servers and clients."""
 
 from __future__ import annotations
 
@@ -20,9 +20,6 @@ class InvalidFrameError(ValueError):
 
 class FrameTooLargeError(ValueError):
     """An encoded JSON-RPC frame exceeds its channel's byte limit."""
-
-
-# ─── JSON-RPC 2.0 framing ───
 
 
 def encode_frame(msg: dict[str, Any], *, max_bytes: int | None = None) -> bytes:
@@ -98,14 +95,9 @@ def error(msg_id: int | str | None, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}
 
 
-# ─── byte splicing (tunneled capability connections) ───
-
-
 async def _pump(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    # Resets/aborts are a normal way for tunneled streams to end (an SSH
-    # client hanging up, a container dying); they end the pump, not the world.
-    # A reset carries no EOF, so close the far side instead: otherwise it
-    # waits for bytes that will never come.
+    # Resets are a normal end for tunneled streams (an SSH client hanging up, a container
+    # dying). A reset carries no EOF, so close the far side or it waits forever.
     try:
         while data := await reader.read(65536):
             writer.write(data)
@@ -138,9 +130,8 @@ async def splice(
     try:
         await asyncio.gather(_pump(a[0], b[1]), _pump(b[0], a[1]))
     except GeneratorExit:
-        # Force-close: the task was abandoned (loop shutdown threw GeneratorExit
-        # into us). Awaiting here would raise "coroutine ignored GeneratorExit",
-        # so close synchronously and get out.
+        # Abandoned at loop shutdown: awaiting here would raise "coroutine ignored
+        # GeneratorExit", so close synchronously.
         for writer in (a[1], b[1]):
             writer.close()
         raise
@@ -159,6 +150,3 @@ async def forward_output(
     while chunk := await reader.read(65536):
         writer.write(chunk)
         await writer.drain()
-
-
-__all__ = ["encode_frame", "error", "forward_output", "read_frame", "reply", "send_frame", "splice"]

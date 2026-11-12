@@ -49,7 +49,8 @@ docker run -p 8765:8765 -e LIBERO_CONTROL=delta robot-libero
 ```
 
 The image installs the released SDK, `hud[robot]==0.6.22`, pinned in
-`Dockerfile.hud` and `pyproject.toml`.
+`Dockerfile.hud`. The tests run against the SDK in this repository, so a
+rollout from this checkout reaches a server on the released SDK.
 
 ## Tests
 

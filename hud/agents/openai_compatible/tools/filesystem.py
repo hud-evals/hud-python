@@ -7,8 +7,8 @@ import posixpath
 import shlex
 from typing import Any, ClassVar
 
-from hud.agents.tools import SSHTool
 from hud.agents.tools.base import AgentToolSpec, result_text, tool_err
+from hud.agents.tools.ssh import SSHTool
 from hud.types import ImageContent, TextContent, ToolResult
 
 DEFAULT_READ_LIMIT = 2000
@@ -326,6 +326,3 @@ def _read_offset(value: Any) -> int:
     if value is None or value == 0:
         return 1
     return _positive_int(value, default=1, name="offset")
-
-
-__all__ = ["BashTool", "EditTool", "GlobTool", "GrepTool", "ReadTool", "WriteTool"]

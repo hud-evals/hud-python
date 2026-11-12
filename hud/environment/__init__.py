@@ -1,16 +1,9 @@
-"""HUD environment authoring: declarations and the wire protocol that serves them.
+"""HUD environment authoring: workspaces, mounts, typed answers, and ``load_environment``.
 
-:class:`Environment` is the declaration (capabilities + tasks behind the wire
-protocol); ``load_environment`` resolves an env
-reference (source path, or dotted module attr/factory);
-:mod:`~hud.environment.server` is the serving entry point substrates run.
-How a substrate comes up — placement — belongs to the eval engine: see
-:mod:`hud.eval.runtime` (:class:`~hud.eval.runtime.Runtime`, the ``Provider``
-contract, ``LocalRuntime``, ``DockerRuntime``, ``HUDRuntime``).
-
-The env-side robot runtime (bridges, action providers, sim runners, contract
-tooling, recording glue) lives in :mod:`hud.environment.robot`; import it
-directly — it pulls optional dependencies (numpy/msgpack, the ``robot`` extra).
+``Environment`` itself is exported from ``hud``; ``hud.environment.server`` is the
+serving entry point hosts run. The robot runtime (``RobotBridge``,
+``RobotEndpoint``, ``DirectControl``, ``wrap``) lives in ``hud.environment.robot``;
+import it directly, since it needs the ``robot`` extra.
 """
 
 from __future__ import annotations
@@ -19,13 +12,10 @@ import importlib
 from pathlib import Path
 from typing import Any
 
-from hud.capabilities import Capability
 from hud.utils.modules import iter_modules
 
-from .arguments import DataFileArg, DataFileRef, DataFilesArg, GradingArg, PromptArg
-from .egress import Peer, WorkspaceRoute
 from .env import Answer, Environment
-from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
+from .workspace import Mount, Workspace
 
 
 def load_environment(
@@ -34,15 +24,13 @@ def load_environment(
     name: str | None = None,
     args: dict[str, Any] | None = None,
 ) -> Environment:
-    """Resolve an environment reference to the one :class:`Environment` it names.
+    """Resolve an environment reference to the one ``Environment`` it names.
 
-    A source path (``.py`` file or directory) is scanned for ``Environment``
-    instances and environments bound to exported tasks; *name* selects among
-    them, matching the module attribute or ``Environment.name``.
-    A dotted importable module reads attribute *name*
-    (default ``env``): an ``Environment`` directly, or a factory called with
-    *args* to build one — how programmatic envs (integrations, adapted
-    images) are served without a source file. Raises when nothing resolves.
+    A source path (a ``.py`` file or directory) is scanned for ``Environment``
+    instances and for environments bound to exported tasks; ``name`` selects among
+    them by module attribute or ``Environment.name``. A dotted module name reads
+    attribute ``name`` (default ``env``): an ``Environment``, or a factory called
+    with ``args``. Raises when nothing resolves.
     """
     # Three forms of reference, decided by what the target *is* rather than by
     # importability — every directory in the working tree is an importable
@@ -55,7 +43,7 @@ def load_environment(
     #                    name with nothing on disk (factories, adapted images)
     path = Path(target)
     if not path.exists() and path.suffix != ".py" and Path(f"{target}.py").exists():
-        path = Path(f"{target}.py")  # bare dev references: 'env' means env.py
+        path = Path(f"{target}.py")
 
     package_attribute = (
         (name is not None or bool(args))
@@ -65,7 +53,7 @@ def load_environment(
     )
     if path.exists() and not package_attribute:
         # Avoid the environment -> eval -> runtime import cycle.
-        from hud.eval.taskset import Taskset
+        from hud.eval.taskset import module_tasks
 
         if args:
             raise ValueError(f"args= applies to factory targets, not source path {target}")
@@ -77,11 +65,11 @@ def load_environment(
             if isinstance(env, Environment) and (name is None or name in (attr, env.name))
         }
         for module in modules:
-            for task in Taskset._scan_tasks(module):
+            for task in module_tasks(module):
                 for row in (task, task.verifier):
                     if (
                         row is not None
-                        and (env := row._env) is not None
+                        and (env := row.environment) is not None
                         and (name is None or name == env.name)
                     ):
                         matched[id(env)] = env
@@ -101,19 +89,8 @@ def load_environment(
 
 
 __all__ = [
-    "DEFAULT_SYSTEM_MOUNTS",
     "Answer",
-    "Capability",
-    "DataFileArg",
-    "DataFileRef",
-    "DataFilesArg",
-    "Environment",
-    "GradingArg",
     "Mount",
-    "MountKind",
-    "Peer",
-    "PromptArg",
     "Workspace",
-    "WorkspaceRoute",
     "load_environment",
 ]

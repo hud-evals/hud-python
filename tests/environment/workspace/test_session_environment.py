@@ -14,13 +14,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+from hud import Environment, Task
 from hud.capabilities import Connection, SSHClient
 from hud.clients import connect
-from hud.environment import Environment
 from hud.environment.process_guard import process_connections_supported
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
+from tests.conftest import SANDBOX
 
-from .conftest import SANDBOX, shell
+from .conftest import shell
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
