@@ -24,7 +24,7 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com/) sandbox per rollout | Cloud scale, no infra to manage |
 | `DaytonaRuntime("my-env")` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout | Cloud scale on Daytona |
 | `Runtime("tcp://host:8765")` | A host you already started | Attaching to a long-lived container or sandbox you own |
-| `Shared(provider, width=N)` | One host from `provider`, shared by up to N concurrent connections | Multi-agent evals - agents that share, compete, or coordinate over one live environment |
+| `Shared(inner, width=N)` | One host from `inner` per environment and runtime config, shared by up to N concurrent connections | Multi-agent evals - agents that share, compete, or coordinate over one live environment |
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
 | `HostedRuntime()` | The whole rollout managed by HUD | Agent and env execute remotely together |
 
@@ -162,13 +162,16 @@ and ports.
 ### `DockerRuntime`
 
 ```python
-DockerRuntime(image=None, *, port=8765, run_args=(), runtime_config=None)
+DockerRuntime(image=None, *, port=8765, run_args=(), bind_mounts=(), compose_service_socket=None, runtime_config=None, env_vars=None)
 ```
 
 - **`image`** - image name to run; shorthand for `runtime_config.image`.
 - **`port`** - port the image's CMD serves inside the container (the scaffolded `Dockerfile.hud` serves `8765`).
-- **`run_args`** - extra `docker run` flags, e.g. `["--gpus", "all"]` or `["-e", "KEY=VAL"]`.
+- **`run_args`** - extra `docker run` flags, e.g. `["--gpus", "all"]` or `["-e", "KEY=VAL"]`. Image environments only.
+- **`bind_mounts`** - `DockerBindMount(source, target, read_only=True)` host paths to mount into the environment (the `main` service of a Compose environment).
+- **`compose_service_socket`** - the host Docker socket to hand a Compose environment that declares `service_access`. Defaults to the local daemon's socket; required when the daemon is remote.
 - **`runtime_config`** - a `RuntimeConfig` (image or Compose file, resources) for finer control.
+- **`env_vars`** - environment variables set in the environment (the `main` service of a Compose environment).
 
 For Compose environments, the service named `main` must serve HUD's control
 channel on `port`. `DockerRuntime` starts the project and publishes that
@@ -280,14 +283,16 @@ Modal implement the transfer directly on their provisioned endpoint.
 ### `Shared`
 
 ```python
-Shared(provider, *, width)
+Shared(inner, *, width)
 ```
 
-- **`provider`** - the `Provider` to provision once, e.g. `DockerRuntime("my-env")`.
-- **`width`** - how many concurrent connections that one host accepts.
+- **`inner`** - the `Provider` that boots each shared host, e.g. `DockerRuntime("my-env")`.
+- **`width`** - how many concurrent connections each host accepts.
 
-A lease pool over one host: it boots through `provider` on the first lease and lives for the
-enclosing `async with` scope, so every rollout in that scope is handed the same address - agents
+A lease pool with one host per environment and runtime config: a host boots through `inner` on the
+first lease for its key and lives for the enclosing `async with` scope, or until its run timeout,
+when the next lease boots a fresh one. Every rollout of one environment and config in that scope is
+handed the same address - agents
 that need to share, compete, or coordinate in the same environment (a vectorized sim's `num_envs`
 slots, see [robots](/v6/advanced/robots#vectorized-envs-and-evals), are one case). Lease
 `width + 1` waits for a slot to free instead of erroring, so `group` and `max_concurrent` keep

@@ -24,7 +24,7 @@ You write the environment once; the model, harness, trainer, and infra all stay 
 
 <AccordionGroup>
 <Accordion title="Do I need Docker?">
-Not for the quickstart. `hud eval`, `hud serve`, and gateway runs need **no Docker** - you write a `tasks.py` and run it. You only need Docker for the **packaging path**: building a portable image from `Dockerfile.hud` and the build step of `hud deploy`. See [Package & deploy](/v6/reference/runtime).
+Not for the quickstart. `hud eval`, `hud serve`, and gateway runs need **no Docker** - you write a `tasks.py` and run it. You only need Docker to build or run the image locally (`docker build -f Dockerfile.hud`, `--runtime docker`); `hud deploy` builds it on the HUD platform. See [Runtimes](/v6/reference/runtime).
 </Accordion>
 
 <Accordion title="Do I need an API key?">
@@ -32,11 +32,11 @@ You need **one** of:
 - A **`HUD_API_KEY`** ([hud.ai/project/api-keys](https://hud.ai/project/api-keys)) - routes models through the HUD gateway (the default when no provider key is set) and traces every rollout. One key for everything.
 - A **provider key** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) - to call that provider directly instead of the gateway.
 
-See [Run on any model](/v6/reference/agents).
+See [Agents](/v6/reference/agents).
 </Accordion>
 
 <Accordion title="Do I need a GPU?">
-No - not to build environments, write tasks, or run evals. Inference happens through the gateway or your provider. **Training** feeds HUD's rewards into your own GRPO/PPO loop (or a stack like Tinker, slime, or Fireworks), which brings its own compute. See [Train on rewards](/v6/reference/training).
+No - not to build environments, write tasks, or run evals. Inference happens through the gateway or your provider. **Training** feeds HUD's rewards into your own GRPO/PPO loop (or a stack like Tinker, slime, or Fireworks), which brings its own compute. See [Training](/v6/reference/training).
 </Accordion>
 
 <Accordion title="My environment imports a package hud can't find - why?">
@@ -82,7 +82,7 @@ Running locally with your own provider key (`hud serve`, `hud eval ... claude`) 
 <Accordion title="hud eval vs hud serve vs hud deploy - which when?">
 - **`hud eval tasks.py claude`** - run an agent over your tasks and grade them. Your main loop.
 - **`hud serve env.py`** - serve the environment locally so you can drive one task by hand (`hud task start` / `hud task grade`).
-- **`hud deploy`** - build a portable Docker image **and** publish to HUD infra in one step.
+- **`hud deploy`** - upload the environment, build its image on the HUD platform, and publish it, in one step.
 
 Full surface in the [CLI reference](/v6/reference/cli).
 </Accordion>
@@ -92,19 +92,19 @@ Pass the file that **lists runnable tasks**. In the split layout (`hud init`) th
 </Accordion>
 
 <Accordion title="Can I use my own model or a local endpoint?">
-Yes. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so any compatible server (vLLM, a local model, a hosted checkpoint) works - point `base_url` at it. From the CLI use the `openai_compatible` agent. See [Run on any model](/v6/reference/agents) and [Integrations](/v6/advanced/extending).
+Yes. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so any compatible server (vLLM, a local model, a hosted checkpoint) works - point `base_url` at it. From the CLI use the `openai_compatible` agent. See [Agents](/v6/reference/agents) and [Extending HUD](/v6/advanced/extending).
 </Accordion>
 
 <Accordion title="Do I have to train, or can I just run evals?">
-Evals are a complete use on their own - write tasks, run them across models, read rewards and traces. Training is **optional**: because every rollout returns a reward and a trace, the same tasks become training data **if and when** you want them to. See [Train on rewards](/v6/reference/training).
+Evals are a complete use on their own - write tasks, run them across models, read rewards and traces. Training is **optional**: because every rollout returns a reward and a trace, the same tasks become training data **if and when** you want them to. See [Training](/v6/reference/training).
 </Accordion>
 
 <Accordion title="Can I bring an existing benchmark or tasks?">
-Yes. The experimental `hud.integrations.harbor.adapt()` integration builds Harbor-format tasks as a runnable HUD `Taskset`. And a whole benchmark can become one generative task definition. See [Harbor interop](/v6/experimental/harbor).
+Yes. The experimental `hud.integrations.harbor.adapt()` integration builds Harbor-format tasks as a runnable HUD `Taskset`. And a whole benchmark can become one generative task definition. See [Harbor interoperability](/v6/experimental/harbor).
 </Accordion>
 
 <Accordion title="Does HUD support robotics / VLA policies?">
-Yes, in **beta**: the `openpi/0` capability is a schema-driven observation/action loop over WebSocket for simulator and robot environments, with a LeRobot-ready agent harness and trace playback with action-chunk markers. See the [Robots reference](/v6/advanced/robots) and the [robot benchmark cookbook](/v6/cookbooks/robot-benchmark).
+Yes, in **beta**: the `openpi/0` capability is a schema-driven observation/action loop over WebSocket for simulator and robot environments, with a LeRobot-ready agent harness and trace playback with action-chunk markers. See the [Robots](/v6/advanced/robots) and the [robot benchmark cookbook](/v6/cookbooks/robot-benchmark).
 </Accordion>
 
 </AccordionGroup>

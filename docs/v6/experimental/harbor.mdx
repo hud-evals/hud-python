@@ -230,7 +230,7 @@ covers that review.
 
 | Function | Contract |
 | --- | --- |
-| `harbor.adapt(path, *, hud_requirement=f"hud=={hud.__version__}") -> AdaptResult` | Package valid tasks as generated Compose environments and native task rows, and return structured failures for the rest. `hud_requirement` installs the controller each image serves (`hud.integrations.harbor.env`); pass a wheel path when adapting from an unreleased checkout. Raises `ValueError` when no task directories exist. |
+| `harbor.adapt(path, *, hud_requirement=f"hud=={hud.__version__}", name=None) -> AdaptResult` | Package valid tasks as generated Compose environments and native task rows, and return structured failures for the rest. `hud_requirement` installs the controller each image serves (`hud.integrations.harbor.env`); pass a wheel path when adapting from an unreleased checkout. `name` names the generated environment instead of `<dataset>-<digest>`, and then `path` must be one task folder. Raises `ValueError` when no task directories exist. |
 | `await harbor.export(source, out_dir, *, answer_file=..., timeout_sec=600) -> list[Path]` | Write HUD task rows as Harbor task directories. |
 
 <CardGroup cols={2}>

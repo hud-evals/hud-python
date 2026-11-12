@@ -16,6 +16,9 @@ service.
 | `common.py` | Selects a deployed taskset or the local environment |
 | `simple_train.py` | On-policy training with a built-in loss |
 | `ppo_custom_loss.py` | On-policy training with a custom double-sided importance-sampling loss |
+| `game2048_env.py` | A 2048 game as a multi-turn environment: one `move` tool call per turn |
+| `play_2048.py` | Plays one 2048 game and reports how many turns carry training samples |
+| `train_2048.py` | On-policy training on 2048 games |
 
 ## Setup
 
@@ -67,19 +70,28 @@ batch_start = len(session.traces)
 await taskset.run(agent, runtime=runtime, job=session)
 batch = session.traces[batch_start:]
 
-await trainer.step(batch, learning_rate=1e-5, group_size=8)
+failed_groups = {
+    trace.group_id for trace in batch if trace.stop_reason == "timeout" or trace.grade.is_error
+}
+trainable = [trace for trace in batch if trace.group_id not in failed_groups]
+if trainable:
+    await trainer.forward_backward(trainable, loss_fn="importance_sampling", group_size=8)
+    await trainer.optim_step(learning_rate=1e-5)
 ```
 
-`trainer.step(...)` performs `forward_backward` followed by `optim_step`.
+A timed-out trace or one whose grade is an error carries no reward signal, and
+`TrainingClient` refuses it, so the loop drops its whole group.
+`forward_backward` accumulates gradients and `optim_step` applies them.
 The optimizer step checkpoints and promotes the updated weights behind the
 gateway model, so the next call to `taskset.run(...)` samples the new policy.
+`trainer.step(...)` runs both in one call.
 
-The trajectory representation depends on the runtime:
+What is sent to training depends on the trace:
 
-| Runtime | Data sent to training |
-|---------|-----------------------|
-| `HUDRuntime` | Reward and `trace_id`; the training service resolves the token-level trajectory stored by the platform |
-| `LocalRuntime` | Reward and the token-level `Sample` recorded on each agent turn of the trace |
+| Trace | Data sent to training |
+|-------|-----------------------|
+| Its agent turns carry token-level `Sample`s, as they do whenever the agent loop runs in this process (`LocalRuntime`, `HUDRuntime`) | The samples and the reward |
+| No samples, but reported to the platform (a rollout hosted with `HostedRuntime`) | The `trace_id`; the training service resolves the trajectory the platform stored |
 
 `TrainingClient` also accepts `trace_id` strings directly. A training batch
 may contain traces, `TrajectoryPayload`s, trace ids, or a mix.

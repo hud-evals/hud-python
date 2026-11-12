@@ -41,19 +41,34 @@ hud init my-env --template blank
 cd my-env
 ```
 
-This includes a ready-to-run task in `tasks.py`:
+`env.py` declares the environment and its `count` template, which asks the agent to count a
+letter and grades the answer:
 
-```python tasks.py
+```python env.py
+from collections.abc import AsyncGenerator
+
 from hud import Environment
 
-env = Environment(name="letter-count")
+env = Environment(name="my-env")
 
-@env.template()
-async def count_letter(word: str = "strawberry", letter: str = "r"):
-    answer = yield f"How many '{letter}'s are in '{word}'? Reply with just the number."
-    yield 1.0 if (answer or "").strip() == str(word.count(letter)) else 0.0
 
-tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
+@env.template(id="count")
+async def count(sentence: str, letter: str) -> AsyncGenerator[str | float, str | None]:
+    """Ask the agent to count a letter and grade the answer."""
+    answer = yield f"How many times does '{letter}' appear in: '{sentence}'?"
+    correct = str(sentence.lower().count(letter.lower()))
+    yield float((answer or "").strip() == correct)
+```
+
+`tasks.py` lists the tasks to run, each a call of that template:
+
+```python tasks.py
+from env import count
+
+tasks = [
+    count(sentence="Strawberry world", letter="r"),
+    count(sentence="banana", letter="a"),
+]
 ```
 
 ## 4. Run it

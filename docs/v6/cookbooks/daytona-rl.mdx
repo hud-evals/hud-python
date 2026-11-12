@@ -1,10 +1,10 @@
 ---
 title: "RL on Daytona sandboxes"
-description: "Run 256 parallel graded rollouts on Daytona and train on the results."
+description: "Run 128 parallel graded rollouts on Daytona and train on the results."
 icon: "/logo/daytona.svg"
 ---
 
-Define one coding environment, run it 256 wide on Daytona sandboxes, and train a model on the graded rollouts. This page shows the HUD path. The full walkthrough, with the concurrency and warm-pool measurements, lives in [Daytona's guide](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook).
+Define one coding environment, run it 128 wide on Daytona sandboxes, and train a model on the graded rollouts. This page shows the HUD path. The full walkthrough, with the concurrency and warm-pool measurements, lives in [Daytona's guide](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook).
 
 <Card title="Open the source" icon="github" href="https://github.com/hud-evals/hud-python/tree/main/cookbooks/daytona-rl">
   The complete project: the environment, the training loop, and the benchmark receipts behind the numbers.
@@ -29,7 +29,7 @@ async def fix_calc(variant: int = 0):
     yield 1.0 if await calc_passes() else 0.0
 ```
 
-Run it locally first, no API key needed:
+Run it locally first. The `claude` agent needs a `HUD_API_KEY` or an `ANTHROPIC_API_KEY`:
 
 ```bash
 hud eval tasks.py claude
@@ -65,8 +65,13 @@ for step in range(10):
     await taskset.run(agent, runtime=runtime, job=session,
                       group=GROUP, max_concurrent=WIDTH)
     batch = session.traces[start:]
-    for i in range(0, len(batch), CHUNK):
-        await trainer.forward_backward(batch[i:i + CHUNK],
+    # A timed-out or error-graded trace carries no reward signal: drop its whole group.
+    failed = {t.group_id for t in batch if t.stop_reason == "timeout" or t.grade.is_error}
+    trainable = [t for t in batch if t.group_id not in failed]
+    if not trainable:
+        continue
+    for i in range(0, len(trainable), CHUNK):
+        await trainer.forward_backward(trainable[i:i + CHUNK],
                                        loss_fn="importance_sampling", group_size=GROUP)
     await trainer.optim_step(learning_rate=1e-5)
 ```

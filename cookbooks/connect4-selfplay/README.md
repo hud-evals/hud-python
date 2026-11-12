@@ -9,7 +9,7 @@ persists as the policy improves and the GRPO advantage stays non-zero.
 - One agent ("outer") plays a full game against an inner model on the **same
   slug** — true self-play. `seed % 2` decides who drops first, for symmetric
   first-move coverage.
-- Each game trains **both sides at once**: the outer agent's `Run` (reward from
+- Each game trains **both sides at once**: the outer agent's `Trace` (reward from
   its perspective) plus a hand-built `TrajectoryPayload` for the inner model
   with the flipped reward (`1 - outer_reward`).
 - `group_size=2` pairs each game's two trajectories so the GRPO advantage is
@@ -18,7 +18,7 @@ persists as the policy improves and the GRPO advantage stays non-zero.
   can't blow up the update.
 
 The training loop uses the public API directly — `forward_backward` accepts
-`Run` and `TrajectoryPayload` mixed, so no private helpers are needed.
+`Trace` and `TrajectoryPayload` mixed, so no private helpers are needed.
 
 ## Setup
 

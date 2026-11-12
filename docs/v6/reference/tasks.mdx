@@ -90,7 +90,7 @@ it is never serialized.
 | `env` | `str` | Name of the environment the row belongs to. |
 | `id` | `str` | Task id registered on the environment. |
 | `args` | `dict` | Bound arguments (what the template was called with). |
-| `slug` | `str \| None` | Stable id for sync, filtering, and lookup. |
+| `slug` | `str` | Stable id for sync, filtering, and lookup. Defaults to `id`, plus a hash of `args` when there are any. |
 | `columns` | `dict \| None` | Metadata surfaced as filter/leaderboard facets. |
 | `validation` | `list[dict] \| None` | Platform/sync metadata. |
 | `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50, "timeout_seconds": 900}`). |

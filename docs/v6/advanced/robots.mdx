@@ -456,7 +456,7 @@ Grading N rollouts by booting N separate containers wastes a GPU sim's whole adv
 container pays for its own physics from scratch, when a sim like Isaac Sim could instead step all
 N copies together in one [vectorized](#gym-style-envs) instance. Running an eval against a vectorized sim needs no changes to
 the agent or the env's contract, only to how the eval provisions rollouts: wrap the runtime in
-[`Shared(provider, width=N)`](/v6/reference/runtime#shared) so `width` rollouts share that one
+[`Shared(inner, width=N)`](/v6/reference/runtime#shared) so `width` rollouts share that one
 host instead of provisioning `N` containers.
 
 ```python
@@ -749,7 +749,7 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 
 | Symbol | Where | Role |
 |--------|-------|------|
-| `env.gym(make_env)` / `Gym` | `hud.environment.robot` | Declarative sim: contract, capability, and serving derived from a gym factory |
+| `env.gym(make_env)` | `Environment` method | Declarative sim: contract, capability, and serving derived from a gym factory |
 | `wrap(env)` | `hud.environment.robot` | One-line trace streaming for any gym-style env you drive yourself |
 | `RobotBridge` / `GymBridge` | `hud.environment.robot` | Env-side serve loop (slot barrier + scalar wire); subclass `RobotBridge` for a custom sim |
 | `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (`reset` → `{prompt, token}`, `result(token=...)`) |
@@ -760,7 +760,7 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 | `BatchedAgent` / `BatchedModel` | `hud.agents.robot` | Many concurrent rollouts against one shared, batched model |
-| `Shared(provider, width=N)` | `hud.runtime` | Refcounting provider: N concurrent rollouts share one host |
+| `Shared(inner, width=N)` | `hud.runtime` | Refcounting provider: N concurrent rollouts share one host |
 
 ## See also
 
