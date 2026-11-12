@@ -139,7 +139,8 @@ choose one, or omit it for the interactive picker:
 hud init my-env --template coding
 ```
 
-Available examples: `coding`, `cua` (computer-use desktop), and `blank`. Adapt
+Available examples: `coding`, `cua` (computer-use desktop), `argument-hints` (prompt,
+data-file attachments, and rubric grading), and `blank`. Adapt
 one of these projects instead of hand-writing an environment from scratch. Cite
 [Quickstart](/v6/start/quickstart).
 
@@ -184,9 +185,9 @@ Cite [Deploy](/v6/reference/runtime), [Models](/v6/reference/agents), [Training]
 
 ## Training scenarios
 
-Training drives a **trainable model** (fork one: `hud models fork <base> --name <slug> --yes`); a `TrainingClient` targets that slug and advances its weights in place. Mark rollouts for training with `return_token_ids` so the gateway records tokens + logprobs. Pick the loop by scenario — all cite [Training](/v6/run/training) and [reference: Training](/v6/reference/training).
+Training drives a **trainable model** (fork one: `hud models fork <base> --name <slug> --yes`); a `TrainingClient` targets that slug and advances its weights in place. Mark rollouts for training with `return_token_ids` so the gateway records tokens + logprobs. Pick the loop by scenario — all cite [Training agents](/v6/guides/training-agents) and [reference: Training](/v6/reference/training).
 
-**Standard managed loop.** Roll out a batch with `group=` for within-group spread, hand the traces to `step` (one `forward_backward` + one `optim_step`), repeat.
+**Standard managed loop.** Roll out a batch with `group=` for within-group spread, drop every group with a timed-out or error-graded trace (`TrainingClient` refuses those; they carry no reward signal), hand the rest to `step` (one `forward_backward` + one `optim_step`), repeat.
 
 ```python
 agent = create_agent(slug, completion_kwargs={"extra_body": {"return_token_ids": True}})
@@ -195,7 +196,11 @@ session = await Job.start(slug, group=8)
 for _ in range(steps):
     start = len(session.traces)
     await taskset.run(agent, job=session)
-    result = await trainer.step(session.traces[start:], learning_rate=1e-5, group_size=8)
+    batch = session.traces[start:]
+    failed = {t.group_id for t in batch if t.stop_reason == "timeout" or t.grade.is_error}
+    trainable = [t for t in batch if t.group_id not in failed]
+    if trainable:
+        result = await trainer.step(trainable, learning_rate=1e-5, group_size=8)
 ```
 
 **Watch progress from the loop.** Read the checkpoint tree — don't tail logs or count processes. Each node carries `mean_reward`, `loss_fn`, counts, and a `metrics` blob (reward spread, KL, clip fraction).

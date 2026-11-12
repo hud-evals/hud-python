@@ -13,19 +13,27 @@ This cookbook runs **pi0.5** against **LIBERO** (a Franka Panda manipulation ben
 
 ## The environment
 
-The env module only declares; it runs no policy of its own. It wires three things together: a **bridge** that drives the simulator, a **`RobotEndpoint`** that exposes the bridge as a capability, and two-yield task templates. This is [`cookbooks/robot-libero/env.py`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/robot-libero), abbreviated:
+The env module only declares; it runs no policy of its own. It wires three things together: a **bridge** that drives the simulator (`bridge.py`), a **`RobotEndpoint`** that exposes the bridge as a capability, and two-yield task templates. The contract, the env's self-describing observation and action schema, is a JSON file per control mode in `contracts/`. This is [`cookbooks/robot-libero/env.py`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/robot-libero), abbreviated to one of its five suites:
 
 ```python env.py
+import json
+import os
+from pathlib import Path
+
 from hud import Environment
 from hud.environment.robot import RobotEndpoint
-from config import build_contract            # the env's own contract helper
-from libero_sim_bridge import LiberoSimBridge
 
-CONTRACT = build_contract({"use_delta": True})  # the env's self-describing obs/action schema
+from bridge import LiberoSimBridge
+
+CONTRACTS = {"absolute": "ee_abs.json", "delta": "ee_del.json"}
+CONTROL = os.environ.get("LIBERO_CONTROL", "absolute")
+CONTRACT = json.loads((Path(__file__).parent / "contracts" / CONTRACTS[CONTROL]).read_text())
 
 env = Environment(name="robot-libero")
-bridge = LiberoSimBridge(use_delta=True)
-bridge.contract = CONTRACT  # capabilities() publishes this on the wire
+bridge = LiberoSimBridge(
+    use_delta=CONTROL == "delta", image_size=CONTRACT["features"]["observation/image"]["shape"][0]
+)
+bridge.contract = CONTRACT  # published on the wire so a policy can configure itself
 endpoint = RobotEndpoint(bridge).attach(env)
 
 @env.initialize
@@ -54,7 +62,7 @@ docker build -f Dockerfile.hud -t robot-libero cookbooks/robot-libero
 
 ## The agent
 
-A stock LeRobot checkpoint needs no custom Model or Adapter:
+A stock LeRobot checkpoint needs no custom Model or Adapter. Save this script as `run_libero.py`:
 
 ```python run_libero.py
 import asyncio
@@ -129,5 +137,5 @@ With `HUD_API_KEY` set, every episode streams to the platform automatically: the
 <Card title="Robots reference" icon="robot" href="/v6/advanced/robots">
   Contracts, bridges, sim threading, and the harness API.
 </Card>
-<Card title="Package & deploy" icon="rocket" href="/v6/reference/runtime" />
+<Card title="Runtimes" icon="rocket" href="/v6/reference/runtime" />
 </CardGroup>

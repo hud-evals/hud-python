@@ -153,7 +153,12 @@ taskset, runtime = ...  # your Taskset and where rollouts run
 session = await Job.start("arith-rl", group=8)
 start = len(session.traces)
 await taskset.run(agent, runtime=runtime, group=8, job=session)
-await trainer.step(session.traces[start:], learning_rate=1e-5, group_size=8)
+batch = session.traces[start:]
+# A timed-out or error-graded trace carries no reward signal: drop its whole group.
+failed = {t.group_id for t in batch if t.stop_reason == "timeout" or t.grade.is_error}
+trainable = [t for t in batch if t.group_id not in failed]
+if trainable:
+    await trainer.step(trainable, learning_rate=1e-5, group_size=8)
 ```
 
 HUD is the environment-and-reward source for your own GRPO/PPO loop — the same environment trains any model, text or multimodal, unchanged.

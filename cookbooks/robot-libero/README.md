@@ -55,8 +55,8 @@ rollout from this checkout reaches a server on the released SDK.
 ## Tests
 
 ```bash
-uv run --with pytest --with pytest-asyncio pytest                  # control profile, no simulator
-uv run --with pytest --with pytest-asyncio pytest -m e2e           # builds the image, plays one move (needs Docker)
+uv run pytest          # control profile, no simulator
+uv run pytest -m e2e   # builds the image, plays one move (needs Docker)
 ```
 
 ## Deploy
