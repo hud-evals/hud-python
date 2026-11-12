@@ -19,7 +19,10 @@ environment streams observations (camera frames, robot state) and the agent stre
 fast as the policy can run. The wire format is **openpi**-inspired (msgpack with numpy serialization), 
 so existing openpi policy servers only need a thin adapter. 
 
-Everything below ships behind the `robot` extra (pulls in numpy + openpi-client):
+New here? Start with the [robotics quickstart](/v6/guides/robotics-quickstart): a runnable toy
+robot environment and policy in two files.
+
+Everything below ships behind the `robot` extra (pulls in numpy, openpi-client, PyAV, and gymnasium):
 
 <CodeGroup>
 ```bash uv
@@ -138,6 +141,11 @@ this capability's per-episode binding, `{"prompt": ep["prompt"], "bindings": {"r
 ep["token"]}}}`, and call `sim.result(token=ep["token"])`; see
 [vectorized envs and evals](#vectorized-envs-and-evals) for the full pattern.
 
+On first start, `env.gym` derives the contract from one sample observation and writes it to
+`contract.json` (the `contract=` path, default `./contract.json`). If that file already exists it is
+loaded instead, so edit it to add `names`, `control_rate`, and the like. Pass `fps=` to override the
+detected control rate.
+
 A sim that resets finished envs inside `step` can report each episode's last frame as
 `info["final_obs"]` (Isaac Lab's `compute_final_obs`, gymnasium's same-step autoreset); GymBridge
 then serves and records that frame for the finished env.
@@ -241,7 +249,7 @@ async def episode(task: str = "assembly-v3", seed: int = 0):
     yield await sim.result()
 ```
 
-Needs `metaworld` / `lerobot[metaworld]` installe.
+Needs `metaworld` / `lerobot[metaworld]` installed.
 </Accordion>
 
 ## Custom bridges
@@ -257,7 +265,7 @@ class MySimBridge(RobotBridge):
         return self.task_description     # becomes the task prompt
 
     def step(self, action) -> None:
-        ...  # advance one tick; set success / terminated
+        ...  # advance one tick (action is [N, A]); set self.success
 
     def get_observation(self):
         # Always [N, ...] arrays + [N] terminated (N=1 is fine).
@@ -270,8 +278,8 @@ All three hooks run on the sim thread (main under `RobotBridge.serve`), so threa
 Isaac are safe without extra hopping in your subclass.
 
 - **`reset`** starts a fresh episode for a task and returns its prompt (the text the agent is given).
-- **`step`** applies one action and advances the sim a tick, setting `success` / `terminated` as the
-  episode plays out.
+- **`step`** applies one action (shape `[N, A]`, one row per slot) and advances the sim one **tick**
+  (one control step of the sim), setting `success` as the episode plays out.
 - **`get_observation`** returns a structured dict of the current observation
 plus whether the episode is done.
 
@@ -362,8 +370,8 @@ HUD integrates with [LeRobot](https://github.com/huggingface/lerobot) natively, 
 is a complete agent in a few lines. The two bundled seams *are* the LeRobot convention:
 
 - **`LeRobotModel(policy, preprocess, postprocess)`** runs the policy through its own LeRobot
-  pre/post-processors, so the checkpoint behaves exactly as it does upstream. Pass an `Ensembler` to
-  reduce overlapping action chunks to one action per step.
+  pre/post-processors, so the checkpoint behaves exactly as it does upstream. The agent plays each
+  predicted chunk open loop, one action per tick, and queries the model again when the chunk runs out.
 - **`LeRobotAdapter(model_image_keys=...)`** maps the env's cameras and state onto the policy's
   inputs from the [contract](#contract) - HWC `uint8` → CHW float, state and prompt passed
   through.
@@ -386,14 +394,16 @@ class PI05Agent(RobotAgent):
         self.adapter = LeRobotAdapter(model_image_keys=list(policy.config.image_features))
 ```
 
-Anything past the stock image/state convention is just a subclass of `Model` or `Adapter`; the
+`RobotAgent.max_steps` caps the **ticks** (control steps) a rollout plays, 520 by default; set it as a
+class attribute, or pass `max_steps` to the agent call. Anything past the stock image/state convention is just a subclass of `Model` or `Adapter`; the
 LeRobot classes are the batteries-included default. See the
 [robot benchmark cookbook](/v6/cookbooks/robot-benchmark) for a full LIBERO + pi0.5 run.
 
 ## The Model
 
 `Model` owns *how to run* a policy. To wrap a non-LeRobot checkpoint, subclass it and implement one
-method - `infer`; the episode loop, threading, and the wire are handled for you.
+method - `infer`; the episode loop, threading, and the wire are handled for you. A `Model` is
+stateless: it keeps no per-episode state, so one instance can be shared across concurrent rollouts.
 
 ```python
 import numpy as np
@@ -403,31 +413,27 @@ class MyModel(Model):
     def __init__(self, policy):
         self.policy = policy
 
-    def reset(self) -> None:
-        ...                                    # clear per-episode state (optional)
-
     def infer(self, batch) -> np.ndarray:
-        chunk = self.policy(batch)             # run your policy
-        return np.asarray(chunk, np.float32)   # [T, A] chunk, in the env's action space
+        chunk = self.policy(batch)             # run your policy on the [N, ...] batch
+        return np.asarray(chunk, np.float32)   # [N, T, A] chunk, in the env's action space
 ```
 
-- **Input** (`batch`) - the policy-ready inputs your [`Adapter`](#agent-side) produced for this step
-  (images, a state vector, the task prompt - whatever your policy consumes). `Model` and `Adapter`
-  are a matched pair, so the batch is exactly what your adapter emits.
-- **Output** - a `[T, A]` `float32` numpy array: an action chunk of `T` timesteps × `A` action dims,
-  already in the env's action space. Single-action policies return `T = 1`.
-- **`reset()`** - optional; clear per-episode state (an action queue, a chunk buffer) at the start of
-  each episode.
+- **Input** (`batch`) - the policy-ready inputs your [`Adapter`](#agent-side) produced, stacked along a
+  leading batch dimension `N` (images, a state vector, the task prompt - whatever your policy
+  consumes). `Model` and `Adapter` are a matched pair, so the batch is exactly what your adapter emits.
+- **Output** - an `[N, T, A]` `float32` numpy array: for each of `N` rollouts, an action chunk of `T`
+  ticks x `A` action dims, already in the env's action space. Always keep the leading `N`, even when
+  it is 1. Single-action policies return `T = 1`.
 
 The harness awaits `ainfer`, which runs your (blocking) `infer` in a worker thread by default -
-override `ainfer` only if your policy is natively async. For chunked policies, reduce each `[T, A]`
-chunk to one action per step with an `Ensembler`.
+override `ainfer` only if your policy is natively async. Per-episode state, such as an action queue,
+belongs on the agent or the adapter (`Adapter.reset()` runs at each episode start), not on the model.
 
 ## Batching
 
-Running many rollouts at once, each calling `infer` once per step, wastes the GPU on
+Running many rollouts at once, each calling `infer` once per tick, wastes the GPU on
 single-observation forwards. `BatchedAgent` fixes that: it wraps a `RobotAgent`, gives each concurrent
-rollout its own episode state, and shares one batched model that coalesces their per-step `infer` calls
+rollout its own episode state, and shares one batched model that coalesces their per-tick `infer` calls
 into a single stacked forward.
 
 ```python
@@ -583,7 +589,7 @@ async def episode(seed: int = 0):
 ```
 
 ```bash
-hud eval env.py openai --model gpt-6-astra --max-steps 40
+hud eval env.py openai --model gpt-6-astra --max-steps 40  # at most 40 model turns
 ```
 
 `attach` registers the profile on that endpoint, which is robotics code. Publishing
@@ -649,11 +655,13 @@ A few embodiment facts can't be read off the contract, so the environment states
 |-----------|---------|-------------|
 | `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
 | `dims` | every action dimension | The dimensions a call may address, by tool or action name; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
-| `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
+| `max_step` | `{}` | Per-dimension override of the largest change per tick, by action name, such as a binary gripper that switches in one tick. |
 | `tolerance` | `{}` | Overrides by quantity: `position` in m, `rotation` and `joint` in rad. An unset `rotation` or `joint` scales from `position`. |
 | `timeout` | `30` | Cap, in seconds, on one call. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. A custom reference is taken not to read the gripper, so gripper offsets are not reported. |
 | `speed` | `0.1` | Fraction of each dimension's range (a rotation: of a full turn) an absolute move travels per second. |
+| `robot` | `"robot"` | Name of the `robot` capability to drive. |
+| `name` | `"control"` | Name of the MCP capability this serves. |
 | `use_annotation` | `True` | Ask for a `note` on every call. |
 | `use_wait` | `True` | Serve the `wait` tool. |
 
