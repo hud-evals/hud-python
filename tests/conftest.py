@@ -51,7 +51,7 @@ IMAGE_FIXTURES = ("echo", "faulty", "sessions", "broken", "stalls")
 SANDBOX = (pytest.mark.e2e, pytest.mark.sandbox)
 
 # The developer's or CI's own environment, captured before any test isolates it.
-# Only ``live`` tests read credentials from it.
+# Only tests that opt into a real account (``live``, ``modal``) read credentials from it.
 REAL_ENVIRONMENT = dict(os.environ)
 
 SERVICE_URL_VARIABLES = (

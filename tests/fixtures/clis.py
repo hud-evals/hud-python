@@ -124,7 +124,9 @@ sys.exit(behavior.get("exit", 0))
 class Stub:
     """A stub CLI installed in ``bin``; ``captures()`` reads what each invocation recorded.
 
-    ``shebang`` installs the stub script itself, as an npm package's launcher script is.
+    For an agent in a sandbox, ``root`` goes inside the workspace: besides /usr and /etc,
+    the workspace is the only host path a sandbox shows. ``shebang`` installs the stub
+    script itself, as an npm package's launcher script is.
     """
 
     root: Path

@@ -240,7 +240,6 @@ async def test_without_a_sandbox_the_cli_holds_its_model_key(
 async def test_in_a_sandbox_the_cli_is_handed_the_relay_and_never_the_hud_key(
     agent_type: str, cli: str, tmp_path: Path
 ) -> None:
-    # Inside the workspace, the only host path the sandbox shows besides /usr and /etc.
     stub = clis.Stub(tmp_path / "ws" / ".stub", cli, stdout=clis.answer(cli, "done"))
     stub.install()
     env = Environment("ws")

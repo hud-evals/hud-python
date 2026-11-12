@@ -261,7 +261,6 @@ async def arm_env(sim: RobotBridge, control: DirectControl) -> AsyncGenerator[En
         yield env
 
 
-# Ticks a stub sim runs before terminating.
 EPISODE_TICKS = 3
 
 # A minimal contract, exactly as documented: one camera, a state vector, an action.
