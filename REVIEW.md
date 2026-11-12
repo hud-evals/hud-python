@@ -1,8 +1,8 @@
 # Reviewing hud-python
 
 Review adversarially: assume the change breaks something and find where. `AGENTS.md`
-holds the rules a change must meet (Code Quality Bar, Architecture And Simplification,
-Testing); a change that breaks one is a finding. This guide is how to look.
+holds the rules a change must meet (Contracts, Principles, Code); a change that breaks
+one is a finding. This guide is how to look.
 
 ## Behavior
 
@@ -38,7 +38,7 @@ Testing); a change that breaks one is a finding. This guide is how to look.
 
 ## Tests
 
-The rules are under "Testing" in `AGENTS.md`. Treat each of these as a finding:
+The rules are under "No fake tests" in `AGENTS.md`. Treat each of these as a finding:
 
 - A test that patches a `hud` name, reads a private attribute, or asserts that a
   fake was called the way it was set up.

@@ -21,14 +21,17 @@ hud init my-env --template blank
 cd my-env
 ```
 
-The blank `my-env` template contains four files, each with one job:
+The blank `my-env` template contains seven files, each with one job:
 
 <div className="filetree">
   <div className="ft-root">my-env/</div>
   <div className="ft-row"><span><span className="ft-branch">├── </span><span className="ft-name">env.py</span></span><span className="ft-note">the environment: object, capabilities, and task definitions</span></div>
   <div className="ft-row"><span><span className="ft-branch">├── </span><span className="ft-name">tasks.py</span></span><span className="ft-note">the concrete tasks to run, filled in with real arguments</span></div>
   <div className="ft-row"><span><span className="ft-branch">├── </span><span className="ft-name">Dockerfile.hud</span></span><span className="ft-note">how the environment is packaged into an image on deploy</span></div>
-  <div className="ft-row"><span><span className="ft-branch">└── </span><span className="ft-name">pyproject.toml</span></span><span className="ft-note">the Python dependencies</span></div>
+  <div className="ft-row"><span><span className="ft-branch">├── </span><span className="ft-name">pyproject.toml</span></span><span className="ft-note">the Python dependencies</span></div>
+  <div className="ft-row"><span><span className="ft-branch">├── </span><span className="ft-name">README.md</span></span><span className="ft-note">how to run and deploy the environment</span></div>
+  <div className="ft-row"><span><span className="ft-branch">├── </span><span className="ft-name">.hud_eval.toml</span></span><span className="ft-note">defaults for <code>hud eval</code> in this directory</span></div>
+  <div className="ft-row"><span><span className="ft-branch">└── </span><span className="ft-name">.dockerignore</span></span><span className="ft-note">what the image build leaves out</span></div>
 </div>
 
 ## The `env.py` file
@@ -306,7 +309,7 @@ To run a taskset from the platform, publish it too. `hud sync` uploads a taskset
 ```bash
 hud sync tasks my-tasks   # publish tasks.py as a named taskset
 hud sync tasks my-tasks --project <project-id>
-hud sync env              # sync environment metadata
+hud sync env my-env       # link this directory to the platform environment my-env
 ```
 
 The deployed environment is available on the platform for scaled runs and model comparisons. Running
