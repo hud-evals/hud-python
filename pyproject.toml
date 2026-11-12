@@ -51,35 +51,6 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 path = "hud/version.py"
 
-[tool.hatch.build]
-exclude = [
-    "docs/",
-    "cookbooks/",
-    "environments/",
-    "hud-python/",
-    "**/checkpoints/",
-    "**/*.safetensors",
-    "**/*.ckpt",
-    "**/*.pth",
-]
-
-[tool.hud.clone]
-title = "🚀 Welcome to HUD SDK!"
-message = """[bold cyan]Thanks for using the hud SDK![/bold cyan]
-
-[yellow]Quick Start:[/yellow]
-• Install dependencies: [green]uv sync[/green]
-• Try the CLI: [green]hud --help[/green]
-• Read the docs: [green]https://docs.hud.ai[/green]
-
-[dim]For runnable recipes, check out the [cyan]cookbooks/[/cyan] directory.[/dim]
-
-[bold]Happy coding! 🎉[/bold]"""
-style = "blue"
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
 [tool.hatch.build.targets.sdist]
 include = [
     "hud/**",
@@ -100,10 +71,6 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["hud"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"hud/py.typed" = "hud/py.typed"
-"hud/runtime/docker-seccomp.json" = "hud/runtime/docker-seccomp.json"
 
 [project.optional-dependencies]
 bedrock = [
@@ -134,7 +101,6 @@ dev = [
     "ruff==0.17.4",
     "pytest>=8.1.1",
     "pytest-asyncio",
-    "pytest-cov",
     "pytest-xdist",
     "pytest-timeout",
     "dirty-equals",
@@ -229,25 +195,6 @@ unsupported-dynamic-base = "warn"
 [tool.ty.analysis]
 respect-type-ignore-comments = false
 strict-equality-semantics = true
-
-[tool.coverage.run]
-source = ["hud"]
-patch = ["subprocess"]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "pass",
-    "pytest.mark.skip",
-    "@(typing\\.)?overload",
-    "if TYPE_CHECKING:",
-    "if typing.TYPE_CHECKING:",
-    "class .*\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
-]
-show_missing = true
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
