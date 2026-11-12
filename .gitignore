@@ -7,7 +7,6 @@ __pycache__
 .pytest_cache
 dist/
 build/
-!docs/v6/build/
 *.egg-info/
 !tests/integrations/harbor/cases/**/.env
 
@@ -21,8 +20,6 @@ build/
 /*.ipynb
 TODO.md
 
-.coverage
-
 *.log
 
 /ref/
@@ -34,23 +31,17 @@ TODO.md
 .claude
 
 *.csv
-.rl_config_*.json
-.rl-config-*.json
 
-wandb/
 outputs/
 
 test/
 
 /checkpoints/
 /checkpoints_test/
-hud/rl/checkpoints/
-hud/rl/checkpoints_test/
 
 .ck/
 
 .hud/
-.hud_eval_config
 .hud_eval.toml
 !environments/*/.hud_eval.toml
 
