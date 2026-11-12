@@ -59,7 +59,7 @@ TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
 
 | Method | Returns | Purpose |
 |--------|---------|---------|
-| `forward_backward(trajectories, *, loss_fn, loss_fn_config=None, group_size=None, reward_scale=1.0, num_substeps=1)` | `ForwardBackwardResult` | Accumulate gradients with a built-in `loss_fn`. |
+| `forward_backward(trajectories, *, loss_fn="importance_sampling", loss_fn_config=None, group_size=None, reward_scale=1.0, num_substeps=1)` | `ForwardBackwardResult` | Accumulate gradients with a built-in `loss_fn`. |
 | `optim_step(*, learning_rate, beta1=0.9, beta2=0.95, eps=1e-8, weight_decay=0.0)` | `OptimStepResult` | Apply gradients, checkpoint, and promote the new weights. |
 | `step(trajectories, *, learning_rate, loss_fn="importance_sampling", loss_fn_config=None, group_size=None, reward_scale=1.0, num_substeps=1, weight_decay=0.0)` | `OptimStepResult` | One `forward_backward` then one `optim_step`. |
 | `forward_backward_custom(trajectories, loss_fn, *, group_size=None, reward_scale=1.0)` | `ForwardBackwardResult` | Accumulate gradients with a client-side loss (see [Custom losses](#custom-losses)). |

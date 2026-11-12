@@ -8,7 +8,7 @@ Install the CLI with `uv tool install hud --python 3.12`.
 
 ## Authentication
 
-Get your API key from [HUD settings](https://hud.ai/settings), then save it locally:
+Get your API key from [hud.ai/project/api-keys](https://hud.ai/project/api-keys), then save it locally:
 
 ```bash
 hud set HUD_API_KEY=your-key-here
@@ -63,16 +63,19 @@ hud init my-env --dir envs            # coding → ./envs/my-env
 Serve an environment's control channel locally (tcp JSON-RPC).
 
 ```bash
-hud serve               # auto-detect env.py
-hud serve env:env       # explicit module:attribute
+hud serve                                   # auto-detect env.py
+hud serve env:env                           # explicit module:attribute
 hud serve env.py -p 9000
+hud serve pkg.mod:make_env --arg name=demo  # call a factory that returns the Environment
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--port`, `-p` | `8765` | Port to serve on. |
 | `--host` | `127.0.0.1` | Interface to bind (use `0.0.0.0` inside containers). |
+| `--arg` | - | `key=value` passed to a factory target (repeatable). |
 | `--verbose`, `-v` | - | Detailed logs. |
+| `--json` | - | Structured output on stdout. |
 
 ### `hud deploy`
 
@@ -165,7 +168,8 @@ timeout, is still graded when it can be; its `trace_error` says what failed.
 | `--gateway`, `-g` | Force LLM calls through the HUD gateway. Agents use a provider key when one is set and the gateway otherwise; pass this to use the gateway even when a provider key is present. |
 | `--group` (alias `--group-size`) | Runs per task - a group of repeats whose reward spread you can inspect. |
 | `--max-concurrent` | Cap parallel rollouts. |
-| `--max-steps` | Cap steps per task (default 10). |
+| `--max-steps` | Cap steps per task (default 10; `--full` makes it 100). `claude_cli` passes it as `--max-turns`; `codex_cli` has no step cap. |
+| `--auto-respond` | Prompt the agent to continue when it answers without a tool call. |
 | `--task-ids` | Comma-separated slugs or 0-based indices. |
 | `--config`, `-c` | Agent config `key=value` (repeatable). |
 | `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
@@ -285,9 +289,18 @@ Publish task definitions or link a local directory to a deployed environment:
 hud sync tasks my-taskset                          # publish using resolved Project
 hud sync tasks my-taskset --project browser-evals  # override the Project (name or ID)
 hud sync tasks my-taskset --link                   # also make my-taskset this directory's default
+hud sync tasks my-taskset tasks/                   # sync from a file, directory, or JSON/JSONL
+hud sync tasks my-taskset --task fix-bug           # sync only the task with this slug
+hud sync tasks my-taskset --force                  # upload every task, changed or not
+hud sync tasks my-taskset --export tasks.csv       # export the remote tasks (.json, .jsonl, .csv)
 hud sync env                                       # pick a deployed environment to link
 hud sync env my-env                                # link by environment name or ID
+hud sync env my-env ./my-env                       # link a directory other than the current one
 ```
+
+`hud sync tasks [taskset] [source]` collects tasks from `source` (default: the current directory)
+and uploads only what differs from the remote taskset; without `taskset` it uses the one stored in
+`.hud/config.json`.
 
 `hud sync tasks --project` is a one-command override, like `hud deploy --project`. Existing resources
 remain in their original Project. The first upload from a directory records the taskset in
@@ -305,7 +318,7 @@ Import Harbor task folders and the job runs Harbor recorded into a taskset:
 hud harbor import ./tasks ./jobs/2026-10-01__12-00 --taskset tb2  # tasks and their runs
 hud harbor import ./jobs/2026-10-02__09-00                        # into the directory's taskset
 hud harbor import bundle.zip --taskset tb2 --no-wait --json       # a prepared zip; return at once
-hud harbor imports --taskset tb2                                  # past imports
+hud harbor imports --taskset tb2 --limit 50                       # past imports (default 20)
 hud harbor report <import-id> --wait                              # follow one, then show its report
 hud harbor cancel <import-id> --yes
 ```
@@ -346,7 +359,8 @@ every one. The checks decide what the IDs are: trace-level checks take
 completed trace IDs, task-level checks take task IDs. Trace-level and
 task-level checks can't be mixed in one run. Where a check's current result is
 completed or still running, it is kept rather than run again; pass
-`--overwrite` to run it anyway. Pass `--no-wait` to return after launch, `--yes`
+`--overwrite` to run it anyway. `--timeout` caps the wait in seconds (default
+900). Pass `--no-wait` to return after launch, `--yes`
 to skip the confirmation, or `--json` for machine-readable output. Exit code `1` means a check did not pass
 or the SDK could not complete the command.
 
@@ -368,6 +382,8 @@ hud jobs list --json          # raw JSON array on stdout
 hud jobs list --quiet         # job ids, one per line
 hud jobs get <job-id>         # traces for one job
 hud jobs cancel <job-id> --yes
+hud jobs cancel <job-id> --trace-id <trace-id> --yes  # one trace in the job
+hud jobs cancel --all --yes   # every active job on your account
 hud jobs                      # alias for list
 ```
 
@@ -376,6 +392,8 @@ hud jobs                      # alias for list
 | `--json` | Structured stdout. |
 | `--quiet`, `-q` | Bare ids, one per line. |
 | `--limit`, `-n` | Max rows (default 20). |
+| `--trace-id`, `-t` | With `cancel`: cancel one trace in the job. |
+| `--all`, `-a` | With `cancel`: cancel every active job on your account. |
 | `--yes`, `-y` | Skip cancel confirmation. |
 | `--dry-run` | Print the cancel plan without calling the API. |
 
@@ -403,7 +421,7 @@ without an API call.
 | `hud models fork <model> --name <slug>` | Fork a trainable model (`--json`, `--dry-run`, `--yes`, `--if-not-exists`). |
 | `hud models checkpoints <model>` | List a model's checkpoint tree. |
 | `hud models head <model> [--set <checkpoint-id>]` | Show - or set - a model's active checkpoint (`--dry-run`, `--yes` with `--set`). |
-| `hud jobs cancel` | Cancel a running job (`--yes`, `--dry-run`, `--json`). |
+| `hud jobs cancel` | Cancel a running job, one of its traces, or every active job (`--trace-id`, `--all`, `--yes`, `--dry-run`, `--json`). |
 | `hud version` | Show the CLI version (`--json`). |
 
 ## See also

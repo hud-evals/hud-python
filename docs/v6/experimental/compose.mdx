@@ -194,7 +194,7 @@ graph and a Docker builder with BuildKit named context support.
 ## Run an image directly
 
 `DockerRuntime` and its Compose override apply the workspace permissions automatically. A direct
-`docker run` must supply the same seccomp profile and system-path setting:
+`docker run` must supply the same seccomp profile, system-path, and AppArmor settings:
 
 ```bash
 HUD_SECCOMP=/path/to/site-packages/hud/runtime/docker-seccomp.json
@@ -203,12 +203,14 @@ docker run \
   --publish 8765:8765 \
   --security-opt "seccomp=$HUD_SECCOMP" \
   --security-opt systempaths=unconfined \
+  --security-opt apparmor=unconfined \
   registry.example/acme/task:tag
 ```
 
 The seccomp profile is default-allow for Docker compatibility and permits the namespace and mount
 syscalls used by HUD's inner `Workspace` sandbox. The `systempaths=unconfined` option lets that
-sandbox replace its own `/proc` and `/dev` mounts.
+sandbox replace its own `/proc` and `/dev` mounts, and `apparmor=unconfined` runs the container
+without Docker's default AppArmor profile.
 
 ## See also
 
