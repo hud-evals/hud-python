@@ -8,12 +8,11 @@ dependencies = [
     "httpx>=0.27.0",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "ruff==0.11.2"]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "ruff==0.17.4"]
+
+[tool.uv]
+package = false
 
 [tool.ruff]
 target-version = "py312"
@@ -32,7 +31,4 @@ line-ending = "auto"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-
-[tool.hatch.build]
-only-packages = false
-include = ["env.py", "tasks.py"]
+pythonpath = ["."]
