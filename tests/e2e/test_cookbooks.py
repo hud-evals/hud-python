@@ -19,10 +19,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.conftest import steps
+from tests.conftest import ROOT, steps
 
 from .lifecycle import assert_clean_lifecycle, evaluated, scripted
-from .projects import ROOT
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -109,6 +108,17 @@ def third_party(path: Path) -> set[str]:
             elif top not in {*sys.stdlib_module_names, "hud", "__future__"}:
                 needed.add(top)
     return needed
+
+
+@pytest.mark.parametrize("path", MODULES, ids=module_id)
+def test_every_hud_name_a_cookbook_module_imports_exists(path: Path) -> None:
+    missing = [
+        module if name is None else f"{module}.{name}"
+        for module, name in imports(path)
+        if module.split(".")[0] == "hud" and not resolves(module, name)
+    ]
+
+    assert missing == []
 
 
 @pytest.mark.parametrize("path", MODULES, ids=module_id)
