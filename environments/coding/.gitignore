@@ -1,4 +1,3 @@
-# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -9,17 +8,9 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-
-# OS / IDE
 .DS_Store
 .vscode/
 .idea/
 *.swp
-
-# HUD
-hud.lock.yaml
 .hud
-.hud_local/
-
-# Logs
 *.log
