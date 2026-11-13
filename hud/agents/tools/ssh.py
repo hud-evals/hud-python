@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import posixpath
+import re
+import shlex
+
 import asyncssh
 
 from hud.agents.tools.base import AgentTool, tool_err, tool_ok
@@ -23,6 +27,16 @@ def _remote_error(exc: asyncssh.ProcessError) -> str:
     return (stderr or "").strip() or f"exit {exc.exit_status}"
 
 
+def _grep_includes(include: str) -> list[str]:
+    """``include`` as ``grep --include`` globs, which match base names and expand no braces."""
+    braces = re.fullmatch(r"(.*)\{([^{}]*)\}(.*)", include)
+    globs = (
+        [braces[1] + option + braces[3] for option in braces[2].split(",")] if braces else [include]
+    )
+    names = [posixpath.basename(glob) for glob in globs]
+    return [] if any(not name.strip("*") for name in names) else names
+
+
 class SSHTool(AgentTool[SSHClient]):
     """Capability base: tool driven by an ``SSHClient``."""
 
@@ -42,6 +56,16 @@ class SSHTool(AgentTool[SSHClient]):
             content=[TextContent(type="text", text=body)],
             isError=completed.returncode != 0,
         )
+
+    async def file_grep(self, pattern: str, path: str, include: str | None = None) -> ToolResult:
+        """Search files under ``path`` for an extended regular expression.
+
+        ``include`` is a file glob; one level of braces and leading directories are accepted.
+        """
+        command = f"grep -rnE {shlex.quote(pattern)} {shlex.quote(path)}"
+        for name in _grep_includes(include or ""):
+            command += f" --include={shlex.quote(name)}"
+        return await self.bash(command)
 
     async def file_read(self, path: str) -> ToolResult:
         try:

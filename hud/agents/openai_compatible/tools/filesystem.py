@@ -287,11 +287,8 @@ class GrepTool(_FilesystemTool):
         if not isinstance(pattern, str):
             raise ValueError("pattern is required")
         path = str(arguments.get("path") or ".")
-        cmd = f"grep -rn {shlex.quote(pattern)} {shlex.quote(path)}"
         include = arguments.get("include")
-        if isinstance(include, str) and include:
-            cmd += f" --include={shlex.quote(include)}"
-        return await self.bash(cmd)
+        return await self.file_grep(pattern, path, include if isinstance(include, str) else None)
 
 
 class GlobTool(_FilesystemTool):
