@@ -255,6 +255,20 @@ def claude_result(text: str = "done", *, is_error: bool = False) -> dict[str, An
     }
 
 
+CLAUDE_TURN_LIMIT = {
+    "type": "result",
+    "subtype": "error_max_turns",
+    "is_error": True,
+    "errors": ["Reached maximum number of turns (1)"],
+    "terminal_reason": "max_turns",
+    "stop_reason": "tool_use",
+    "session_id": "session-1",
+    "duration_ms": 5,
+    "num_turns": 2,
+    "total_cost_usd": 0.01,
+}
+
+
 def codex_item(kind: str, item_id: str, **fields: Any) -> dict[str, Any]:
     return {"type": "item.completed", "item": {"id": item_id, "type": kind, **fields}}
 
