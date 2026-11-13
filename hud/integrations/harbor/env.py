@@ -24,7 +24,7 @@ from hud.types import EvaluationResult
 from hud.utils.process import ProcessResult, create_process_group_exec
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Generator
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
 
     from hud.environment.namespace import NamespaceProcess
 
@@ -33,6 +33,7 @@ TESTS = Path("/tests")
 LOGS = Path("/logs")
 VERIFIER_LOGS = LOGS / "verifier"
 AGENT_ANSWER = LOGS / "agent_answer.txt"
+ARTIFACTS = LOGS / "artifacts"
 DOCKER = CONTROLLER_ROOT / "bin" / "docker"
 CONFIG = ControllerConfig.model_validate_json((CONTROLLER_ROOT / "config.json").read_text("utf-8"))
 TASK_ROOT = Path("/rootfs")
@@ -150,7 +151,9 @@ agent_account = account(agent.user, TASK_ROOT)
 agent_hosts = frozenset(agent.network.allowed_hosts)
 environment_hosts = frozenset(CONFIG.environment.network.allowed_hosts)
 rooted_at_filesystem = len(WORKDIR.parts) == 1
-task_mounts = tuple(CONFIG.mounts)
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
+ARTIFACTS.chmod(0o777)
+task_mounts = (*CONFIG.mounts, Mount("rw", src=str(ARTIFACTS), dst=str(ARTIFACTS)))
 agent_mounts = (
     *task_mounts,
     Mount("tmpfs", dst=str(TESTS)),
@@ -355,8 +358,8 @@ def artifact_path(artifact: Artifact, artifacts: Path) -> Path:
     return artifacts / relative
 
 
-async def collect(task: TaskSpec, artifacts: Path) -> None:
-    clear(artifacts)
+def compose_services() -> Callable[[str], Awaitable[str]]:
+    """Return a lookup from a Compose service to its container id; ``main`` is ``""``."""
     services: dict[str, str] = {}
 
     async def container(service: str) -> str:
@@ -371,6 +374,10 @@ async def collect(task: TaskSpec, artifacts: Path) -> None:
         except KeyError as error:
             raise RuntimeError(f"Compose service {service!r} is not running") from error
 
+    return container
+
+
+async def run_collect_hooks(task: TaskSpec, container: Callable[[str], Awaitable[str]]) -> None:
     for hook in task.collect:
         service = hook.service
         container_id = await container(service)
@@ -402,6 +409,18 @@ async def collect(task: TaskSpec, artifacts: Path) -> None:
                 detail = execution.stderr.decode("utf-8", "replace").strip()
                 raise RuntimeError(f"collect hook on {service!r} failed: {detail}")
 
+
+async def collect(task: TaskSpec, session: Path) -> None:
+    artifacts = session / "artifacts"
+    clear(artifacts)
+    container = compose_services()
+    await run_collect_hooks(task, container)
+
+    logs_artifacts = session / "logs-artifacts"
+    copy_artifact(ARTIFACTS, logs_artifacts, [], name=str(ARTIFACTS))
+    if any(path.is_symlink() for path in logs_artifacts.rglob("*")):
+        raise RuntimeError(f"artifact {ARTIFACTS} contains a symbolic link")
+
     for artifact in task.artifacts:
         source = artifact.source
         target = artifact_path(artifact, artifacts)
@@ -431,6 +450,7 @@ async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
     clear_grading_files()
     AGENT_ANSWER.parent.mkdir(parents=True, exist_ok=True)
     AGENT_ANSWER.touch()
+    clear(ARTIFACTS)
     entrypoint = None
     try:
         entrypoint = await start_entrypoint()
@@ -446,12 +466,13 @@ async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
                 raise RuntimeError("Harbor actor is not running in an environment session")
             await workspace.terminate_sessions()
             try:
-                await collect(task, SESSIONS / session_id / "artifacts")
+                await collect(task, SESSIONS / session_id)
             except Exception as error:
                 yield EvaluationResult(isError=True, content=str(error))
             else:
                 yield EvaluationResult(info={"answer": "" if answer is None else str(answer)})
         else:
+            await run_collect_hooks(task, compose_services())
             yield await grade(task.id, task.verifier_timeout, answer)
     finally:
         clear_grading_files()
@@ -475,7 +496,7 @@ if CONFIG.verifier_root is not None:
         if not session.is_dir():
             raise ValueError("Harbor actor session files are unavailable in this runtime")
         try:
-            yield await grade_separate(task, session / "artifacts", actor.info["answer"])
+            yield await grade_separate(task, session, actor.info["answer"])
         finally:
             clear_grading_files()
             shutil.rmtree(session, ignore_errors=True)
@@ -528,7 +549,7 @@ async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResu
     verifier = CONFIG.verifier
     verifier_account = account(verifier.user, TASK_ROOT)
     if verifier_account.identity:
-        for root in (TESTS, VERIFIER_LOGS):
+        for root in (TESTS, VERIFIER_LOGS, ARTIFACTS):
             for path in (root, *root.rglob("*")):
                 os.lchown(path, *verifier_account.identity)
 
@@ -637,7 +658,7 @@ def materialized_artifacts(
 
 async def grade_separate(
     task: TaskSpec,
-    artifacts: Path,
+    session: Path,
     answer: str,
 ) -> EvaluationResult:
     assert CONFIG.verifier_root is not None
@@ -650,6 +671,14 @@ async def grade_separate(
         await asyncio.to_thread(VERIFIER_LOGS.chmod, 0o777)
         await asyncio.to_thread(LOGS.mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(AGENT_ANSWER.write_text, answer, encoding="utf-8")
+        await asyncio.to_thread(clear, ARTIFACTS)
+        await asyncio.to_thread(
+            shutil.copytree,
+            session / "logs-artifacts",
+            ARTIFACTS,
+            symlinks=True,
+            dirs_exist_ok=True,
+        )
 
         try:
             verifier = CONFIG.verifier
@@ -657,13 +686,18 @@ async def grade_separate(
             verifier_access = None if public else verifier.network.allowed_hosts
             image = CONFIG.verifier_image
             verifier_account = account(verifier.user, verifier_root)
+            if verifier_account.identity:
+                for path in (ARTIFACTS, *ARTIFACTS.rglob("*")):
+                    await asyncio.to_thread(os.lchown, path, *verifier_account.identity)
             verifier_env = {
                 **verifier_account.env,
                 **CONFIG.environment.env,
                 **image.env,
                 **resolve_env_templates(verifier.env),
             }
-            with materialized_artifacts(task, verifier_root, artifacts, verifier_account.identity):
+            with materialized_artifacts(
+                task, verifier_root, session / "artifacts", verifier_account.identity
+            ):
                 isolated = Workspace(
                     verifier_root,
                     guest_path="/",

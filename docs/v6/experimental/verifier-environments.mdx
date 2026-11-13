@@ -134,7 +134,7 @@ runtime, the phases remain isolated:
 - actor sessions are terminated before artifact collection;
 - declared `collect` hooks run against `main` or named Compose services;
 - agent-produced state crosses into the verifier filesystem only through declared absolute
-  artifact paths and `/logs`;
+  artifact paths and Harbor's `/logs/artifacts` directory;
 - `/tests/test.sh` runs from the verifier image with its own user, workdir, environment, network
   mode, allowlist, and credentials directory; and
 - verifier output is read from `/logs/verifier/reward.json` (a number, or an object with a

@@ -1,0 +1,6 @@
+[verifier]
+timeout_sec = 30
+user = "verifier"
+
+[[verifier.collect]]
+command = "echo diff > /tmp/model.patch"
