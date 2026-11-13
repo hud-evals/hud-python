@@ -1,0 +1,9 @@
+artifacts = ["/logs/artifacts/model.patch"]
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
+user = "verifier"
+
+[[verifier.collect]]
+command = "echo diff > /logs/artifacts/model.patch"
