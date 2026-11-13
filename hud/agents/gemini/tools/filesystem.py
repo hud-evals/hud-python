@@ -113,8 +113,7 @@ class GeminiGlobTool(SSHTool):
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
-        cmd = f"find {shlex.quote(str(dir_path))} -name {shlex.quote(pattern)}"
-        return await self.bash(cmd)
+        return await self.file_glob(pattern, str(dir_path))
 
 
 class GeminiListTool(SSHTool):
