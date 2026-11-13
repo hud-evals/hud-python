@@ -311,7 +311,7 @@ class GlobTool(_FilesystemTool):
         if not isinstance(pattern, str):
             raise ValueError("pattern is required")
         path = str(arguments.get("path") or ".")
-        return await self.bash(f"find {shlex.quote(path)} -name {shlex.quote(pattern)}")
+        return await self.file_glob(pattern, path)
 
 
 def _positive_int(value: Any, *, default: int, name: str) -> int:

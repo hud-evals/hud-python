@@ -14,9 +14,9 @@ from pydantic import ValidationError
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent
 from hud.agents.claude.tools.hosted import ClaudeToolSearchTool
 from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
-from hud.agents.types import ClaudeConfig, ClaudeEffort, GeminiConfig, OpenAIConfig
+from hud.agents.types import ClaudeConfig, ClaudeEffort, GeminiConfig, OpenAIConfig, ToolStep
 from hud.capabilities import Capability
-from hud.types import AgentType
+from hud.types import AgentType, TextContent
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call, stream_error
@@ -327,3 +327,51 @@ def test_an_openai_setting_the_installed_sdk_does_not_declare_is_refused() -> No
                 "format": {"type": "json_schema", "name": "answer", "schema": {}, "strictness": 1}
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("agent_type", "model", "path_key"),
+    [("openai_compatible", "qwen3.6-plus", "path"), ("gemini", GEMINI_MODEL, "dir_path")],
+    ids=["openai_compatible", "gemini"],
+)
+@pytest.mark.parametrize(
+    ("pattern", "tests", "found"),
+    [
+        ("*.ts", "-name '*.ts'", ["a.ts"]),
+        (
+            "**/firebase.json",
+            "-path {root}/firebase.json -o -path '{root}/*/firebase.json'",
+            ["sub/firebase.json"],
+        ),
+        ("**/*.ts*", "-path '{root}/*.ts*' -o -path '{root}/*/*.ts*'", ["a.ts", "b.tsx"]),
+        ("sub/*", "-path '{root}/sub/*'", ["sub/firebase.json"]),
+    ],
+    ids=["a-base-name", "at-any-depth", "at-no-depth", "under-a-directory"],
+)
+async def test_a_glob_with_directories_matches_the_path_below_the_search_root(
+    pattern: str,
+    tests: str,
+    found: list[str],
+    agent_type: str,
+    model: str,
+    path_key: str,
+    models: Models,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "ws"
+    (root / "sub").mkdir(parents=True)
+    for name in ("a.ts", "b.tsx", "sub/firebase.json"):
+        (root / name).touch()
+    models.script([call("glob", **{"pattern": pattern, path_key: str(root)}), Turn(text="done")])
+    kind = AgentType(agent_type).cls
+
+    task = workspace_task(root)
+    (trace,) = (await task().run(kind(kind.config_cls(model=model)))).traces
+
+    (step,) = (step for step in trace.steps if isinstance(step, ToolStep))
+    assert step.result is not None
+    command, *lines = "".join(
+        block.text for block in step.result.content if isinstance(block, TextContent)
+    ).splitlines()
+    assert command == f"$ find {root} {tests.format(root=root)}"
+    assert sorted(line.removeprefix(f"{root}/") for line in lines if line.startswith("/")) == found
