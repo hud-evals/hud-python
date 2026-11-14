@@ -23,6 +23,7 @@ import pytest
 from hud import Task
 from hud.agents.base import Agent
 from hud.runtime import (
+    DockerEndpoint,
     DockerRuntime,
     HUDRuntime,
     LocalRuntime,
@@ -115,17 +116,51 @@ async def placed(
             label = uuid.uuid4().hex
             image = request.getfixturevalue("fixture_image")(fixture)
             limits = RuntimeConfig.model_validate({"limits": {"startup_timeout_s": startup}})
+            inner = DockerRuntime(
+                image, run_args=["--label", f"hud-test={label}"], runtime_config=limits
+            )
+            volumes: set[str] = set()
 
-            async def removed() -> bool:
-                listing = await asyncio.create_subprocess_exec(
-                    *("docker", "ps", "--all", "--quiet", "--filter", f"label=hud-test={label}"),
+            async def docker(*args: str) -> tuple[int, str]:
+                process = await asyncio.create_subprocess_exec(
+                    "docker",
+                    *args,
                     stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
                 )
-                listed, _ = await listing.communicate()
-                return listed.split() == []
+                out, _ = await process.communicate()
+                assert process.returncode is not None
+                return process.returncode, out.decode()
 
-            labelled = ["--label", f"hud-test={label}"]
-            yield DockerRuntime(image, run_args=labelled, runtime_config=limits), removed
+            @asynccontextmanager
+            async def recorded(task: Task) -> AsyncGenerator[Runtime]:
+                async with inner(task) as placed_runtime:
+                    assert isinstance(placed_runtime, DockerEndpoint)
+                    code, mounts = await docker(
+                        "inspect",
+                        "--format",
+                        "{{range .Mounts}}{{.Name}} {{end}}",
+                        placed_runtime.container,
+                    )
+                    assert code == 0 and mounts.split(), placed_runtime.container
+                    volumes.update(mounts.split())
+                    yield placed_runtime
+
+            # A cancelled rollout's teardown finishes in the background, removing the
+            # container before its session volume; the test must outlast both.
+            async def removed() -> bool:
+                _, listed = await docker(
+                    "ps", "--all", "--quiet", "--filter", f"label=hud-test={label}"
+                )
+                if listed.split():
+                    return False
+                for volume in volumes:
+                    code, _ = await docker("volume", "inspect", volume)
+                    if code == 0:
+                        return False
+                return True
+
+            yield recorded, removed
         case "ModalRuntime":
             import modal
 
