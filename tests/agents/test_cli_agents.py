@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -27,8 +28,6 @@ from tests.fixtures.environments import workspace_task
 from tests.fixtures.screen import fake_screen
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from hud import Run
     from tests.conftest import HudEnv
 
@@ -45,6 +44,8 @@ EVERY_CLI = pytest.mark.parametrize(
 )
 # The variable each CLI reads its model key from.
 MODEL_KEY = {"claude": "ANTHROPIC_API_KEY", "codex": "INFERENCE_API_KEY"}
+# The variable naming the directory each CLI reads its login and settings from.
+CONFIG_HOME = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
 # Where a workspace runs: unsandboxed where the host gives no sandbox, and in the
 # sandbox lane, where its CLI reaches its model through a process-bound relay.
 BACKINGS = pytest.mark.parametrize(
@@ -179,6 +180,26 @@ async def test_how_the_cli_exits_decides_how_the_run_ends(
     assert trace.error == (None if error is None else f"[agent loop] RuntimeError: {error}")
 
 
+async def test_a_cli_run_that_reaches_its_turn_limit_stops_at_max_steps(tmp_path: Path) -> None:
+    stub = clis.Stub(
+        tmp_path / "ws" / ".stub",
+        "claude",
+        stdout=clis.jsonl(DONE, clis.CLAUDE_TURN_LIMIT),
+        exit=1,
+    )
+    stub.install()
+
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    (trace,) = (await task().run(ClaudeCLIAgent(ClaudeCLIConfig(max_steps=1)))).traces
+
+    assert (trace.status, trace.stop_reason, trace.content, trace.error) == (
+        "completed",
+        "max_steps",
+        "done",
+        None,
+    )
+
+
 @BACKINGS
 async def test_the_cli_drives_the_screen_through_the_computer_bridge(
     backing: dict[str, Any], tmp_path: Path
@@ -232,6 +253,25 @@ async def test_without_a_sandbox_the_cli_holds_its_model_key(
     (capture,) = stub.captures()
     assert trace.status == "completed"
     assert "hud-key" in capture["env"].values()
+
+
+@UNSANDBOXED
+@EVERY_CLI
+async def test_a_cli_given_the_hud_key_reads_no_login_or_settings_from_the_users_home(
+    agent_type: str, cli: str, tmp_path: Path
+) -> None:
+    stub = clis.Stub(tmp_path / "ws" / ".stub", cli, stdout=clis.answer(cli, "done"))
+    stub.install()
+    shell_env = stub.shell_env()
+    task = workspace_task(tmp_path / "ws", env=shell_env)
+
+    trace = await rollout(task(), AgentType(agent_type).cls(), runtime=LocalRuntime(task.env))
+
+    (capture,) = stub.captures()
+    config_home = Path(capture["env"][CONFIG_HOME[cli]])
+    assert trace.status == "completed"
+    assert not config_home.is_relative_to(shell_env["HOME"])
+    assert not await asyncio.to_thread(config_home.exists)
 
 
 @pytest.mark.e2e

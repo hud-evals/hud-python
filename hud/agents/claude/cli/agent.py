@@ -106,6 +106,8 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                     env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
             # PowerShell's environment ignores case.
             taken = {key.casefold() for key in env}
+            if endpoint is not None:
+                taken.add("claude_config_dir")
             if clash := sorted(key for key in self.config.env if key.casefold() in taken):
                 raise ValueError(f"the agent sets {', '.join(clash)} itself")
             env.update(self.config.env)
@@ -130,25 +132,47 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
             if mcp_servers:
                 args.extend(["--mcp-config", MCP_CONFIG_PATH])
 
+            # Injected credentials get a throwaway CLAUDE_CONFIG_DIR, so the host user's login,
+            # settings, memory and MCP servers stay out of the run; otherwise they apply.
             if windows:
-                script = ";".join(
-                    [
-                        *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
-                        f"Get-Content -Raw -Encoding UTF8 {powershell_quote(INPUT_PATH)}"
-                        f" | & {powershell_quote(executable)} "
-                        f"{' '.join(powershell_quote(arg) for arg in args)}",
-                        "exit $LASTEXITCODE",
-                    ]
+                invocation = (
+                    f"Get-Content -Raw -Encoding UTF8 {powershell_quote(INPUT_PATH)}"
+                    f" | & {powershell_quote(executable)} "
+                    f"{' '.join(powershell_quote(arg) for arg in args)}"
                 )
-                command = powershell(script)
+                statements = [
+                    *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
+                    f"{invocation}; $hudExitCode=$LASTEXITCODE",
+                ]
+                if endpoint is not None:
+                    statements = [
+                        "$claudeConfig=Join-Path ([System.IO.Path]::GetTempPath()) "
+                        "('hud-claude-' + [System.Guid]::NewGuid())",
+                        "New-Item -ItemType Directory -Force -Path $claudeConfig | Out-Null",
+                        "$env:CLAUDE_CONFIG_DIR=$claudeConfig",
+                        *statements[:-1],
+                        f"try {{ {statements[-1]} }} "
+                        "finally { Remove-Item -Recurse -Force $claudeConfig }",
+                    ]
+                command = powershell(";".join([*statements, "exit $hudExitCode"]))
             else:
                 env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
                 cli = " ".join(shlex.quote(arg) for arg in [executable, *args])
-                invocation = f"{env_prefix} {cli}"
-                if connection is not None:
-                    # A guarded connection is bound to the launched process, so exec the CLI itself.
-                    invocation = f"exec env {invocation}"
-                command = f'export PATH="$HOME/.local/bin:$PATH"; {invocation}'
+                statements: list[str] = []
+                if endpoint is not None:
+                    statements.append(
+                        'claude_config=$(mktemp -d "${TMPDIR:-/tmp}/hud-claude.XXXXXX") || exit 1'
+                    )
+                    # Under exec no trap survives; the sandbox holding a guarded connection is
+                    # discarded after the rollout.
+                    if connection is None:
+                        statements.append("trap 'rm -rf -- \"$claude_config\"' EXIT")
+                    statements.append('export CLAUDE_CONFIG_DIR="$claude_config"')
+                statements.append('export PATH="$HOME/.local/bin:$PATH"')
+                # A guarded connection is bound to the launched process, so exec the CLI itself.
+                exec_ = "exec env " if connection is not None else ""
+                statements.append(f"{exec_}{env_prefix} {cli}")
+                command = "; ".join(statements)
 
             input_text = (
                 json.dumps(
