@@ -41,8 +41,17 @@ FIXTURES = sorted(
     )
 )
 
+# The HUD gateway does not serve Gemini's native API for now; drop this skip once it does.
+GATEWAY_DOWN = pytest.mark.skip(reason="the HUD gateway does not serve Gemini's native API")
+
 CELLS = [
-    pytest.param(kind, MODELS[kind], fixture, id=f"{kind}-{fixture}")
+    pytest.param(
+        kind,
+        MODELS[kind],
+        fixture,
+        id=f"{kind}-{fixture}",
+        marks=GATEWAY_DOWN if kind is AgentType.GEMINI else (),
+    )
     for kind in AgentType
     for fixture in (["workspace"] if kind.is_cli else FIXTURES)
 ]
