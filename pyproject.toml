@@ -45,11 +45,12 @@ classifiers = [
 hud = "hud.cli.__main__:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-path = "hud/version.py"
+source = "vcs"
+raw-options = { git_describe_command = "git describe --dirty --tags --long --match v*.*.* --exclude *dev*" }
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -110,6 +111,7 @@ dev = [
 [tool.uv]
 required-version = ">=0.12.2"
 exclude-newer = "1 day"
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
 
 [tool.ruff]
 target-version = "py311"
