@@ -1,11 +1,10 @@
-"""Probe the task's difficulty before committing to a training run.
+"""Pass rate across the bug variants on Daytona, broken down by bug count.
 
     PYTHONPATH=. uv run bench/baseline.py  # 24 variants, 1 rollout each
     PYTHONPATH=. uv run bench/baseline.py --variants 24 --group 2
 
-Runs the same agent config training would use, with no optimizer. The decision
-this informs: a 15-55% pass rate leaves room for GRPO to learn; near 0% or near
-100% means retune the task before training.
+A 15-55% pass rate means the task separates stronger attempts from weaker ones;
+near 0% or near 100% means retune the task.
 """
 
 from __future__ import annotations
@@ -24,14 +23,11 @@ import bugs
 from env import fix_calc
 from snapshot import snapshot_name
 
-MODEL = "daytona-calc-3"
+MODEL = "claude-haiku-4-5"
 
 
 async def main(*, variants: int, group: int, max_concurrent: int, start: int, model: str) -> None:
-    agent = create_agent(
-        model,
-        completion_kwargs={"max_tokens": 2048, "extra_body": {"return_token_ids": True}},
-    )
+    agent = create_agent(model, completion_kwargs={"max_tokens": 2048})
     variant_ids = list(range(start, start + variants))
     taskset = Taskset("calc", [fix_calc(variant=v) for v in variant_ids])
     runtime = DaytonaRuntime(snapshot_name(), image=Image.from_dockerfile("Dockerfile.hud"))
@@ -78,7 +74,7 @@ async def main(*, variants: int, group: int, max_concurrent: int, start: int, mo
 
     rate = solved / launched
     verdict = (
-        "in range — a training run is justified"
+        "in range — the task separates attempts"
         if 0.15 <= rate <= 0.55
         else "too easy — add bugs or harder ones"
         if rate > 0.55

@@ -350,9 +350,7 @@ design; they are not a Fireworks serverless benchmark.
 
 BFCL is not a drop-in input to this cookbook. `--taskset` can select the
 hosted taskset and runtime, but the included adapter cannot execute the tool
-loop and the batch builder keeps only one assistant turn. See the
-[HUD RL training cookbook](https://github.com/hud-evals/hud-python/tree/main/cookbooks/rl-training)
-for a runnable multi-turn implementation.
+loop and the batch builder keeps only one assistant turn.
 
 ## References
 

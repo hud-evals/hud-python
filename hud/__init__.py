@@ -1,4 +1,4 @@
-"""HUD: tools for building, evaluating, and training AI agents."""
+"""HUD: tools for building and evaluating AI agents."""
 
 from __future__ import annotations
 

@@ -21,9 +21,8 @@ from timing import TimedProvider
 
 SNAPSHOT = snapshot_name()
 
-# The model this repo trains. Any gateway model works — swap it for "claude" or
-# a base model to see the untrained behaviour.
-MODEL = "daytona-calc-3"
+# Any gateway model works.
+MODEL = "claude-haiku-4-5"
 
 
 async def main() -> None:

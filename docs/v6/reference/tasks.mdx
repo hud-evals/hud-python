@@ -7,7 +7,7 @@ icon: "list-check"
 An [environment](/v6/reference/environment) is *where* the agent acts. A **task** is the *work* you
 measure there: the unit of evaluation, one prompt paired with one graded outcome that resolves to a
 single number, the **reward**. That one number is what an evaluation reports and what
-[training](/v6/reference/training) learns from.
+training learns from.
 
 A task has two representations. You author it as an **async generator** decorated with `@env.template`,
 the shape that prompts the agent and scores what happens. Calling that template mints a **`Task`**: a

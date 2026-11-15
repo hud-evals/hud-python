@@ -6,7 +6,7 @@
   </picture>
 </div>
 
-HUD is a platform for building RL environments for AI agents, across coding, browser, computer-use, and robotics. Define an environment, write tasks, and run them as evals and training across any model, at any scale.
+HUD is a platform for building RL environments for AI agents, across coding, browser, computer-use, and robotics. Define an environment, write tasks, and run them as evals across any model, at any scale.
 
 To learn more, see the [documentation](https://docs.hud.ai) and [environment reference](https://docs.hud.ai/v6/reference/environment).
 
@@ -137,34 +137,6 @@ From the [platform UI](https://hud.ai) you can run batches, compare models on th
 
 → [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 
-## Train on rewards
-
-Every rollout returns a graded `Trace` carrying a `trace_id` and a `reward`, so the tasks you evaluate are already training data. Run a **group** per task and pass the graded traces to `TrainingClient.step()`:
-
-```python
-from hud import Job
-from hud.agents import create_agent
-from hud.train import TrainingClient
-
-agent = create_agent("arith-rl", completion_kwargs={"extra_body": {"return_token_ids": True}})
-trainer = TrainingClient("arith-rl")
-taskset, runtime = ...  # your Taskset and where rollouts run
-
-session = await Job.start("arith-rl", group=8)
-start = len(session.traces)
-await taskset.run(agent, runtime=runtime, group=8, job=session)
-batch = session.traces[start:]
-# A timed-out or error-graded trace carries no reward signal: drop its whole group.
-failed = {t.group_id for t in batch if t.stop_reason == "timeout" or t.grade.is_error}
-trainable = [t for t in batch if t.group_id not in failed]
-if trainable:
-    await trainer.step(trainable, learning_rate=1e-5, group_size=8)
-```
-
-HUD is the environment-and-reward source for your own GRPO/PPO loop — the same environment trains any model, text or multimodal, unchanged.
-
-→ [Training](https://docs.hud.ai/v6/reference/training) · [Designing tasks for signal](https://docs.hud.ai/v6/reference/advice)
-
 ## Links
 
 - [Documentation](https://docs.hud.ai)
@@ -176,7 +148,7 @@ HUD is the environment-and-reward source for your own GRPO/PPO loop — the same
 
 ## Enterprise
 
-Building agents at scale? We work with teams on custom environments, benchmarks, and training.
+Building agents at scale? We work with teams on custom environments and benchmarks.
 
 [📅 Book a call](https://cal.com/jay-hud) · [📧 founders@hud.ai](mailto:founders@hud.ai)
 

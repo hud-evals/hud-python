@@ -223,17 +223,12 @@ hud eval env.py claude --group 3
 ## 5 · Learn
 
 With runs in hand, you can **learn** from their signals - *evaluating* a model, *benchmarking* it against
-others, or *training* it to improve. For training, the **training client** turns the rewards from your runs
-into model updates you can plug straight into your RL stack.
-
-| Concept | What it is in HUD |
-| --- | --- |
-| [**Training Client**](/v6/reference/training#trainingclient) | Drives managed training for a model - turning the rewards collected from runs into gradient updates you feed into your RL loop. |
+others, or *training* it to improve.
 
 <Accordion title="Part 5: Learn">
 
 HUD can directly provide rewards for your runs based on the **grader**. 
-These can then be used for your [training](/v6/reference/training): run a group per task and feed the
+These can then be used for training: run a group per task and feed the
 spread straight into your own GRPO/PPO loop - or a stack like
 [Tinker](https://thinkingmachines.ai/tinker/), [slime](https://github.com/THUDM/slime), or
 [Fireworks](https://fireworks.ai/).

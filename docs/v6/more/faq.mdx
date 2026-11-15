@@ -36,7 +36,7 @@ See [Agents](/v6/reference/agents).
 </Accordion>
 
 <Accordion title="Do I need a GPU?">
-No - not to build environments, write tasks, or run evals. Inference happens through the gateway or your provider. **Training** feeds HUD's rewards into your own GRPO/PPO loop (or a stack like Tinker, slime, or Fireworks), which brings its own compute. See [Training](/v6/reference/training).
+No - not to build environments, write tasks, or run evals. Inference happens through the gateway or your provider. **Training** feeds HUD's rewards into your own GRPO/PPO loop (or a stack like Tinker, slime, or Fireworks), which brings its own compute.
 </Accordion>
 
 <Accordion title="My environment imports a package hud can't find - why?">
@@ -96,7 +96,7 @@ Yes. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so any compatible
 </Accordion>
 
 <Accordion title="Do I have to train, or can I just run evals?">
-Evals are a complete use on their own - write tasks, run them across models, read rewards and traces. Training is **optional**: because every rollout returns a reward and a trace, the same tasks become training data **if and when** you want them to. See [Training](/v6/reference/training).
+Evals are a complete use on their own - write tasks, run them across models, read rewards and traces. Training is **optional**: because every rollout returns a reward and a trace, the same tasks become training data **if and when** you want them to.
 </Accordion>
 
 <Accordion title="Can I bring an existing benchmark or tasks?">

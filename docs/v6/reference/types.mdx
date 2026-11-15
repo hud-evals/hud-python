@@ -64,8 +64,7 @@ print(len(job.errors))  # traces without a grade
 ```
 
 Each `run` call mints its own job by default. To gather many calls under one id - a training session, a
-multi-turn chat - open one with `Job.start(name, *, group=1, taskset_id=None)` and pass it as `job=`;
-the [training agents](/v6/guides/training-agents) guide uses this session pattern.
+multi-turn chat - open one with `Job.start(name, *, group=1, taskset_id=None)` and pass it as `job=`.
 
 ## `Trace`
 
