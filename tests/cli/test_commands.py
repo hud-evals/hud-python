@@ -282,6 +282,22 @@ def test_a_mutating_command_changes_nothing_unless_confirmed(
     assert state(hud, hud_env) == before
 
 
+@pytest.mark.parametrize(
+    ("argv", "command"),
+    [
+        (["init", "demo", "--templat", "blank"], "init"),
+        (["jobs", "list", "--templat"], "jobs list"),
+    ],
+)
+def test_a_mistyped_option_names_its_command(argv: list[str], command: str, hud: Hud) -> None:
+    result = hud(*argv, "--json")
+
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
+    assert result.json["suggestion"].endswith(f" {command} --help'."), result
+    if command == "init":
+        assert "Possible options: --template" in result.json["message"], result
+
+
 @pytest.mark.parametrize("name", sorted(FAILING))
 def test_a_failure_is_one_error_document_under_json_and_stays_off_stdout_in_text(
     name: str, services: FakeServices, hud_env: HudEnv, hud: Hud
