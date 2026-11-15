@@ -16,6 +16,7 @@ from uuid import UUID
 import typer
 from dotenv import set_key
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from typer._click.exceptions import UsageError
 from typer.core import TyperCommand, TyperGroup
 
 from hud.utils.exceptions import HudAuthenticationError, HudRequestError, HudTimeoutError
@@ -237,10 +238,14 @@ class CliError(Exception):
 def map_exception(exc: BaseException, *, input: dict[str, Any] | None = None) -> CliError:
     if isinstance(exc, CliError):
         return exc
-    # Typer vendors Click, so its UsageError (unknown command, bad option) is not
-    # click.UsageError; the exit code is the stable signal.
-    if getattr(exc, "exit_code", None) == ExitCode.USAGE:
-        return CliError(error="usage", message=str(exc), input=input)
+    if isinstance(exc, UsageError):
+        command = exc.ctx.command_path if exc.ctx is not None else "hud"
+        return CliError(
+            error="usage",
+            message=exc.format_message(),
+            input=input,
+            suggestion=f"Run '{command} --help'.",
+        )
     if isinstance(exc, ValueError):
         return CliError(error="usage", message=str(exc), input=input)
     if isinstance(exc, FileNotFoundError):
@@ -279,13 +284,26 @@ def _json_option() -> Any:
     return option
 
 
+class CLIContext(typer.Context):
+    """Records the deepest command reached, for usage errors the root reports."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Click shares ``meta`` across a command's nested contexts.
+        self.meta["hud.command"] = self
+
+
 class CLICommand(TyperCommand):
+    context_class = CLIContext
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.params.append(_json_option())
 
 
 class CLIGroup(TyperGroup):
+    context_class = CLIContext
+
     # Typer emits leaf commands before groups; this is the public help order.
     command_order = (
         "init",
@@ -363,7 +381,7 @@ class CLIGroup(TyperGroup):
                 sys.stdout.flush()
             else:
                 if error.exit_code == ExitCode.USAGE:
-                    sys.stderr.write(ctx.get_usage() + "\n")
+                    sys.stderr.write(ctx.meta["hud.command"].get_usage() + "\n")
                 sys.stderr.write(f"Error: {error.message}\n")
                 if error.suggestion:
                     sys.stderr.write(f"Hint: {error.suggestion}\n")
