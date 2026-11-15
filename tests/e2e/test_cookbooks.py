@@ -15,10 +15,12 @@ import importlib
 import importlib.util
 import subprocess
 import sys
+import warnings
 from typing import TYPE_CHECKING
 
 import pytest
 
+from hud.utils.exceptions import HudDeprecationWarning
 from tests.conftest import ROOT, steps
 
 from .lifecycle import assert_clean_lifecycle, evaluated, scripted
@@ -77,10 +79,18 @@ def imports(path: Path) -> list[tuple[str, str | None]]:
 
 
 def resolves(module: str, name: str | None) -> bool:
-    """``module`` imports and has ``name``, as an attribute or a submodule."""
+    """``module`` imports and has ``name``, as an attribute or a submodule, on a current path.
+
+    A name served from a retired path warns; that counts as not resolving.
+    """
     imported = importlib.import_module(module)
-    if name is None or hasattr(imported, name):
-        return True
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", HudDeprecationWarning)
+        try:
+            if name is None or hasattr(imported, name):
+                return True
+        except HudDeprecationWarning:
+            return False
     return (
         hasattr(imported, "__path__") and importlib.util.find_spec(f"{module}.{name}") is not None
     )
