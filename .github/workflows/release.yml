@@ -1,54 +1,135 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version to release (X.Y.Z). Leave empty to publish this commit's dev build.
+        required: false
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
-  validate:
+  version:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Require pre-release validation for this commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          validated_run=$(gh api --method GET \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/pre-release.yml/runs" \
-            -f head_sha="$GITHUB_SHA" -f branch=main \
-            -f event=workflow_dispatch -f status=success \
-            --jq '.workflow_runs[0].html_url // empty')
-          if [ -z "$validated_run" ]; then
-            echo "::error::Run Pre-release on main for commit $GITHUB_SHA before publishing."
-            exit 1
-          fi
-          echo "Validated by $validated_run"
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-  deploy:
-    needs: validate
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+
+      - name: Choose the version
+        id: version
+        env:
+          RELEASE: ${{ inputs.version }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            latest=$(git tag --list 'v*' | grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n 1)
+            if ! [[ "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Release version '$RELEASE' must be a stable X.Y.Z."
+              exit 1
+            fi
+            if [ "$(printf '%s\n' "$latest" "v$RELEASE" | sort -V | tail -n 1)" != "v$RELEASE" ] || [ "$latest" = "v$RELEASE" ]; then
+              echo "::error::Release version $RELEASE must be newer than $latest."
+              exit 1
+            fi
+            echo "version=${RELEASE}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=$(uvx --from hatchling --with hatch-vcs hatchling version)
+          version=${version%%+*}
+          case "$version" in *.dev*) echo "version=${version}" >> "$GITHUB_OUTPUT" ;; esac
+
+  templates:
+    needs: version
+    runs-on: ubuntu-latest
+    environment: pre-release
+    timeout-minutes: 45
+    concurrency:
+      group: ci-example-${{ matrix.template }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [blank, coding, cua, argument-hints]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+
+      - name: Require credentials
+        env:
+          HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
+        run: test -n "$HUD_API_KEY"
+
+      - name: Deploy and run the template on HUD
+        env:
+          HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
+          HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
+          HUD_E2E_TRACE_DIR: ${{ runner.temp }}/traces
+        run: >-
+          uv run --locked --python 3.12 --all-extras
+          pytest -m "e2e and hosted" -p no:cacheprovider -rs
+          "tests/e2e/test_templates.py::test_a_deployed_template_runs_on_hud_and_its_trace_reads_back[${{ matrix.template }}]"
+
+      - name: Save traces
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: example-traces-${{ matrix.template }}
+          path: ${{ runner.temp }}/traces/${{ matrix.template }}
+          retention-days: 7
+
+  live:
+    needs: version
+    uses: ./.github/workflows/live.yml
+    secrets: inherit
+
+  publish:
+    needs: [version, templates, live]
+    if: needs.version.outputs.version
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       contents: write
+    env:
+      TAG: v${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
 
       - name: Build and publish 'hud' to PyPI
         env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.version.outputs.version }}
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           uv build
-          uv publish
+          uv publish --check-url https://pypi.org/simple/
 
-      # docs.hud.ai builds the SDK tab from the docs branch. Prereleases stay
-      # off it: the branch tracks the latest stable release.
-      - name: Point docs at this release
-        if: ${{ !github.event.release.prerelease }}
+      - name: Tag the published commit
         run: |
-          git push --force origin "${GITHUB_SHA}:refs/heads/docs"
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+
+      # docs.hud.ai builds the SDK tab from the docs branch.
+      - name: Point docs at this release
+        if: inputs.version
+        run: git push --force origin "${GITHUB_SHA}:refs/heads/docs"
+
+      - name: Draft the GitHub release for its notes
+        if: inputs.version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$TAG" --verify-tag --draft --title "$TAG" --notes ""

@@ -117,11 +117,6 @@ def init_command(
         else:
             # An installed SDK: fetch the example from this version's release tag.
             version = Version(__version__)
-            if version.is_devrelease:
-                raise ValueError(
-                    f"HUD SDK development version {__version__!r} has no matching example "
-                    "archive; run hud init from a source checkout"
-                )
             headers = {}
             if token := os.environ.get("GITHUB_TOKEN"):
                 headers["Authorization"] = f"Bearer {token}"

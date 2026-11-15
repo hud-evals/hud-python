@@ -8,7 +8,7 @@ that lifecycle:
 - a scripted model behind the fake gateway, on every PR;
 - a cheap real model through the HUD gateway, in the ``live`` lane;
 - ``hosted``: deployed to HUD and run on its runtime, with the trace read back
-  from the platform. The pre-release workflow runs it one template per job.
+  from the platform. The release workflow runs it one template per job.
 
 A template that serves an isolated workspace (coding) needs the sandbox lane
 locally; its environment is installed under /usr, where its image puts it.
