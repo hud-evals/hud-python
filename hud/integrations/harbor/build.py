@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from hud.runtime.compose import ComposeConfig
 
-    from .adapt import HarborTask
+    from .adapt import HarborSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +70,7 @@ def inspect_image(image: str) -> dict[str, Any]:
 
 
 def resolve_images(
-    source: HarborTask,
+    source: HarborSource,
     compose_project: ComposeConfig,
     *,
     verifier_image: str,

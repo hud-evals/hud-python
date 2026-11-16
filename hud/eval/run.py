@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import math
 import traceback
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from hud.capabilities.base import Capability
     from hud.environment.egress import WorkspaceRoute
     from hud.environment.file_tracker import FileTrackingOp
-    from hud.runtime.core import Provider, RuntimeConfig
+    from hud.runtime.core import Provider, Runtime, RuntimeConfig
 
     from .task import Task
 
@@ -43,7 +44,7 @@ logger = logging.getLogger("hud.eval.run")
 
 
 class EnvironmentSession(Protocol):
-    """One live environment as the engine drives it; each kind of runtime opens its own.
+    """The core protocol: one live environment as rollout drives it, whatever its format.
 
     ``capabilities`` are at the addresses this process reaches them. ``revoke`` ends the
     agent's access and must finish before ``grade``. ``files`` returns ``None`` when the
@@ -65,6 +66,21 @@ class EnvironmentSession(Protocol):
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     async def files(self, op: FileTrackingOp) -> dict[str, Any] | None: ...
+
+
+@functools.singledispatch
+def connect(
+    task: Task,
+    runtime: Runtime,
+    *,
+    workspace_routes: Sequence[WorkspaceRoute] = (),
+) -> AbstractAsyncContextManager[EnvironmentSession]:
+    """A session of the core protocol for ``task``, on the runtime it was placed on.
+
+    A format registers how its tasks connect, by their type; HUD's own tasks connect to the
+    environment their runtime hosts, served or in this process.
+    """
+    return runtime.connect(workspace_routes=workspace_routes)
 
 
 def validate_rollout_timeouts(
@@ -435,7 +451,7 @@ async def rollout(
                     )
                     shared_verifier = True
                 _phase = "starting task"
-                async with addr.connect(workspace_routes=workspace_routes) as actor_session:
+                async with connect(task, addr, workspace_routes=workspace_routes) as actor_session:
                     bound = [*connections, *_gateway_relay(agent, actor_session, connections)]
                     if bound:
                         await actor_session.bind(bound)
@@ -489,7 +505,9 @@ async def rollout(
                         return
                     _phase = "provisioning verifier"
                     verifier_addr = await scope.enter_async_context(runtime(verifier))
-                    verifier_session = await scope.enter_async_context(verifier_addr.connect())
+                    verifier_session = await scope.enter_async_context(
+                        connect(verifier, verifier_addr)
+                    )
                     if archive is not None:
                         await verifier_addr.restore_session(verifier_session.session_id, archive)
                     _phase = "verifying"

@@ -183,7 +183,7 @@ docstring-code-format = true
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["pydantic.BaseModel", "fastmcp.tools.Tool"]
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "fastmcp.tools.Tool", "hud.eval.task.Task"]
 
 [tool.ty.src]
 include = ["hud", "tests"]

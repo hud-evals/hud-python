@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fnmatch
-import json
-import math
 import os
-import re
-import shlex
 import shutil
 import socket
 import tempfile
@@ -20,7 +15,15 @@ from hud.environment.egress import ANY_HOST
 from hud.environment.env import Environment
 from hud.environment.sandbox import Mount, Sandbox
 from hud.environment.session import session_state_dir
-from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
+from hud.integrations.harbor.config import ControllerConfig, TaskSpec
+from hud.integrations.harbor.grading import (
+    artifact_path,
+    env_refs,
+    evaluation,
+    exclude_artifact_paths,
+    verifier_command,
+)
+from hud.runtime.core import resolve_env
 from hud.types import EvaluationResult
 from hud.utils.process import ProcessResult, create_process_group_exec
 
@@ -42,32 +45,8 @@ RUNTIME_ROOT = Path("/runtime")
 DOCKER_SOCKET = Path("/var/run/docker.sock")
 MANAGED_AGENTS = Path("/usr/local/lib/agents")
 
-ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
-
-
-def resolve_env_templates(env: dict[str, str]) -> dict[str, str]:
-    resolved: dict[str, str] = {}
-    for key, value in env.items():
-        match = ENV_TEMPLATE.fullmatch(value)
-        if match is None:
-            resolved[key] = value
-            continue
-        name, default = match.group(1), match.group(2)
-        runtime_value = os.environ.get(name)
-        if runtime_value is not None and (runtime_value or default is None):
-            resolved[key] = runtime_value
-        elif default is not None:
-            resolved[key] = default
-        else:
-            raise ValueError(
-                f"Harbor env template for {key!r} needs {name!r}; "
-                "the runtime environment must provide it"
-            )
-    return resolved
-
-
 for policy in (CONFIG.environment, CONFIG.agent):
-    policy.env = resolve_env_templates(policy.env)
+    policy.env = resolve_env(env_refs(policy.env), os.environ)
 os.environ.update(CONFIG.environment.env)
 TASK_ENV = {**CONFIG.image_env, **CONFIG.environment.env}
 WORKDIR = Path(CONFIG.workdir)
@@ -304,29 +283,6 @@ async def compose_containers() -> dict[str, str]:
     }
 
 
-def exclude_artifact_paths(root: Path, patterns: list[str]) -> None:
-    if not patterns or not root.is_dir() or root.is_symlink():
-        return
-    for entry in sorted(root.rglob("*"), key=lambda path: len(path.parts), reverse=True):
-        relative = entry.relative_to(root).as_posix()
-        parts = Path(relative).parts
-        candidates = (
-            relative,
-            f"./{relative}",
-            *("/".join(parts[index:]) for index in range(1, len(parts))),
-        )
-        if not any(
-            fnmatch.fnmatchcase(candidate, pattern)
-            for candidate in candidates
-            for pattern in patterns
-        ):
-            continue
-        if entry.is_dir() and not entry.is_symlink():
-            shutil.rmtree(entry)
-        else:
-            entry.unlink()
-
-
 def copy_artifact(source: Path, target: Path, exclude: list[str], *, name: str) -> None:
     if source.is_symlink():
         raise RuntimeError(f"artifact {name} is a symbolic link")
@@ -351,11 +307,6 @@ def task_path(guest: str) -> Path:
         return TASK_ROOT / path.relative_to("/")
     mount = max(mounts, key=lambda mount: len(PurePosixPath(mount.dst).parts))
     return Path(mount.src, path.relative_to(mount.dst))
-
-
-def artifact_path(artifact: Artifact, artifacts: Path) -> Path:
-    relative = artifact.destination or artifact.source.lstrip("/").rstrip("/")
-    return artifacts / relative
 
 
 def compose_services() -> Callable[[str], Awaitable[str]]:
@@ -520,17 +471,6 @@ def clear_grading_files() -> None:
             AGENT_ANSWER.unlink()
 
 
-def verifier_command(script: Path, path: str | None = None) -> list[str]:
-    target = path or str(script)
-    for line in script.read_text("utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#!"):
-            return [*shlex.split(stripped[2:]), target]
-        if stripped and not stripped.startswith("#"):
-            break
-    return ["/bin/sh", target]
-
-
 async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResult:
     clear(TESTS)
     shutil.copytree(CONTROLLER_ROOT / "tests" / task_id, TESTS, symlinks=True, dirs_exist_ok=True)
@@ -548,9 +488,9 @@ async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResu
                 os.lchown(path, *verifier_account.identity)
 
     execution = await sandbox.run(
-        verifier_command(test_script),
+        verifier_command(test_script.read_text("utf-8"), str(test_script)),
         mounts=verifier_mounts,
-        env={**verifier_account.env, **TASK_ENV, **resolve_env_templates(verifier.env)},
+        env={**verifier_account.env, **TASK_ENV, **resolve_env(env_refs(verifier.env), os.environ)},
         identity=verifier_account.identity,
         inherit_workspace_env=False,
         allowed_hosts=verifier.network.allowed_hosts,
@@ -558,7 +498,7 @@ async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResu
         max_wait=timeout_sec,
         writable_hosts=True,
     )
-    return evaluation(execution, timeout_sec)
+    return read_evaluation(execution, timeout_sec)
 
 
 def remove_path(path: Path) -> None:
@@ -687,7 +627,7 @@ async def grade_separate(
                 **verifier_account.env,
                 **CONFIG.environment.env,
                 **image.env,
-                **resolve_env_templates(verifier.env),
+                **resolve_env(env_refs(verifier.env), os.environ),
             }
             with materialized_artifacts(
                 task, verifier_root, session / "artifacts", verifier_account.identity
@@ -717,7 +657,7 @@ async def grade_separate(
                 try:
                     await isolated.start()
                     execution = await isolated.run(
-                        verifier_command(test_script, "/tests/test.sh"),
+                        verifier_command(test_script.read_text("utf-8"), "/tests/test.sh"),
                         env=verifier_env,
                         cwd=image.workdir,
                         identity=verifier_account.identity,
@@ -731,59 +671,12 @@ async def grade_separate(
                     await isolated.stop()
         finally:
             test_script.chmod(test_mode)
-    return evaluation(execution, task.verifier_timeout)
+    return read_evaluation(execution, task.verifier_timeout)
 
 
-def evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult:
-    info: dict[str, Any] = {
-        "exit_code": execution.returncode,
-        "stdout": execution.stdout.decode("utf-8", "replace"),
-        "stderr": execution.stderr.decode("utf-8", "replace"),
-    }
-    if execution.timed_out:
-        info["verifier_timeout_sec"] = timeout_sec
-        return EvaluationResult(
-            isError=True,
-            content=f"Harbor verifier timed out after {timeout_sec:.0f}s",
-            info=info,
-        )
-
-    score, reward_info = reward()
-    info.update(reward_info)
-    if score is None:
-        return EvaluationResult(
-            isError=True,
-            content="Harbor verifier did not write a numeric reward",
-            info=info,
-        )
-    return EvaluationResult(reward=score, info=info)
-
-
-def reward() -> tuple[float | None, dict[str, Any]]:
-    reward_json = VERIFIER_LOGS / "reward.json"
-    if reward_json.is_file():
-        try:
-            data = json.loads(reward_json.read_text("utf-8"))
-        except json.JSONDecodeError:
-            return None, {"reward_parse_error": "reward.json is not valid JSON"}
-        candidates = [data]
-        if isinstance(data, dict):
-            candidates.extend((data.get("reward"), data.get("score")))
-        for value in candidates:
-            if isinstance(value, int | float) and not isinstance(value, bool):
-                score = float(value)
-                if math.isfinite(score):
-                    return score, {"reward_file": str(reward_json)}
-        return None, {"reward_parse_error": "reward.json has no numeric reward"}
-
-    reward_text = VERIFIER_LOGS / "reward.txt"
-    if reward_text.is_file():
-        text = reward_text.read_text("utf-8").strip()
-        try:
-            score = float(text)
-        except ValueError:
-            score = math.nan
-        if math.isfinite(score):
-            return score, {"reward_file": str(reward_text)}
-        return None, {"reward_parse_error": text}
-    return None, {}
+def read_evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult:
+    reward_json, reward_txt = (
+        path.read_text("utf-8") if path.is_file() else None
+        for path in (VERIFIER_LOGS / "reward.json", VERIFIER_LOGS / "reward.txt")
+    )
+    return evaluation(execution, timeout_sec, reward_json, reward_txt)

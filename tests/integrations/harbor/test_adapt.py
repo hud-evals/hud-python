@@ -240,3 +240,20 @@ def test_another_hud_release_rebuilds_the_image_from_the_index(
     after = main_image(dataset, "hud==0.0.1")
 
     assert after != before
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        ("Not Normalized", "not a normalized environment name"),
+        ("named", "applies to one Harbor task folder"),
+    ],
+)
+def test_adapt_refuses_a_name_it_cannot_give_the_environment(
+    tmp_path: Path, name: str, message: str
+) -> None:
+    dataset = tmp_path / "dataset"
+    assemble_case(Path(__file__).parent / "tasks" / "agent-answer", dataset / "agent-answer")
+
+    with pytest.raises(ValueError, match=message):
+        harbor.adapt(dataset, name=name, hud_requirement="hud")

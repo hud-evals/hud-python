@@ -14,6 +14,36 @@ contracts. `adapt()` packages Harbor tasks without publishing
 images. `export()` materializes HUD tasks as self-contained Harbor folders.
 `hud harbor import` brings Harbor tasks and the runs Harbor recorded into a HUD
 taskset, to browse and compare them on the platform without running them again.
+`load()` runs Harbor tasks natively instead, with no generated environment.
+
+## Run Harbor tasks natively
+
+`harbor.load(path)` reads one task or a dataset into a taskset of `HarborTask` rows. Each
+row places the task's own image (built from `environment/` by the runtime) or Compose
+project as a box, and Harbor's lifecycle runs in this process against it:
+
+```python
+from hud.agents.claude.cli.agent import ClaudeCLIAgent
+from hud.integrations import harbor
+from hud.runtime import DockerRuntime
+
+loaded = harbor.load("./terminal-bench")
+job = await loaded.taskset.run(ClaudeCLIAgent(), runtime=DockerRuntime())
+```
+
+Starting a task serves the agent a shell into the box as `[agent].user`, plus the task's
+network MCP servers, and prompts with `instruction.md`. Before grading, the agent's
+shell is closed; processes it started keep running, as Harbor's shared verifier expects.
+Grading runs the collect hooks, copies `tests/` in, runs `test.sh` as `[verifier].user`,
+and reads `reward.json` or `reward.txt`. `/logs/artifacts` starts empty, and the verifier
+owns it at grading. With `[verifier].environment_mode = "separate"`, the declared
+artifacts and `/logs/artifacts` travel to a fresh verifier box through the runtime's
+session handoff. Loading never builds; tasks that declare a network policy come back as
+failures, since native runs do not enforce one yet. The agent's shell is served without
+`bwrap` isolation, so a CLI agent receives its model credential in the box.
+
+Native runs need `DockerRuntime` for now: it is the provider that builds images and
+places boxes.
 
 ## Adapt Harbor tasks
 
@@ -233,6 +263,7 @@ covers that review.
 | Function | Contract |
 | --- | --- |
 | `harbor.adapt(path, *, hud_requirement=f"hud=={hud.__version__}", name=None) -> AdaptResult` | Package valid tasks as generated Compose environments and native task rows, and return structured failures for the rest. `hud_requirement` installs the controller each image serves (`hud.integrations.harbor.env`); pass a wheel path when adapting from an unreleased checkout. `name` names the generated environment instead of `<dataset>-<digest>`, and then `path` must be one task folder. Raises `ValueError` when no task directories exist. |
+| `harbor.load(path) -> AdaptResult` | Read valid tasks as `HarborTask` rows that run natively in their authored image or Compose project, and return structured failures for the rest. Raises `ValueError` when no task directories exist. |
 | `await harbor.export(source, out_dir, *, answer_file=..., timeout_sec=600) -> list[Path]` | Write HUD task rows as Harbor task directories. |
 
 <CardGroup cols={2}>

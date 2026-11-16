@@ -217,7 +217,7 @@ class AdaptResult:
 
 
 @dataclass(frozen=True, slots=True)
-class HarborTask:
+class HarborSource:
     path: Path
     config: TaskConfig
     instruction: str
@@ -239,7 +239,8 @@ def _tree_hash(root: Path) -> str:
     return digest.hexdigest()[:16]
 
 
-def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding, ...]]:
+def inspect_task(task_dir: Path) -> tuple[HarborSource | None, tuple[AdaptFinding, ...]]:
+    """Parse one Harbor task directory, or say what keeps it from loading."""
     findings: list[AdaptFinding] = []
 
     def add(code: str, message: str) -> None:
@@ -404,7 +405,7 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
     assert compose is not None
     assert base_image is not None
     return (
-        HarborTask(
+        HarborSource(
             path=task_dir,
             config=config,
             instruction=instruction.read_text("utf-8"),
@@ -416,6 +417,21 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
         ),
         (),
     )
+
+
+def task_dirs(path: str | Path) -> tuple[list[Path], Path]:
+    """The Harbor task directories at ``path``, one task or a dataset of them, and the dataset."""
+    root = Path(path).resolve()
+    if (root / "task.toml").is_file():
+        found, dataset = [root], root.parent
+    elif root.is_dir():
+        found = sorted(child for child in root.iterdir() if (child / "task.toml").is_file())
+        dataset = root
+    else:
+        found, dataset = [], root
+    if not found:
+        raise ValueError(f"no Harbor tasks found in {path}")
+    return found, dataset
 
 
 def adapt(
@@ -431,33 +447,22 @@ def adapt(
     ``name`` names the generated environment instead of ``<dataset>-<digest>``;
     ``path`` must then be one task folder.
     """
-    if name is not None and normalize_environment_name(name) != name:
-        raise ValueError(f"environment name {name!r} is not a normalized environment name")
-    root = Path(path).resolve()
-    if (root / "task.toml").is_file():
-        task_dirs = [root]
-        dataset = root.parent
-    elif name is not None:
-        raise ValueError(f"name {name!r} applies to one Harbor task folder; {path} is not one")
-    elif root.is_dir():
-        task_dirs = sorted(child for child in root.iterdir() if (child / "task.toml").is_file())
-        dataset = root
-    else:
-        task_dirs = []
-        dataset = root
-    if not task_dirs:
-        raise ValueError(f"no Harbor tasks found in {path}")
-
-    tasks: list[HarborTask] = []
+    if name is not None:
+        if normalize_environment_name(name) != name:
+            raise ValueError(f"environment name {name!r} is not a normalized environment name")
+        if not (Path(path).resolve() / "task.toml").is_file():
+            raise ValueError(f"name {name!r} applies to one Harbor task folder; {path} is not one")
+    directories, dataset = task_dirs(path)
+    tasks: list[HarborSource] = []
     failures: list[AdaptFailure] = []
-    for task_dir in task_dirs:
-        task, findings = _inspect_task(task_dir)
+    for task_dir in directories:
+        task, findings = inspect_task(task_dir)
         if task is not None:
             tasks.append(task)
         else:
             failures.append(AdaptFailure(task=task_dir.name, path=task_dir, findings=findings))
 
-    grouped: dict[tuple[str, str, str], list[HarborTask]] = {}
+    grouped: dict[tuple[str, str, str], list[HarborSource]] = {}
     for task in tasks:
         group_config = task.config.model_dump(
             mode="json",
@@ -621,7 +626,7 @@ def adapt(
             isinstance(argument, str) for argument in entrypoint
         ):
             raise ValueError("OCI image Entrypoint must be a list of strings")
-        # Reserved ports an image EXPOSEs are not forwarded; _inspect_task rejects
+        # Reserved ports an image EXPOSEs are not forwarded; inspect_task rejects
         # explicit Compose declarations of them.
         ports = compose_main.tcp_ports | (
             image_ports(resolved.main, image="main image") - RESERVED_PORTS
