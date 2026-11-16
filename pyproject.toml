@@ -16,7 +16,7 @@ dependencies = [
     "typing-extensions>=4.16,<5",
     "python-dotenv>=1.0,<2",
     "mcp>=2.2.0,<3",
-    "fastmcp>=4.1.2,<4.2",
+    "fastmcp>=4.1.2,<4.3",
     "openai>=2.45.0,<4",
     "anthropic>=2.1,<3",
     "google-genai>=3.0.0,<4",
@@ -99,13 +99,13 @@ train = [
 
 [dependency-groups]
 dev = [
-    "ruff==0.17.4",
+    "ruff==0.17.5",
     "pytest>=8.1.1",
     "pytest-asyncio",
     "pytest-xdist",
     "pytest-timeout",
     "dirty-equals",
-    "ty==0.0.101",
+    "ty==0.0.104",
 ]
 
 [tool.uv]
