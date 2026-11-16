@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 from uuid import UUID
 
@@ -18,7 +19,7 @@ from hud.cli import (
     map_exception,
 )
 from hud.settings import settings
-from hud.utils.exceptions import HudException, HudRequestError
+from hud.utils.exceptions import HudDeprecationWarning, HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import Page, PlatformClient
 
@@ -287,14 +288,20 @@ def jobs_command(
     ),
     limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
 ) -> Any:
-    """List recent jobs (same as hud jobs list).
+    """List jobs, inspect their traces, and cancel rollouts.
 
     [not dim]Examples:
-        hud jobs
+        hud jobs list
         hud jobs list --json
         hud jobs get <job-id>
         hud jobs cancel <job-id> --yes[/not dim]
     """
     if ctx.invoked_subcommand is not None:
         return None
+    warnings.warn(
+        "`hud jobs` without a subcommand is deprecated and will be removed in hud v0.7.0; "
+        "use `hud jobs list`.",
+        HudDeprecationWarning,
+        stacklevel=2,
+    )
     return list_command(quiet=quiet, limit=limit)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import sys
+import warnings
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -25,7 +26,7 @@ from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.eval.sync import TasksetRecord, diff, resolve_taskset_id, upload_taskset
 from hud.eval.taskset import Taskset
 from hud.settings import settings
-from hud.utils.exceptions import HudRequestError
+from hud.utils.exceptions import HudDeprecationWarning, HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import Page, PlatformClient
@@ -422,11 +423,9 @@ def sync_callback(
 ) -> Any:
     """Sync tasks and environments to the HUD platform.
 
-    [not dim]Without a subcommand, syncs tasks using stored config.
-
-    Examples:
-        hud sync                         # sync tasks using .hud/config.json
-        hud sync --yes                   # without the confirmation prompt
+    [not dim]Examples:
+        hud sync tasks                   # sync tasks using .hud/config.json
+        hud sync tasks --yes             # without the confirmation prompt
         hud sync tasks my-taskset        # sync tasks to specific taskset
         hud sync env my-env              # link to a deployed environment[/not dim]
     """
@@ -439,6 +438,12 @@ def sync_callback(
             )
         return
 
+    warnings.warn(
+        "`hud sync` without a subcommand is deprecated and will be removed in hud v0.7.0; "
+        "use `hud sync tasks`.",
+        HudDeprecationWarning,
+        stacklevel=2,
+    )
     assert isinstance(ctx.command, TyperGroup)
     command = ctx.command.get_command(ctx, "tasks")
     assert command is not None
