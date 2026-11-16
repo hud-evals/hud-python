@@ -253,6 +253,64 @@ async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
     assert error in trace.error
 
 
+@pytest.mark.parametrize(
+    ("agent_type", "model", "tool", "path_key", "include_key"),
+    [
+        ("openai_compatible", "qwen3.6-plus", "grep", "path", "include"),
+        ("gemini", GEMINI_MODEL, "grep_search", "dir_path", "include_pattern"),
+    ],
+    ids=["openai_compatible", "gemini"],
+)
+@pytest.mark.parametrize(
+    ("include", "options", "found"),
+    [
+        (
+            "*.{ts,tsx,json}",
+            " --include='*.ts' --include='*.tsx' --include='*.json'",
+            ["a.ts", "b.tsx", "sub/firebase.json"],
+        ),
+        ("**/*", "", ["a.ts", "b.tsx", "notes.md", "sub/firebase.json"]),
+        ("src/**/*.tsx", " --include='*.tsx'", ["b.tsx"]),
+    ],
+    ids=["braces", "every-file", "under-a-directory"],
+)
+async def test_a_search_takes_alternation_and_the_include_globs_models_send(
+    include: str,
+    options: str,
+    found: list[str],
+    agent_type: str,
+    model: str,
+    tool: str,
+    path_key: str,
+    include_key: str,
+    models: Models,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "ws"
+    (root / "sub").mkdir(parents=True)
+    (root / "a.ts").write_text("// noExplicitAny\n")
+    (root / "b.tsx").write_text("// biome-ignore\n")
+    (root / "notes.md").write_text("noExplicitAny\n")
+    (root / "sub" / "firebase.json").write_text('{"lint": "biome-ignore"}\n')
+    search = {"pattern": "noExplicitAny|biome-ignore", path_key: str(root), include_key: include}
+    models.script([call(tool, **search), Turn(text="done")])
+    kind = AgentType(agent_type).cls
+
+    task = workspace_task(root)
+    (trace,) = (await task().run(kind(kind.config_cls(model=model)))).traces
+
+    (step,) = (step for step in trace.steps if isinstance(step, ToolStep))
+    assert step.result is not None
+    command, *lines = "".join(
+        block.text for block in step.result.content if isinstance(block, TextContent)
+    ).splitlines()
+    assert command == f"$ grep -rnE 'noExplicitAny|biome-ignore' {root}{options}"
+    assert (
+        sorted(line.split(":")[0].removeprefix(f"{root}/") for line in lines if ":" in line)
+        == found
+    )
+
+
 # Strict mode offers each position's type; the Chat Completions subset has no unions,
 # so a mixed tuple's items stay untyped.
 @pytest.mark.parametrize(
