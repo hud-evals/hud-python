@@ -15,8 +15,8 @@ from importlib import import_module
 import pytest
 
 from hud import Environment, Task
-from hud.clients import connect
-from hud.runtime import LocalRuntime
+from hud.clients import HudClient, connect
+from hud.runtime import SubprocessRuntime
 from hud.utils.exceptions import HudDeprecationWarning
 
 RUNTIME_NAMES = [
@@ -131,11 +131,7 @@ async def test_a_template_written_with_the_retired_argument_helpers_keeps_its_hi
         yield prompt
         yield 1.0
 
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="review")) as runtime,
-        connect(runtime) as client,
-    ):
-        (template,) = await client.list_tasks()
+    (template,) = [task.manifest_entry() for task in env.tasks.values()]
 
     schema = template["args"]
     hints = {name: spec.get("x-hud-hint") for name, spec in schema["properties"].items()}
@@ -147,3 +143,16 @@ async def test_a_template_written_with_the_retired_argument_helpers_keeps_its_hi
     }
     assert schema["properties"]["attachments"]["items"]["$ref"] == "#/$defs/DataFileRef"
     assert set(schema["$defs"]["DataFileRef"]["properties"]) == {"file_id", "path"}
+
+
+async def test_a_v0_6_23_connect_still_reaches_a_served_environment() -> None:
+    source = import_module("tests.fixtures.envs").source("echo")
+    with pytest.warns(HudDeprecationWarning, match=r"runtime\.connect\(\)"):
+        async with (
+            SubprocessRuntime(source)(Task(env="echo", id="echo")) as runtime,
+            connect(runtime) as client,
+        ):
+            assert isinstance(client, HudClient)
+            (template,) = await client.list_tasks()
+
+    assert template["id"] == "echo"

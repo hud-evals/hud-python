@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import itertools
 import logging
+import warnings
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -21,14 +23,17 @@ from hud.environment.utils import (
     send_frame,
     splice,
 )
+from hud.utils.exceptions import HudDeprecationWarning
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
     from hud.capabilities.connection import Connection
     from hud.clients.dial import Streams
     from hud.environment.egress import WorkspaceRoute
     from hud.environment.file_tracker import FileTrackingOp
+    from hud.eval.run import EnvironmentSession
+    from hud.runtime.core import Runtime
 
 LOGGER = logging.getLogger("hud.clients")
 _LEGACY_FILE_TRACKING = "filetracking/1"
@@ -371,3 +376,27 @@ class _LegacyFileTracking:
         if self._stream is not None:
             self._stream[1].close()
             self._stream = None
+
+
+@asynccontextmanager
+async def connect(
+    runtime: Runtime,
+    *,
+    ready_timeout: float | None = None,
+    workspace_routes: Sequence[WorkspaceRoute] = (),
+) -> AsyncGenerator[EnvironmentSession]:
+    """Open a session on ``runtime``; deprecated, ``runtime.connect()`` opens it now.
+
+    Kept, with a ``HudDeprecationWarning``, for v0.6.23 callers until hud v0.7.0. A
+    runtime served over a control channel yields a ``HudClient``, as before.
+    """
+    warnings.warn(
+        "`connect` from `hud.clients` is deprecated and will be removed in hud v0.7.0; "
+        "open a session with `runtime.connect()`.",
+        HudDeprecationWarning,
+        stacklevel=3,
+    )
+    if ready_timeout is not None:
+        runtime = replace(runtime, ready_timeout=ready_timeout)
+    async with runtime.connect(workspace_routes=workspace_routes) as session:
+        yield session
