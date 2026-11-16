@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from hud.environment.egress import Peer
-from hud.environment.workspace import Mount
+from hud.environment.sandbox import Mount
 
 if TYPE_CHECKING:
     from hud.runtime.compose import ComposeHealthcheck

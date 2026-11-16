@@ -33,4 +33,4 @@ async def test_coding_task_uses_description_as_prompt(monkeypatch):
 
     assert await anext(task) == "Fix the bug."
     await task.aclose()
-    workspace.discard_sandbox.assert_awaited_once_with()
+    workspace.sandbox.discard.assert_awaited_once_with()

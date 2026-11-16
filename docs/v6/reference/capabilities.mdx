@@ -280,14 +280,14 @@ The bundled provider agents open these automatically based on which capabilities
 
 A `Workspace` is not itself a capability - it's the built-in workspace daemon. It serves `ssh` for agent access and, when enabled, file tracking for rollout telemetry. For `mcp`, `cdp`, and `rfb` you stand up the daemon yourself.
 
-Concretely it's a directory plus a `bwrap`-isolated SSH exec server. Shell commands and file operations run through the same exec channel. [`env.workspace(root, ...)`](/v6/reference/environment#methods) wires its whole lifecycle; construction is pure data, with keys, sockets, and the root directory materializing only at serve time. To run one outside an env, drive its lifecycle directly and publish `ws.capability()`:
+Concretely it's an SSH exec server over a `Sandbox`: a directory plus the isolation policy its commands run under (mounts, network, environment, user drop) and the `bwrap` mechanism that enforces it. Shell commands and file operations run through the same exec channel. [`env.workspace(root, ...)`](/v6/reference/environment#methods) builds both and wires their whole lifecycle; construction is pure data, with keys, sockets, and the root directory materializing only at serve time. To run one outside an env, drive its lifecycle directly and publish `ws.capability()`:
 
 ```python
 from hud import Environment
-from hud.environment import Workspace
+from hud.environment import Sandbox, Workspace
 
 env = Environment(name="coder")
-ws = Workspace("workspace", host="127.0.0.1", port=0)   # port 0 = ephemeral
+ws = Workspace(Sandbox("workspace"), host="127.0.0.1", port=0)   # port 0 = ephemeral
 
 @env.initialize
 async def _up():
@@ -304,6 +304,8 @@ Use a relative path (`"workspace"`, created next to `env.py`). Sandbox isolation
 For a complete repository workspace with hidden-test grading, run `hud init my-coding-env --template coding`.
 </Note>
 
+`Sandbox` parameters (also accepted as keyword arguments by `env.workspace(...)`):
+
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `root` | `Path \| str` | Directory served (created at start). |
@@ -316,27 +318,38 @@ For a complete repository workspace with hidden-test grading, run `hud init my-c
 | `env` | `Mapping[str, str] \| None` | Environment variables for the sandbox. |
 | `system_mounts` | `Sequence[Mount] \| None` | Override the default system mounts. |
 | `guest_path` | `str` | Path the root mounts at inside the sandbox. Default `"/workspace"`. |
-| `host` | `str` | SSH bind host. Default `"127.0.0.1"`. |
-| `port` | `int` | SSH bind port (`0` binds an ephemeral port). Default `0`. |
-| `user` | `str` | SSH username. Default `"agent"`. |
-| `shell_uid` | `int \| None` | When serving as root, run every agent command as this uid/gid with cleared supplementary groups and `no_new_privs`. Only the workspace directory itself is handed to the uid at start (O(1)); own pre-staged content via `COPY --chown` or task setup. Default `None`. |
+| `shell_uid` | `int \| None` | When serving as root, run every agent command as this uid/gid with cleared supplementary groups and `no_new_privs`. Only the root directory itself is handed to the uid at start (O(1)); own pre-staged content via `COPY --chown` or task setup. Default `None`. |
 | `shell_gid` | `int \| None` | Group for agent commands when `shell_uid` drops them. Defaults to `shell_uid`. |
 | `hand_over_root` | `bool` | Hand the root directory to `shell_uid` at start. Set `False` when the image already set its owner. Default `True`. |
 | `require_isolation` | `bool` | Refuse to start unless `bwrap` can sandbox sessions, instead of running them unisolated. Default `False`. |
+| `credentials_dir` | `Path \| str \| None` | Where the session's SSH keys are written. Defaults to a fresh temporary directory; point it inside anything you mask from sessions. |
+| `hosts_path` | `Path \| str \| None` | Where the sandbox's own `/etc/hosts` is written. Defaults to `credentials_dir`. |
+
+| Member | Description |
+|--------|-------------|
+| `sandbox.bwrap_available` | Whether `bwrap` isolation is active. |
+| `await sandbox.run(argv, ...)` | Run a command in the sandbox and collect its result. |
+
+`Workspace` parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sandbox` | `Sandbox` | The sandbox sessions run in. |
+| `host` | `str` | SSH bind host. Default `"127.0.0.1"`. |
+| `port` | `int` | SSH bind port (`0` binds an ephemeral port). Default `0`. |
+| `user` | `str` | SSH username. Default `"agent"`. |
 | `host_key_path` | `Path \| None` | Reuse a host key instead of generating one. |
 | `authorized_client_keys` | `list[Path] \| None` | Authorize specific client public keys. |
-| `credentials_dir` | `Path \| str \| None` | Where the session's SSH keys are written. Defaults to a fresh temporary directory; point it inside anything you mask from sessions. |
-| `hosts_path` | `Path \| str \| None` | Where the workspace's own `/etc/hosts` is written. Defaults to `credentials_dir`. |
 | `track_files` | `bool` | Track file changes under `root` for the rollout to stream. Constructor default `False`; `env.workspace(...)` defaults it to `HUD_FILE_TRACKING_ENABLED` (on) for the first workspace. |
 
 | Member | Description |
 |--------|-------------|
-| `await ws.start()` | Start the SSH accept loop (idempotent). |
-| `await ws.stop()` | Stop accepting sessions and release the socket. |
+| `await ws.start()` | Start the sandbox and the SSH accept loop (idempotent). |
+| `await ws.stop()` | Stop the sandbox, stop accepting sessions, and release the socket. |
+| `ws.sandbox` | The `Sandbox` sessions run in. |
 | `ws.capability(name="shell")` | The resolved `ssh` `Capability` (materializes keys, binds the socket). |
 | `ws.tracks_files` | Whether this workspace tracks file changes. |
 | `ws.ssh_url` / `ws.ssh_host_pubkey` / `ws.ssh_client_key_path` / `ws.ssh_user` | Connection address, host key, client key path, and username. |
-| `ws.bwrap_available` | Whether `bwrap` isolation is active. |
 
 A `Mount` (`hud.environment`) configures a single bwrap mount, `Mount(kind, src, dst, optional)`, where `kind` is one of `ro`, `rw`, `tmpfs`, `symlink`, `proc`, `dev`.
 

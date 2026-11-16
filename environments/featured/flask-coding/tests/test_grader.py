@@ -120,9 +120,9 @@ async def test_binary_junit_grader_rejects_passing_report_from_failed_command(gr
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_grading_runs_as_agent_after_session_termination(grading_workspace):
-    session = await grading_workspace.run(["/bin/bash", "-lc", "echo agent > agent.txt"])
+    session = await grading_workspace.sandbox.run(["/bin/bash", "-lc", "echo agent > agent.txt"])
     assert session.returncode == 0
-    await grading_workspace.terminate_sessions()
+    await grading_workspace.sandbox.terminate_sessions()
 
     result = await grade_tests(
         grading_workspace,

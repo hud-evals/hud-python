@@ -24,6 +24,7 @@ from hud.capabilities.base import Capability
 from hud.settings import settings
 
 from .egress import ConnectionRelay, Peer, WorkspaceRoute
+from .sandbox import Sandbox
 from .workspace import Workspace
 
 if TYPE_CHECKING:
@@ -155,17 +156,17 @@ class TaskTemplate(Generic[P]):
 
 @dataclass(frozen=True, slots=True)
 class _BoundConnection:
-    """A controller connection relayed into one workspace for one control session."""
+    """A controller connection relayed into one sandbox for one control session."""
 
     connection: Connection
-    workspace: Workspace
+    sandbox: Sandbox
     peer: Peer
     relay: ConnectionRelay
     session: str
 
     def release(self) -> None:
-        self.workspace.remove_process_connection(self.connection.name, self.peer)
-        self.workspace.remove_peer(self.peer)
+        self.sandbox.remove_process_connection(self.connection.name, self.peer)
+        self.sandbox.remove_peer(self.peer)
         self.relay.stop()
 
 
@@ -195,10 +196,10 @@ class Environment:
         self._on_start: list[Callable[[], Awaitable[None]]] = []
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
         self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
-        self._workspaces: dict[str, Workspace] = {}
+        self._workspaces: dict[str, Workspace[Sandbox]] = {}
         # Controller routes by the control sessions holding them; ``None`` peer when
         # an authored peer already provides the route.
-        self._workspace_routes: dict[WorkspaceRoute, tuple[Workspace, Peer | None, set[str]]] = {}
+        self._workspace_routes: dict[WorkspaceRoute, tuple[Sandbox, Peer | None, set[str]]] = {}
         self._connections: dict[str, _BoundConnection] = {}
         self._binding = asyncio.Lock()
 
@@ -316,12 +317,12 @@ class Environment:
         name: str = "shell",
         track_files: bool | None = None,
         **kwargs: Any,
-    ) -> Workspace:
+    ) -> Workspace[Sandbox]:
         """Attach a ``Workspace`` serving ``name`` over ``ssh/2``.
 
         Registers the start → publish → stop lifecycle on this env's hooks;
         nothing touches the filesystem until the env actually serves. Extra
-        kwargs go to ``Workspace`` (``network=``, ``env=``, ...).
+        kwargs go to its ``Sandbox`` (``network=``, ``env=``, ...).
 
         With ``track_files`` the rollout streams this workspace's setup and agent
         file diffs over the control channel. One workspace per environment can track
@@ -334,7 +335,7 @@ class Environment:
             raise ValueError("another workspace already tracks files; pass track_files=False")
         if name in self._workspaces:
             raise ValueError(f"workspace capability {name!r} is already attached")
-        ws = Workspace(root, track_files=track_files, **kwargs)
+        ws = Workspace(Sandbox(root, **kwargs), track_files=track_files)
         self._workspaces[name] = ws
 
         @self.initialize
@@ -396,9 +397,9 @@ class Environment:
         for hook in reversed(self._on_stop):
             with contextlib.suppress(Exception):
                 await hook()
-        for workspace, peer, _sessions in reversed(self._workspace_routes.values()):
+        for sandbox, peer, _sessions in reversed(self._workspace_routes.values()):
             if peer is not None:
-                workspace.remove_peer(peer)
+                sandbox.remove_peer(peer)
         self._workspace_routes.clear()
         for bound in reversed(self._connections.values()):
             bound.release()
@@ -406,7 +407,7 @@ class Environment:
         self._started = False
         self._hooks_done = False
 
-    def _workspace_for(self, capability: str) -> Workspace:
+    def _sandbox_for(self, capability: str) -> Sandbox:
         workspace = self._workspaces.get(capability)
         if workspace is None and capability in {"ssh", "ssh/2"}:
             if len(self._workspaces) > 1:
@@ -415,13 +416,13 @@ class Environment:
             workspace = next(iter(self._workspaces.values()), None)
         if workspace is None:
             raise RuntimeError(f"workspace capability {capability!r} does not exist")
-        return workspace
+        return workspace.sandbox
 
     async def open_session(self) -> None:
         """Start every workspace's sandbox, so a new session's first command does not pay
         for starting it inside its own timeout."""
         for workspace in self._workspaces.values():
-            await workspace.sandbox_pid()
+            await workspace.sandbox.pid()
 
     async def bind_connections(self, connections: Sequence[Connection], *, session: str) -> None:
         """Install one control session's controller connections into their workspaces.
@@ -453,15 +454,15 @@ class Environment:
             bound: list[_BoundConnection] = []
             try:
                 for connection in connections:
-                    workspace = self._workspace_for(connection.capability)
-                    if not workspace.supports_process_connections:
+                    sandbox = self._sandbox_for(connection.capability)
+                    if not sandbox.supports_process_connections:
                         raise RuntimeError(
-                            f"workspace capability {connection.capability!r} does not support "
+                            f"sandbox capability {connection.capability!r} does not support "
                             "process-bound connections"
                         )
                     if any(
                         peer.name == connection.host and peer.port == connection.port
-                        for peer in workspace.peers
+                        for peer in sandbox.peers
                     ):
                         raise RuntimeError(
                             f"connection endpoint {connection.host}:{connection.port} "
@@ -474,9 +475,9 @@ class Environment:
                         connection.port,
                         target=("127.0.0.1", relay.port),
                     )
-                    await workspace.add_peer(peer, first=True)
-                    workspace.add_process_connection(connection.name, peer)
-                    record = _BoundConnection(connection, workspace, peer, relay, session)
+                    await sandbox.add_peer(peer, first=True)
+                    sandbox.add_process_connection(connection.name, peer)
+                    record = _BoundConnection(connection, sandbox, peer, relay, session)
                     self._connections[connection.name] = record
                     bound.append(record)
             except BaseException:
@@ -491,11 +492,11 @@ class Environment:
             if bound.session == session:
                 bound.release()
                 del self._connections[name]
-        for route, (workspace, peer, sessions) in reversed(list(self._workspace_routes.items())):
+        for route, (sandbox, peer, sessions) in reversed(list(self._workspace_routes.items())):
             sessions.discard(session)
             if not sessions:
                 if peer is not None:
-                    workspace.remove_peer(peer)
+                    sandbox.remove_peer(peer)
                 del self._workspace_routes[route]
 
     async def bind_workspace_routes(
@@ -504,49 +505,49 @@ class Environment:
         """Install a control session's routes into their workspaces."""
         async with self._binding:
             if not self._started:
-                raise RuntimeError("environment must be started before workspace routes are bound")
+                raise RuntimeError("environment must be started before sandbox routes are bound")
 
-            planned: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
+            planned: list[tuple[WorkspaceRoute, Sandbox, Peer | None]] = []
             for route in dict.fromkeys(routes):
                 if (held := self._workspace_routes.get(route)) is not None:
                     held[2].add(session)
                     continue
-                workspace = self._workspace_for(route.capability)
-                if not workspace.bwrap_available or not workspace.owns_netns:
+                sandbox = self._sandbox_for(route.capability)
+                if not sandbox.bwrap_available or not sandbox.owns_netns:
                     raise RuntimeError(
-                        f"workspace route for {route.capability!r} requires an isolated network"
+                        f"sandbox route for {route.capability!r} requires an isolated network"
                     )
                 matching = [
                     peer
-                    for peer in workspace.peers
+                    for peer in sandbox.peers
                     if peer.name == route.host and peer.port == route.port
                 ]
                 if matching:
                     if any(peer.address != (route.host, route.port) for peer in matching):
                         raise RuntimeError(
-                            f"workspace route {route.host}:{route.port} conflicts with "
+                            f"sandbox route {route.host}:{route.port} conflicts with "
                             "an authored peer"
                         )
-                    planned.append((route, workspace, None))
+                    planned.append((route, sandbox, None))
                     continue
                 planned.append(
                     (
                         route,
-                        workspace,
+                        sandbox,
                         Peer(route.host, route.port, target=(route.host, route.port)),
                     )
                 )
 
-            bound: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
+            bound: list[tuple[WorkspaceRoute, Sandbox, Peer | None]] = []
             try:
-                for route, workspace, peer in planned:
+                for route, sandbox, peer in planned:
                     if peer is not None:
-                        await workspace.add_peer(peer, first=True)
-                    self._workspace_routes[route] = (workspace, peer, {session})
-                    bound.append((route, workspace, peer))
+                        await sandbox.add_peer(peer, first=True)
+                    self._workspace_routes[route] = (sandbox, peer, {session})
+                    bound.append((route, sandbox, peer))
             except BaseException:
-                for route, workspace, peer in reversed(bound):
+                for route, sandbox, peer in reversed(bound):
                     if peer is not None:
-                        workspace.remove_peer(peer)
+                        sandbox.remove_peer(peer)
                     self._workspace_routes.pop(route, None)
                 raise

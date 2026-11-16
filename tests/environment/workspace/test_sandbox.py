@@ -20,9 +20,9 @@ from typing import Any
 
 import pytest
 
-from hud.environment import Mount, Workspace
+from hud.environment import Mount, Sandbox, Workspace
 from hud.environment.egress import Peer
-from hud.environment.workspace import usable_bwrap
+from hud.environment.sandbox import usable_bwrap
 from tests.conftest import SANDBOX
 
 from .conftest import shell
@@ -136,7 +136,7 @@ async def test_a_workspace_that_cannot_wall_its_sessions_refuses_to_serve(
     error: type[Exception],
     message: str,
 ) -> None:
-    workspace = Workspace(tmp_path / "root", **cause(monkeypatch))
+    workspace = Workspace(Sandbox(tmp_path / "root", **cause(monkeypatch)))
 
     with pytest.raises(error, match=message):
         await workspace.start()
@@ -156,8 +156,8 @@ async def test_the_shell_user_reads_and_writes_the_guest_workspace(
         root, guest_path=guest_path, network=False, shell_uid=1000, require_isolation=True
     ) as (workspace, client):
         session = await client.run(command, check=False)
-        await workspace.terminate_sessions()
-        captured = await workspace.run(["sh", "-c", command], scope="environment")
+        await workspace.sandbox.terminate_sessions()
+        captured = await workspace.sandbox.run(["sh", "-c", command], scope="environment")
 
     assert (session.exit_status, session.stdout) == (0, "1000\nhello\n")
     assert (captured.returncode, captured.stdout) == (0, b"1000\nhello\n")
@@ -214,8 +214,8 @@ async def test_a_verifier_run_joins_the_sandbox_and_an_isolated_one_gets_its_own
     probe = ["sh", "-c", namespaces]
     async with shell(tmp_path / "root", require_isolation=True) as (workspace, client):
         session = str((await client.run(namespaces, check=True)).stdout)
-        joined = await workspace.run(probe, identity=None, max_wait=10)
-        isolated = await workspace.run(probe, isolated=True, identity=None, max_wait=10)
+        joined = await workspace.sandbox.run(probe, identity=None, max_wait=10)
+        isolated = await workspace.sandbox.run(probe, isolated=True, identity=None, max_wait=10)
 
     session_pid, session_net = session.split()
     assert joined.stdout.decode().split() == [session_pid, session_net]
@@ -228,7 +228,7 @@ async def test_a_verifier_run_joins_the_sandbox_and_an_isolated_one_gets_its_own
 async def test_a_verifier_gets_a_disposable_writable_hosts_file(tmp_path: Path) -> None:
     async with shell(tmp_path / "root", require_isolation=True) as (workspace, client):
         before = (await client.run("cat /etc/hosts", check=True)).stdout
-        written = await workspace.run(
+        written = await workspace.sandbox.run(
             ["sh", "-c", "echo '127.0.0.1 verifier-added' >> /etc/hosts && cat /etc/hosts"],
             identity=None,
             writable_hosts=True,
@@ -251,7 +251,7 @@ async def test_ending_the_sessions_keeps_environment_processes_and_the_sandbox()
             workspace,
             client,
         ):
-            infrastructure = await workspace.launch(
+            infrastructure = await workspace.sandbox.launch(
                 ["sh", "-c", "id -u; id -g; exec sleep 300"],
                 identity=(1000, 2000),
                 no_new_privs=False,
@@ -262,7 +262,7 @@ async def test_ending_the_sessions_keeps_environment_processes_and_the_sandbox()
             session = await client.conn.create_process("sleep 300")
             sandbox = (await client.run("readlink /proc/self/ns/pid", check=True)).stdout
 
-            await workspace.terminate_sessions()
+            await workspace.sandbox.terminate_sessions()
 
             await asyncio.wait_for(session.wait_closed(), 5)
             after = (await client.run("readlink /proc/self/ns/pid", check=True)).stdout
@@ -316,8 +316,10 @@ async def test_a_task_image_without_util_linux_runs_its_processes_dropped() -> N
                 Mount("tmpfs", dst="/tmp", mode=0o1777),
             ],
         ) as (workspace, _):
-            launched = await (await workspace.launch(report, identity=(1000, 2000))).complete()
-            isolated = await workspace.run(report, isolated=True, identity=(1000, 2000))
+            launched = await (
+                await workspace.sandbox.launch(report, identity=(1000, 2000))
+            ).complete()
+            isolated = await workspace.sandbox.run(report, isolated=True, identity=(1000, 2000))
     finally:
         shutil.rmtree(parent, ignore_errors=True)
 
@@ -390,15 +392,15 @@ done
 
 PUBLISHED_ISOLATION = """
 import asyncio, sys
-from hud.environment import Workspace
+from hud.environment import Sandbox, Workspace
 
 async def main():
     for attempt in range(2):
-        workspace = Workspace(sys.argv[1], require_isolation=True)
+        workspace = Workspace(Sandbox(sys.argv[1], require_isolation=True))
         if attempt == 0:
             print(workspace.capability().params["isolation"])
         try:
-            if not workspace.bwrap_available:
+            if not workspace.sandbox.bwrap_available:
                 await workspace.start()
         except RuntimeError as exc:
             print(exc)

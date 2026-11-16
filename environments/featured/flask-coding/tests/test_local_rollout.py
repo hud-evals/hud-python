@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from hud import Taskset
-from hud.environment import workspace as workspace_lib
+from hud.environment import sandbox as sandbox_lib
 from hud.eval.run import start_run
 from hud.runtime import LocalRuntime
 
@@ -155,7 +155,7 @@ async def test_local_runtime_refuses_unisolated_non_root_workspace(
     fixture_repo,
     monkeypatch,
 ):
-    monkeypatch.setattr(workspace_lib, "usable_bwrap", lambda: None)
+    monkeypatch.setattr(sandbox_lib, "usable_bwrap", lambda: None)
     monkeypatch.setattr(os, "geteuid", lambda: 501)
     os.environ["REPO_URL"] = str(fixture_repo)
 

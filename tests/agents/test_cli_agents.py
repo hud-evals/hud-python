@@ -18,7 +18,7 @@ from hud.agents.base import Agent
 from hud.agents.types import ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability
 from hud.environment.egress import ANY_HOST
-from hud.environment.workspace import usable_bwrap
+from hud.environment.sandbox import usable_bwrap
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime, Shared
 from hud.types import AgentType

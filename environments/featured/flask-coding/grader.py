@@ -144,7 +144,7 @@ async def grade_tests(
     with tempfile.TemporaryDirectory(prefix=".hud-junit-", dir=workspace.root) as directory:
         Path(directory).chmod(0o733)
         report = Path(directory) / "report.xml"
-        process = await workspace.run(
+        process = await workspace.sandbox.run(
             ["/bin/bash", "-lc", command.replace("{junit_path}", shlex.quote(str(report)))],
             cwd=str(workspace.root),
             env={"HOME": "/tmp", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},

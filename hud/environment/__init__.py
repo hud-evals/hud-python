@@ -16,8 +16,9 @@ from hud.utils.deprecation import moved_to, resolve_retired
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
+from .sandbox import Mount, Sandbox
 from .session import session_state_dir
-from .workspace import Mount, Workspace
+from .workspace import Workspace
 
 
 def load_environment(
@@ -93,6 +94,7 @@ def load_environment(
 __all__ = [
     "Answer",
     "Mount",
+    "Sandbox",
     "Workspace",
     "load_environment",
     "session_state_dir",
@@ -101,7 +103,7 @@ __all__ = [
 _RETIRED = {
     **moved_to("hud.capabilities", "Capability"),
     **moved_to("hud.environment.egress", "Peer", "WorkspaceRoute"),
-    **moved_to("hud.environment.workspace", "DEFAULT_SYSTEM_MOUNTS", "MountKind"),
+    **moved_to("hud.environment.sandbox", "DEFAULT_SYSTEM_MOUNTS", "MountKind"),
 }
 
 

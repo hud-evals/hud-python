@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from hud.environment import Workspace
+from hud.environment import Sandbox, Workspace
 
 SANDBOXED = (
     sys.platform == "linux"
@@ -75,7 +75,7 @@ def repo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fixture_repo: Path) ->
 async def workspace(tmp_path: Path):
     """An isolated workspace like the environment's, for grading commands directly."""
     root = tmp_path / "workspace"
-    served = Workspace(root, guest_path=str(root), network=False, shell_uid=1000, require_isolation=True)
+    served = Workspace(Sandbox(root, guest_path=str(root), network=False, shell_uid=1000, require_isolation=True))
     await served.start()
     yield served
     await served.stop()

@@ -88,7 +88,7 @@ async def bound_connection_session(root: Path) -> dict[str, str]:
 
 async def verifier_run(root: Path) -> dict[str, str]:
     async with shell(root, env=TASK_ENV, require_isolation=True) as (workspace, _):
-        result = await workspace.run(
+        result = await workspace.sandbox.run(
             ["env"],
             env={"VERIFIER_ONLY": "yes"},
             identity=None,
@@ -100,7 +100,7 @@ async def verifier_run(root: Path) -> dict[str, str]:
 
 async def isolated_run(root: Path) -> dict[str, str]:
     async with shell(root, env=TASK_ENV, require_isolation=True) as (workspace, _):
-        result = await workspace.run(["env"], isolated=True, identity=None)
+        result = await workspace.sandbox.run(["env"], isolated=True, identity=None)
     return parsed(result.stdout)
 
 

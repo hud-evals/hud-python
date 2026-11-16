@@ -170,7 +170,7 @@ lint.ignore = [
 "hud/environment/env.py" = ["PLC0415"]
 "hud/eval/task.py" = ["PLC0415"]
 # Imports inside functions: Windows-only modules.
-"hud/environment/workspace.py" = ["PLC0415"]
+"hud/environment/sandbox.py" = ["PLC0415"]
 "hud/agents/robot/**" = ["T201"]
 "*.ipynb" = ["ALL"]
 "**/cookbooks/**/*.py" = ["ALL"]

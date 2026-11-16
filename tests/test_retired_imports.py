@@ -16,6 +16,7 @@ import pytest
 
 from hud import Environment, Task
 from hud.clients import HudClient, connect
+from hud.environment import Workspace
 from hud.runtime import SubprocessRuntime
 from hud.utils.exceptions import HudDeprecationWarning
 
@@ -59,8 +60,8 @@ RETIRED = [
     ("hud.environment", "Capability", "hud.capabilities"),
     ("hud.environment", "Peer", "hud.environment.egress"),
     ("hud.environment", "WorkspaceRoute", "hud.environment.egress"),
-    ("hud.environment", "DEFAULT_SYSTEM_MOUNTS", "hud.environment.workspace"),
-    ("hud.environment", "MountKind", "hud.environment.workspace"),
+    ("hud.environment", "DEFAULT_SYSTEM_MOUNTS", "hud.environment.sandbox"),
+    ("hud.environment", "MountKind", "hud.environment.sandbox"),
 ]
 
 
@@ -156,3 +157,17 @@ async def test_a_v0_6_23_connect_still_reaches_a_served_environment() -> None:
             (template,) = await client.list_tasks()
 
     assert template["id"] == "echo"
+
+
+async def test_a_v0_6_23_workspace_keeps_its_constructor_and_sandbox_members(tmp_path) -> None:
+    with pytest.warns(HudDeprecationWarning, match=r"Workspace\(Sandbox\(root"):
+        workspace = Workspace(tmp_path / "root", env={"GREETING": "hi"})
+    await workspace.start()
+    try:
+        assert workspace.capability().name == "shell"
+        with pytest.warns(HudDeprecationWarning, match=r"workspace\.sandbox\.env"):
+            assert workspace.env == {"GREETING": "hi"}
+        with pytest.warns(HudDeprecationWarning, match=r"workspace\.sandbox\.discard"):
+            await workspace.discard_sandbox()
+    finally:
+        await workspace.stop()

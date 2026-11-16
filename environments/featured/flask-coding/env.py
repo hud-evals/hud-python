@@ -121,7 +121,7 @@ async def _grade(
     pass_to_pass: list[str] | None,
     binary: bool,
 ) -> EvaluationResult:
-    await workspace.terminate_sessions()
+    await workspace.sandbox.terminate_sessions()
     agent_git = REPO_DIR / ".git"
     if agent_git.is_symlink() or agent_git.is_file():
         agent_git.unlink()
@@ -196,5 +196,5 @@ async def coding_task(
             binary,
         )
     finally:
-        await workspace.discard_sandbox()
+        await workspace.sandbox.discard()
     yield result

@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, Any
 from hud.capabilities.base import Capability
 from hud.environment.egress import ANY_HOST
 from hud.environment.env import Environment
+from hud.environment.sandbox import Mount, Sandbox
 from hud.environment.session import session_state_dir
-from hud.environment.workspace import Mount, Workspace
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
 from hud.types import EvaluationResult
 from hud.utils.process import ProcessResult, create_process_group_exec
@@ -195,16 +195,16 @@ workspace = env.workspace(
     ports=CONFIG.ports,
     require_isolation=True,
 )
+sandbox = workspace.sandbox
 
 
 async def start_entrypoint() -> NamespaceProcess | None:
     entrypoint = CONFIG.entrypoint
     if not entrypoint:
         return None
-    sandbox = await workspace.sandbox_pid()
-    if sandbox is None:
+    if await sandbox.pid() is None:
         raise RuntimeError("Harbor entrypoints require an isolated workspace")
-    process = await workspace.launch(
+    process = await sandbox.launch(
         [*entrypoint, "sh", "-c", "sleep infinity"],
         env=TASK_ENV,
         identity=image_identity,
@@ -234,7 +234,7 @@ async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
             raise RuntimeError(
                 f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
             )
-        result = await workspace.run(
+        result = await sandbox.run(
             ["sh", "-c", healthcheck.command],
             env=TASK_ENV,
             identity=image_identity,
@@ -391,7 +391,7 @@ async def run_collect_hooks(task: TaskSpec, container: Callable[[str], Awaitable
                 max_wait=hook.timeout_sec,
             )
         else:
-            execution = await workspace.run(
+            execution = await sandbox.run(
                 ["sh", "-c", hook.command],
                 mounts=task_mounts,
                 env=TASK_ENV,
@@ -461,7 +461,7 @@ async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
                 f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
             )
         if task.separate_verifier:
-            await workspace.terminate_sessions()
+            await sandbox.terminate_sessions()
             try:
                 await collect(task, Path(session_state_dir()))
             except Exception as error:
@@ -473,7 +473,7 @@ async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
             yield await grade(task.id, task.verifier_timeout, answer)
     finally:
         clear_grading_files()
-        await workspace.discard_sandbox()
+        await sandbox.discard()
         if entrypoint is not None:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(entrypoint.wait(), 10.0)
@@ -547,7 +547,7 @@ async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResu
             for path in (root, *root.rglob("*")):
                 os.lchown(path, *verifier_account.identity)
 
-    execution = await workspace.run(
+    execution = await sandbox.run(
         verifier_command(test_script),
         mounts=verifier_mounts,
         env={**verifier_account.env, **TASK_ENV, **resolve_env_templates(verifier.env)},
@@ -692,7 +692,7 @@ async def grade_separate(
             with materialized_artifacts(
                 task, verifier_root, session / "artifacts", verifier_account.identity
             ):
-                isolated = Workspace(
+                isolated = Sandbox(
                     verifier_root,
                     guest_path="/",
                     system_mounts=(),

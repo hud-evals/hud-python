@@ -580,7 +580,7 @@ async def test_overlapping_verifier_runs_keep_their_own_policies_and_credentials
     root = tmp_path / "root"
 
     def visitor(name: str, own: str, other: str) -> Any:
-        return workspace.run(
+        return workspace.sandbox.run(
             ["python3", "-c", VISITOR, name, own, other], allowed_hosts={own}, identity=None
         )
 
@@ -653,7 +653,7 @@ async def test_a_verifier_run_is_held_to_the_policy_it_runs_under(
     tmp_path: Path, options: dict[str, Any], allowed: set[str] | None
 ) -> None:
     async with shell(tmp_path / "root", require_isolation=True, **options) as (workspace, _):
-        result = await workspace.run(
+        result = await workspace.sandbox.run(
             ["python3", "-c", PROXIED_STATUSES, "pypi.org", "example.com"],
             allowed_hosts=allowed,
             identity=None,

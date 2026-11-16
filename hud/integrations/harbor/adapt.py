@@ -17,8 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from hud.capabilities.base import Capability
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT, VISITOR_PORT, Peer
+from hud.environment.sandbox import Mount
 from hud.environment.server import DEFAULT_PORT
-from hud.environment.workspace import Mount
 from hud.eval.task import Task
 from hud.eval.taskset import Taskset
 from hud.runtime.compose import (

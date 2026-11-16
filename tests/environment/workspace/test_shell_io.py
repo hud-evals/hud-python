@@ -235,7 +235,7 @@ async def a_channel_closed_while_a_trapped_child_runs(
         child = root / "close-race-child.pid"
         await eventually(lambda: child.exists() and bool(child.read_text().strip()))
         pid = int(child.read_text())
-        if not workspace.bwrap_available:
+        if not workspace.sandbox.bwrap_available:
             await eventually(lambda: (root / "teardown-started").exists())
         remote.close()
         await asyncio.wait_for(remote.wait_closed(), 5.0)

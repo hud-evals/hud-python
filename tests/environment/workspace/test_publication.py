@@ -18,7 +18,7 @@ import pytest
 
 from hud import Environment, Task
 from hud.capabilities import find_capability
-from hud.environment import Workspace
+from hud.environment import Sandbox, Workspace
 from hud.runtime import LocalRuntime
 
 from .conftest import shell
@@ -51,7 +51,7 @@ async def test_session_credentials_live_privately_outside_the_served_root(tmp_pa
         credentials = Path(client.capability.params["client_key_path"]).parent
         mode = stat.S_IMODE(credentials.stat().st_mode)
         listing = await client.run("ls -A", check=True)
-        other = Workspace(tmp_path / "other")
+        other = Workspace(Sandbox(tmp_path / "other"))
         other_credentials = Path(other.capability().params["client_key_path"]).parent
         await other.stop()
 
