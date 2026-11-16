@@ -170,6 +170,7 @@ class ModalRuntime:
         import modal
 
         config = self.config_for(task)
+        pulled = config.pulled_image("ModalRuntime")
         resources = config.resources
         if resources is not None:
             resources.require_support("ModalRuntime", {"cpu", "memory_mb", "gpu"})
@@ -196,11 +197,11 @@ class ModalRuntime:
         port_service = compose_config.network_owner("main") if compose_config else "main"
         if compose is not None:
             image = modal.Image.from_registry("docker:28.3.3-dind")
-        elif config.image is not None:
+        elif pulled is not None:
             image = (
-                modal.Image.from_id(config.image.removeprefix("modal://"))
-                if config.image.startswith("modal://")
-                else modal.Image.from_registry(config.image, secret=self.registry_secret)
+                modal.Image.from_id(pulled.removeprefix("modal://"))
+                if pulled.startswith("modal://")
+                else modal.Image.from_registry(pulled, secret=self.registry_secret)
             )
         elif self.image_name is not None:
             image = modal.Image.from_name(self.image_name)
@@ -307,8 +308,7 @@ class ModalRuntime:
                 )
                 project_directory = str(PurePosixPath(compose_path).parent)
                 with project.stage(
-                    f"{self.port}:{self.port}",
-                    port_service=port_service,
+                    {port_service: [f"{self.port}:{self.port}"]},
                     seccomp="/hud/docker-seccomp.json",
                     service_socket=("/var/run/docker.sock" if project.service_access else None),
                     env_vars=self.env_vars,

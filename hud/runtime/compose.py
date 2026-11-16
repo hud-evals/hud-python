@@ -532,12 +532,9 @@ class ComposeProject(BaseModel):
 
     @model_validator(mode="after")
     def validate_source(self) -> ComposeProject:
-        if self.root is None:
-            return self
-        if isinstance(self.root, Path) != isinstance(self.document, Path):
+        if isinstance(self.root, ComposeProjectRef) and isinstance(self.document, Path):
             raise ValueError("Compose source and project root must use the same form")
-        if isinstance(self.root, Path):
-            assert isinstance(self.document, Path)
+        if isinstance(self.root, Path) and isinstance(self.document, Path):
             try:
                 self.document.resolve().relative_to(self.root.resolve())
             except ValueError:
@@ -569,7 +566,8 @@ class ComposeProject(BaseModel):
         base = (info.context or {}).get("base_path")
         if isinstance(base, Path):
             return os.path.relpath(root.resolve(), base)
-        assert isinstance(self.document, Path)
+        if not isinstance(self.document, Path):
+            return str(root)
         return {
             "compose_path": self.document.resolve().relative_to(root.resolve()).as_posix(),
         }
@@ -577,28 +575,47 @@ class ComposeProject(BaseModel):
     @contextlib.contextmanager
     def stage(
         self,
-        published_port: str,
+        ports: Mapping[str, Sequence[str]],
         *,
-        port_service: str = "main",
         seccomp: str | Path,
+        sessions: bool = True,
+        init: bool = False,
         service_socket: str | None = None,
         bind_mounts: Sequence[DockerBindMount] = (),
         env_vars: Mapping[str, str] | None = None,
+        command: Sequence[str] | None = None,
+        healthcheck: Mapping[str, Any] | None = None,
         cpu: float | None = None,
         memory_mb: int | None = None,
         gpu_count: int | None = None,
         archive: bool = False,
     ) -> Generator[ComposeLaunchFiles]:
-        if not isinstance(self.document, Path):
+        """Write the files that start this project for one placement.
+
+        ``ports`` publishes, per service, ports in ``docker run --publish`` form, in place of
+        the service's own. ``sessions`` mounts HUD's session state into ``main``, and
+        ``init`` runs an init there that reaps the processes run in it.
+        ``env_vars``, ``command`` and ``healthcheck`` apply to ``main`` over its own.
+        """
+        if isinstance(self.document, Path):
+            compose_file = self.document.resolve()
+            config = ComposeConfig.from_file(compose_file)
+            project_directory = compose_file.parent
+            project_root = self.root.resolve() if isinstance(self.root, Path) else project_directory
+            compose_name = compose_file.relative_to(project_root).as_posix()
+        elif isinstance(self.root, Path):
+            config = self.document
+            project_root = project_directory = self.root.resolve()
+            compose_name = "compose.json"
+        else:
             raise ValueError("Compose project is not available on the local filesystem")
-        compose = self.document.resolve()
         volumes: list[dict[str, str | bool]] = [
             {
                 "type": "volume",
                 "source": "hud-runtime-sessions",
                 "target": target,
             }
-            for target in ("/runtime/sessions", "/media/hud/sessions")
+            for target in (("/runtime/sessions", "/media/hud/sessions") if sessions else ())
         ]
         volumes.extend(mount.compose_volume() for mount in bind_mounts)
         if service_socket is not None:
@@ -620,6 +637,12 @@ class ComposeProject(BaseModel):
         }
         if env_vars:
             main["environment"] = dict(env_vars)
+        if init:
+            main["init"] = True
+        if command is not None:
+            main["command"] = list(command)
+        if healthcheck is not None:
+            main["healthcheck"] = dict(healthcheck)
         if cpu is not None:
             main["cpus"] = cpu
         if memory_mb is not None:
@@ -631,9 +654,7 @@ class ComposeProject(BaseModel):
             root = Path(directory)
             normalized = root / "compose.json"
             normalized.write_text(
-                json.dumps(
-                    ComposeConfig.from_file(compose).model_dump(mode="json", exclude_none=True)
-                ),
+                json.dumps(config.model_dump(mode="json", exclude_none=True)),
                 encoding="utf-8",
             )
             override = root / "override.json"
@@ -641,35 +662,37 @@ class ComposeProject(BaseModel):
                 json.dumps(
                     {
                         "services": {"main": main},
-                        "volumes": {"hud-runtime-sessions": {}},
+                        **({"volumes": {"hud-runtime-sessions": {}}} if sessions else {}),
                     }
                 ),
                 encoding="utf-8",
             )
-            ports = root / "ports.yaml"
-            ports.write_text(
-                f'services:\n  {port_service}:\n    ports: !override ["{published_port}"]\n',
+            published = root / "ports.yaml"
+            published.write_text(
+                "services:\n"
+                + "".join(
+                    f"  {service}:\n    ports: !override {json.dumps(list(service_ports))}\n"
+                    for service, service_ports in ports.items()
+                )
+                if ports
+                else "services: {}\n",
                 encoding="utf-8",
             )
             archive_path = None
             if archive:
                 archive_path = root / "project.tar.gz"
-                project_root = (
-                    self.root.resolve() if isinstance(self.root, Path) else compose.parent
-                )
-                compose_path = compose.relative_to(project_root).as_posix()
 
                 def omit_authored_compose(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-                    return None if info.name == compose_path else info
+                    return None if info.name == compose_name else info
 
                 with tarfile.open(archive_path, "w:gz") as tar:
                     for entry in project_root.iterdir():
                         tar.add(entry, arcname=entry.name, filter=omit_authored_compose)
-                    tar.add(normalized, arcname=compose_path)
+                    tar.add(normalized, arcname=compose_name)
             yield ComposeLaunchFiles(
                 compose=normalized,
-                project_directory=compose.parent,
+                project_directory=project_directory,
                 override=override,
-                ports=ports,
+                ports=published,
                 archive=archive_path,
             )

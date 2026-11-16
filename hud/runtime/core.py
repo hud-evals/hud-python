@@ -9,7 +9,8 @@ import logging
 import math
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Protocol, Self, runtime_checkable
 
 from pydantic import (
     BaseModel,
@@ -24,16 +25,17 @@ from hud.clients.client import HudClient
 from hud.clients.dial import dialer
 from hud.environment.session import validate_session_id
 from hud.environment.utils import HudProtocolError
+from hud.utils.process import create_process_group_exec
 
 from .compose import ComposeProject
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence
-    from pathlib import Path
 
     from hud.environment.egress import WorkspaceRoute
     from hud.eval.run import EnvironmentSession
     from hud.eval.task import Task
+    from hud.utils.process import ProcessResult
 
     from .hosted import HostedRuntime
 
@@ -102,16 +104,97 @@ class RuntimeLimits(BaseModel):
     run_timeout_s: int | None = Field(default=None, gt=0)
 
 
+class RuntimeBuild(BaseModel):
+    """An image built from ``context``, with ``dockerfile`` relative to it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    context: Path
+    dockerfile: str | None = Field(default=None, min_length=1)
+
+
+class EnvRef(BaseModel):
+    """The value of ``name`` in this process's environment at placement.
+
+    ``default`` stands in when ``name`` is unset or empty.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    default: str | None = None
+
+
+class RuntimeHealthcheck(BaseModel):
+    """A shell ``command`` whose success reports the environment ready, and how to poll it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: str = Field(min_length=1)
+    interval_s: float = Field(default=30.0, gt=0)
+    timeout_s: float = Field(default=30.0, gt=0)
+    start_period_s: float = Field(default=0.0, ge=0)
+    start_interval_s: float = Field(default=5.0, gt=0)
+    retries: int = Field(default=3, ge=1)
+
+
+class RuntimeProcess(BaseModel):
+    """How the environment's main process runs: the image's own, or a Compose ``main``'s.
+
+    ``command`` replaces the image's command and keeps its entrypoint, and with it the HUD
+    control channel an environment image serves: a placement with a ``command`` is a box
+    the controller drives through its runtime. ``env`` is set over the image's own. The
+    environment is ready once ``healthcheck`` passes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: list[str] | None = Field(default=None, min_length=1)
+    env: dict[str, str | EnvRef] = Field(default_factory=dict)
+    healthcheck: RuntimeHealthcheck | None = None
+
+
+class RuntimePort(BaseModel):
+    """A port a service of the environment serves, published for the controller to reach."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    port: int = Field(ge=1, le=65535)
+    service: str = Field(default="main", min_length=1)
+
+
+def resolve_env(env: Mapping[str, str | EnvRef], available: Mapping[str, str]) -> dict[str, str]:
+    """``env`` with each reference read from ``available``."""
+    resolved: dict[str, str] = {}
+    for key, value in env.items():
+        if isinstance(value, str):
+            resolved[key] = value
+            continue
+        found = available.get(value.name)
+        if found is not None and (found or value.default is None):
+            resolved[key] = found
+        elif value.default is not None:
+            resolved[key] = value.default
+        else:
+            raise ValueError(f"env {key!r} reads {value.name!r}, which is not set here")
+    return resolved
+
+
 class RuntimeConfig(BaseModel):
     """Typed task-environment launch requirements.
 
+    The environment comes from an ``image``, pulled by reference or built, or from a
+    ``compose`` project; ``process`` says how its main process runs, and ``ports`` which
+    ports the controller reaches.
     ``Task.runtime_config`` is the requested config; ``Runtime.config`` is the one applied.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    image: str | None = Field(default=None, min_length=1)
+    image: Annotated[str, Field(min_length=1)] | RuntimeBuild | None = None
     compose: ComposeProject | None = None
+    process: RuntimeProcess | None = None
+    ports: list[RuntimePort] | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
 
@@ -147,11 +230,82 @@ class RuntimeConfig(BaseModel):
             config["image"] = None
         return RuntimeConfig.model_validate(config | changes)
 
+    def pulled_image(self, provider: str) -> str | None:
+        """The image reference, for a provider that runs only pulled images as they are."""
+        if isinstance(self.image, RuntimeBuild):
+            raise ValueError(f"{provider} does not support building runtime_config.image")
+        if self.process is not None:
+            raise ValueError(f"{provider} does not support runtime_config.process")
+        if self.ports:
+            raise ValueError(f"{provider} does not support runtime_config.ports")
+        return self.image
+
 
 class Provider(Protocol):
     """Places a task: an async context manager yielding a connectable ``Runtime`` for its scope."""
 
     def __call__(self, task: Task, /) -> AbstractAsyncContextManager[Runtime]: ...
+
+
+@runtime_checkable
+class Box(Protocol):
+    """A placed runtime the controller runs commands in and copies files in and out of."""
+
+    def exec_argv(
+        self,
+        argv: Sequence[str],
+        *,
+        user: str | None = None,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        tty: bool = False,
+    ) -> list[str]:
+        """The local command line that runs ``argv`` in the box, with its stdio attached.
+
+        ``env`` is set over the box's own environment. With ``tty`` the command gets a
+        terminal, so the command line's own stdio must be one.
+        """
+        ...
+
+    async def put(self, source: Path, target: str) -> None:
+        """Copy ``source``, a file or the contents of a directory, to ``target`` in the box."""
+        ...
+
+    async def get(self, source: str, target: Path) -> None:
+        """Copy ``source`` from the box to ``target``."""
+        ...
+
+    def service(self, name: str) -> Box:
+        """The box of ``name``, another service placed with this one."""
+        ...
+
+    def address(self, port: int) -> str:
+        """``host:port`` where this process reaches ``port``, one ``RuntimeConfig.ports`` named."""
+        ...
+
+
+async def exec_in(
+    box: Box,
+    argv: Sequence[str],
+    *,
+    user: str | None = None,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    input: bytes = b"",
+    max_wait: float | None = None,
+) -> ProcessResult:
+    """Run ``argv`` in ``box`` to completion, or for at most ``max_wait`` seconds."""
+    process = await create_process_group_exec(
+        *box.exec_argv(argv, user=user, cwd=cwd, env=env),
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdin = process.process.stdin
+    assert stdin is not None
+    stdin.write(input)
+    stdin.close()
+    return await process.complete(max_wait=max_wait)
 
 
 @runtime_checkable

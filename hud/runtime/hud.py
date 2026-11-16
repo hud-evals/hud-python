@@ -49,7 +49,8 @@ class HUDRuntime:
         if task.runtime_config is not None:
             # The lease resolves the env by name, so an image or Compose recipe is only
             # provenance and cpu/memory only warn; a GPU, OS, TPU or limits change what is
-            # graded, so those fail.
+            # graded, so those fail. A build is not an image to compare, so it is refused.
+            task.runtime_config.pulled_image("HUDRuntime")
             resources = task.runtime_config.resources
             if (
                 resources is not None

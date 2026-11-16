@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import sys
@@ -11,7 +12,7 @@ import tempfile
 import uuid
 from collections import deque
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
@@ -22,7 +23,15 @@ from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
 from .compose import SECCOMP_PROFILE, ComposeConfig, DockerBindMount
-from .core import READY_TIMEOUT_SECONDS, Runtime, RuntimeConfig
+from .core import (
+    READY_TIMEOUT_SECONDS,
+    Runtime,
+    RuntimeBuild,
+    RuntimeConfig,
+    RuntimeHealthcheck,
+    RuntimeProcess,
+    resolve_env,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -33,6 +42,7 @@ logger = logging.getLogger("hud.runtime")
 
 # Images built before session state moved to SESSION_STATE_ROOT still write it here.
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
+_HEALTH_POLL_SECONDS = 0.25
 
 _DOCKER_SECURITY_ARGS = (
     "--security-opt",
@@ -70,6 +80,74 @@ async def _published_port(docker: Sequence[str], owner: str, port: int, name: st
             f"{name} exited before serving port {port}:\n{(logs_err or logs_out).strip()}"
         )
     return int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
+
+
+def _context_digest(context: Path, dockerfile: str | None) -> str:
+    """A digest of a build's Dockerfile choice and everything in its context."""
+    digest = hashlib.sha256(f"{dockerfile or 'Dockerfile'}\0".encode())
+    for entry in sorted(context.rglob("*")):
+        relative = entry.relative_to(context).as_posix().encode()
+        if entry.is_symlink():
+            digest.update(relative + b"\0symlink\0" + os.readlink(entry).encode() + b"\0")
+        elif entry.is_file():
+            digest.update(relative + b"\0" + entry.read_bytes() + b"\0")
+    return digest.hexdigest()[:16]
+
+
+def _health_args(healthcheck: RuntimeHealthcheck) -> list[str]:
+    return [
+        "--health-cmd",
+        healthcheck.command,
+        "--health-interval",
+        f"{healthcheck.interval_s}s",
+        "--health-timeout",
+        f"{healthcheck.timeout_s}s",
+        "--health-start-period",
+        f"{healthcheck.start_period_s}s",
+        "--health-start-interval",
+        f"{healthcheck.start_interval_s}s",
+        "--health-retries",
+        str(healthcheck.retries),
+    ]
+
+
+def _compose_healthcheck(healthcheck: RuntimeHealthcheck) -> dict[str, Any]:
+    return {
+        "test": ["CMD-SHELL", healthcheck.command],
+        "interval": f"{healthcheck.interval_s}s",
+        "timeout": f"{healthcheck.timeout_s}s",
+        "start_period": f"{healthcheck.start_period_s}s",
+        "start_interval": f"{healthcheck.start_interval_s}s",
+        "retries": healthcheck.retries,
+    }
+
+
+async def _wait_healthy(container: str, name: str, *, deadline: float | None) -> None:
+    """Wait for ``container``'s healthcheck to pass, failing once it exits, Docker gives up,
+    or ``deadline`` seconds pass."""
+    try:
+        async with asyncio.timeout(deadline):
+            while True:
+                status, _ = await _docker(
+                    "inspect", "--format", "{{.State.Status}} {{.State.Health.Status}}", container
+                )
+                state, _, health = status.strip().partition(" ")
+                if health == "healthy":
+                    return
+                if state != "running" or health == "unhealthy":
+                    log, _ = await _docker(
+                        "inspect",
+                        "--format",
+                        "{{range .State.Health.Log}}{{.Output}}{{end}}",
+                        container,
+                        check=False,
+                    )
+                    raise RuntimeError(
+                        f"{name} did not become healthy ({state}, {health}): {log.strip()[-2000:]}"
+                    )
+                await asyncio.sleep(_HEALTH_POLL_SECONDS)
+    except TimeoutError:
+        raise RuntimeError(f"{name} did not become healthy within {deadline:.0f}s") from None
 
 
 @asynccontextmanager
@@ -182,10 +260,36 @@ class DockerRuntime:
         if runtime_config is not None:
             config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
         self.runtime_config = config if config.model_dump(exclude_none=True) else None
+        self._builds: dict[tuple[Path, str | None], str] = {}
+        self._build_locks: dict[tuple[Path, str | None], asyncio.Lock] = {}
 
     def config_for(self, task: Task) -> RuntimeConfig:
         """This provider's runtime configuration, overridden by ``task``'s."""
         return (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+
+    async def _built(self, build: RuntimeBuild, *, deadline: float | None) -> str:
+        """The image ``build`` makes, built at most once by this provider.
+
+        Its tag names a digest of the context, so later providers reuse an unchanged build.
+        """
+        key = (build.context.resolve(), build.dockerfile)
+        async with self._build_locks.setdefault(key, asyncio.Lock()):
+            if key not in self._builds:
+                context, dockerfile = key
+                digest = await asyncio.to_thread(_context_digest, context, dockerfile)
+                tag = f"hud-build:{digest}"
+                found, _ = await _docker("image", "ls", "--quiet", tag)
+                if not found.strip():
+                    await _docker(
+                        "build",
+                        "--tag",
+                        tag,
+                        *(("--file", str(context / dockerfile)) if dockerfile else ()),
+                        str(context),
+                        timeout_s=deadline,
+                    )
+                self._builds[key] = tag
+        return self._builds[key]
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
@@ -196,16 +300,30 @@ class DockerRuntime:
         resources = config.resources
         if resources is not None:
             resources.require_support("DockerRuntime", {"cpu", "memory_mb", "storage_mb", "gpu"})
+        process = config.process or RuntimeProcess()
+        env_vars = {**self.env_vars, **resolve_env(process.env, os.environ)}
+        # A process the task supplies replaces the environment's server: the placement is a
+        # box, with no control channel and no HUD session state.
+        box = process.command is not None
+        requested = config.ports or []
         compose_project = config.compose
         if compose_project is not None:
-            compose = compose_project.document
-            if not isinstance(compose, Path):
-                raise ValueError("DockerRuntime requires compose as a local file path")
-            compose = compose.resolve()
+            document = compose_project.document
+            if isinstance(document, Path):
+                compose_config = ComposeConfig.from_file(document.resolve())
+            elif isinstance(compose_project.root, Path):
+                compose_config = document
+            else:
+                raise ValueError("DockerRuntime requires a Compose project on the local filesystem")
             if self.run_args:
                 raise ValueError("DockerRuntime run_args apply only to image environments")
-            compose_config = ComposeConfig.from_file(compose)
             port_service = compose_config.network_owner("main")
+            published: dict[str, list[str]] = (
+                {"main": []} if box else {port_service: [f"127.0.0.1::{self.port}"]}
+            )
+            for requirement in requested:
+                owner = compose_config.network_owner(requirement.service)
+                published.setdefault(owner, []).append(f"127.0.0.1::{requirement.port}")
             if (
                 resources is not None
                 and resources.gpu is not None
@@ -234,12 +352,19 @@ class DockerRuntime:
                     service_socket = parsed.path
             project = f"hud-{uuid.uuid4().hex[:12]}"
             with compose_project.stage(
-                f"127.0.0.1::{self.port}",
-                port_service=port_service,
+                published,
                 seccomp=SECCOMP_PROFILE,
+                sessions=not box,
+                init=box,
                 service_socket=service_socket,
                 bind_mounts=self.bind_mounts,
-                env_vars=self.env_vars,
+                env_vars=env_vars,
+                command=process.command,
+                healthcheck=(
+                    _compose_healthcheck(process.healthcheck)
+                    if process.healthcheck is not None
+                    else None
+                ),
                 cpu=resources.cpu if resources is not None else None,
                 memory_mb=resources.memory_mb if resources is not None else None,
                 gpu_count=(
@@ -275,7 +400,10 @@ class DockerRuntime:
                         "--remove-orphans",
                         timeout_s=startup_timeout,
                     )
-                    if awaited := compose_config.healthchecked_services():
+                    awaited = compose_config.healthchecked_services()
+                    if process.healthcheck is not None and "main" not in awaited:
+                        awaited.append("main")
+                    if awaited:
                         await _docker(
                             *command,
                             "up",
@@ -291,26 +419,49 @@ class DockerRuntime:
                     out, _ = await _docker(*command, "ps", "--all", "--quiet", "main")
                     container = out.strip()
                     async with _docker_output(*command, "logs", "--follow", "--no-color"):
-                        await _wait_serving(
-                            container,
-                            "Compose main service",
-                            ready_timeout
-                            if startup_deadline is None
-                            else startup_deadline - loop.time(),
-                        )
+                        # A box serves no control channel, so it announces no port.
+                        if not box:
+                            await _wait_serving(
+                                container,
+                                "Compose main service",
+                                ready_timeout
+                                if startup_deadline is None
+                                else startup_deadline - loop.time(),
+                            )
                         if resources is not None and resources.storage_mb is not None:
                             await _require_free_disk(
                                 (*command, "exec", "-T", "main"), resources.storage_mb
                             )
-                        host_port = await _published_port(
-                            command, port_service, self.port, f"Compose {port_service} service"
+                        listed, _ = await _docker(
+                            *command, "ps", "--format", "{{.Service}} {{.ID}}"
                         )
+                        services = {
+                            **dict(line.split() for line in listed.splitlines() if line.strip()),
+                            "main": container,
+                        }
+                        addresses: dict[tuple[str, int], str] = {}
+                        for requirement in requested:
+                            owner = compose_config.network_owner(requirement.service)
+                            host_port = await _published_port(
+                                command, owner, requirement.port, f"Compose {owner} service"
+                            )
+                            addresses[(requirement.service, requirement.port)] = (
+                                f"127.0.0.1:{host_port}"
+                            )
+                        url = f"docker://{container}"
+                        if not box:
+                            control = await _published_port(
+                                command, port_service, self.port, f"Compose {port_service} service"
+                            )
+                            url = f"tcp://127.0.0.1:{control}"
                         async with _docker_deadline(run_timeout, teardown):
                             yield DockerEndpoint(
-                                f"tcp://127.0.0.1:{host_port}",
+                                url,
                                 ready_timeout=ready_timeout,
                                 config=config if config.model_dump(exclude_none=True) else None,
                                 container=container,
+                                services=services,
+                                addresses=addresses,
                             )
                 finally:
                     await _docker(*teardown, check=False)
@@ -319,6 +470,11 @@ class DockerRuntime:
             raise ValueError(
                 "DockerRuntime requires runtime_config.image or runtime_config.compose"
             )
+        image = (
+            config.image
+            if isinstance(config.image, str)
+            else await self._built(config.image, deadline=startup_timeout)
+        )
 
         resource_args: list[str] = []
         if resources is not None:
@@ -337,15 +493,29 @@ class DockerRuntime:
                 resource_args.extend(("--gpus", str(resources.gpu.count)))
 
         env_args: list[str] = []
-        for key, value in self.env_vars.items():
+        for key, value in env_vars.items():
             env_args.extend(("--env", f"{key}={value}"))
         mount_args: list[str] = []
         for mount in self.bind_mounts:
             mount_args.extend(("--mount", mount.docker_argument()))
-        session_volume = f"hud-runtime-sessions-{uuid.uuid4().hex}"
+        if any(requirement.service != "main" for requirement in requested):
+            raise ValueError("an image environment publishes ports only from main")
+        publish_args: list[str] = []
+        for port in ([] if box else [self.port]) + [requirement.port for requirement in requested]:
+            publish_args.extend(("--publish", f"127.0.0.1::{port}"))
+        name = f"container for image {image!r}"
+        session_volume = None if box else f"hud-runtime-sessions-{uuid.uuid4().hex}"
         container = ""
         try:
-            await _docker("volume", "create", session_volume, timeout_s=startup_timeout)
+            session_args: list[str] = []
+            if session_volume is not None:
+                await _docker("volume", "create", session_volume, timeout_s=startup_timeout)
+                session_args = [
+                    "--mount",
+                    f"type=volume,source={session_volume},target={SESSION_STATE_ROOT}",
+                    "--mount",
+                    f"type=volume,source={session_volume},target={_SESSION_ALIAS_ROOT}",
+                ]
             out, _ = await _docker(
                 "run",
                 "--detach",
@@ -354,50 +524,106 @@ class DockerRuntime:
                 *resource_args,
                 *mount_args,
                 *_DOCKER_SECURITY_ARGS,
-                "--mount",
-                f"type=volume,source={session_volume},target={SESSION_STATE_ROOT}",
-                "--mount",
-                f"type=volume,source={session_volume},target={_SESSION_ALIAS_ROOT}",
-                "--publish",
-                f"127.0.0.1::{self.port}",
-                config.image,
+                *session_args,
+                # A box's processes are started beside its main one, which need not
+                # reap them once they are orphaned.
+                *(("--init",) if box else ()),
+                *publish_args,
+                *(_health_args(process.healthcheck) if process.healthcheck is not None else ()),
+                image,
+                *(process.command or ()),
                 timeout_s=startup_timeout,
             )
             container = out.strip()
             teardown = ("rm", "--force", container)
             async with _docker_output("logs", "--follow", container):
-                await _wait_serving(
-                    container,
-                    f"container for image {config.image!r}",
-                    ready_timeout,
-                )
+                # A box serves no control channel, so it announces no port.
+                if not box:
+                    await _wait_serving(container, name, ready_timeout)
+                if process.healthcheck is not None:
+                    await _wait_healthy(container, name, deadline=startup_timeout)
                 if resources is not None and resources.storage_mb is not None:
                     await _require_free_disk(("exec", container), resources.storage_mb)
-                host_port = await _published_port(
-                    (), container, self.port, f"container for image {config.image!r}"
+                addresses = {
+                    ("main", requirement.port): "127.0.0.1:"
+                    + str(await _published_port((), container, requirement.port, name))
+                    for requirement in requested
+                }
+                url = (
+                    f"docker://{container}"
+                    if box
+                    else f"tcp://127.0.0.1:{await _published_port((), container, self.port, name)}"
                 )
                 async with _docker_deadline(run_timeout, teardown):
                     yield DockerEndpoint(
-                        f"tcp://127.0.0.1:{host_port}",
+                        url,
                         ready_timeout=ready_timeout,
                         config=config,
                         container=container,
+                        services={"main": container},
+                        addresses=addresses,
                     )
         finally:
             # check=False: teardown must not shadow the run's own error, and
             # rm -f only fails when the daemon itself is broken.
             if container:
                 await _docker("rm", "--force", container, check=False)
-            await _docker("volume", "rm", "--force", session_volume, check=False)
+            if session_volume is not None:
+                await _docker("volume", "rm", "--force", session_volume, check=False)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DockerEndpoint(Runtime):
-    """The ``Runtime`` a ``DockerRuntime`` yields: its control channel and ``container`` id."""
+    """The ``Runtime`` a ``DockerRuntime`` yields: its control channel, or a box's
+    ``docker://`` address, and its ``container`` with the services placed beside it."""
 
     transports_sessions: ClassVar[bool] = True
 
     container: str
+    services: Mapping[str, str] = field(default_factory=dict)
+    addresses: Mapping[tuple[str, int], str] = field(default_factory=dict)
+    service_name: str = "main"
+
+    def service(self, name: str) -> DockerEndpoint:
+        """The endpoint of ``name``, another service placed with this one."""
+        if name not in self.services:
+            raise ValueError(f"no service {name!r} was placed with {self.service_name!r}")
+        return replace(self, container=self.services[name], service_name=name)
+
+    def address(self, port: int) -> str:
+        """``host:port`` where this process reaches ``port`` of this service."""
+        try:
+            return self.addresses[(self.service_name, port)]
+        except KeyError:
+            raise ValueError(f"port {port} of {self.service_name!r} was not published") from None
+
+    def exec_argv(
+        self,
+        argv: Sequence[str],
+        *,
+        user: str | None = None,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        tty: bool = False,
+    ) -> list[str]:
+        """The local ``docker exec`` command line that runs ``argv`` in this container."""
+        options = ["--interactive", *(("--tty",) if tty else ())]
+        if user is not None:
+            options += ["--user", user]
+        if cwd is not None:
+            options += ["--workdir", cwd]
+        for key, value in (env or {}).items():
+            options += ["--env", f"{key}={value}"]
+        return ["docker", "exec", *options, self.container, *argv]
+
+    async def put(self, source: Path, target: str) -> None:
+        """Copy ``source``, a file or the contents of a directory, to ``target`` here."""
+        origin = f"{source}/." if await asyncio.to_thread(source.is_dir) else str(source)
+        await _docker("cp", origin, f"{self.container}:{target}")
+
+    async def get(self, source: str, target: Path) -> None:
+        """Copy ``source`` from this container to ``target``."""
+        await _docker("cp", f"{self.container}:{source}", str(target))
 
     @asynccontextmanager
     async def snapshot_session(self, session_id: str) -> AsyncGenerator[Path | None]:
@@ -416,39 +642,10 @@ class DockerEndpoint(Runtime):
             if not exists:
                 yield None
                 return
-            archive = f"/runtime/session-export-{uuid.uuid4().hex}.tar.gz"
-            script = """
-import sys
-import tarfile
-from pathlib import Path
-
-root = Path(sys.argv[1])
-entries = list(root.rglob("*"))
-if any(entry.is_symlink() for entry in entries):
-    raise ValueError("runtime session contains a symbolic link")
-if any(not (entry.is_file() or entry.is_dir()) for entry in entries):
-    raise ValueError("runtime session contains an unsupported entry")
-with tarfile.open(sys.argv[2], "w:gz") as output:
-    for entry in entries:
-        output.add(entry, arcname=entry.relative_to(root), recursive=False)
-"""
-            try:
-                await _docker(
-                    "exec",
-                    "--user",
-                    "0",
-                    self.container,
-                    "python3",
-                    "-c",
-                    script,
-                    root,
-                    archive,
-                )
-                await _docker("cp", f"{self.container}:{archive}", str(destination))
-            finally:
-                await _docker(
-                    "exec", "--user", "0", self.container, "rm", "-f", archive, check=False
-                )
+            # Copied out by the daemon and archived here, so the box needs no tools of its own.
+            staged = Path(directory) / "session"
+            await _docker("cp", f"{self.container}:{root}", str(staged))
+            await asyncio.to_thread(_archive_session, staged, destination)
             yield destination
 
     async def restore_session(self, session_id: str, source: Path) -> None:
@@ -463,6 +660,17 @@ with tarfile.open(sys.argv[2], "w:gz") as output:
                 f"{root}/.",
                 f"{self.container}:{target}",
             )
+
+
+def _archive_session(root: Path, destination: Path) -> None:
+    entries = list(root.rglob("*"))
+    if any(entry.is_symlink() for entry in entries):
+        raise ValueError("runtime session contains a symbolic link")
+    if any(not (entry.is_file() or entry.is_dir()) for entry in entries):
+        raise ValueError("runtime session contains an unsupported entry")
+    with tarfile.open(destination, "w:gz") as output:
+        for entry in entries:
+            output.add(entry, arcname=entry.relative_to(root).as_posix(), recursive=False)
 
 
 def _extract_session_archive(source: Path, destination: Path) -> None:

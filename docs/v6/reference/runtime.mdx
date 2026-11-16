@@ -82,8 +82,10 @@ RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2
 
 | Field | Description |
 |-------|-------------|
-| `image` | Image to run. |
+| `image` | Image to run: a reference to pull, or `RuntimeBuild(context, dockerfile=None)` to build from a local context. `DockerRuntime` builds each context once and tags it `hud-build:<digest of the context>`; other providers refuse a build by name. |
 | `compose` | `ComposeProject(document, root, service_access)`. Mutually exclusive with `image`. |
+| `process` | `RuntimeProcess(command, env, healthcheck)`. A `command` replaces the image's command and makes the placement a box: it serves no control channel, and the controller drives it through the runtime (`exec`, file copy). `env` values may be `EnvRef(name, default=None)`, read from this process's environment at placement. `healthcheck` (`RuntimeHealthcheck`) gates readiness. Docker only. |
+| `ports` | `RuntimePort(port, service="main")` entries a box publishes for the controller to reach. Docker only. |
 | `resources` | Placement requests: CPU, memory, disk, acceptable GPU types and count, OS, or TPU slice. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
 

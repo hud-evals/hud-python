@@ -123,6 +123,7 @@ class DaytonaRuntime:
 
         async with AsyncDaytona() as daytona:
             config = self.config_for(task)
+            image = config.pulled_image("DaytonaRuntime")
             if config.compose is not None:
                 raise ValueError("DaytonaRuntime does not support runtime_config.compose")
             if config.limits is not None and config.limits.run_timeout_s is not None:
@@ -160,9 +161,9 @@ class DaytonaRuntime:
                 if resource_kwargs:
                     daytona_resources = Resources(**resource_kwargs)
 
-            if config.image is not None:
+            if image is not None:
                 sandbox_params = CreateSandboxFromImageParams(
-                    image=Image.base(config.image),
+                    image=Image.base(image),
                     ephemeral=True,
                     auto_stop_interval=0,
                     resources=daytona_resources,

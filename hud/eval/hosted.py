@@ -138,6 +138,7 @@ async def _submit_and_await(
     if parent_trace_id is not None:
         payload["parent_trace_id"] = parent_trace_id
     if task.runtime_config is not None:
+        task.runtime_config.pulled_image("HostedRuntime")
         runtime_config = task.runtime_config.model_dump(mode="json", exclude_unset=True)
         if runtime_config:
             payload["runtime_config"] = runtime_config
