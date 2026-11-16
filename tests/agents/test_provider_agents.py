@@ -253,64 +253,6 @@ async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
     assert error in trace.error
 
 
-@pytest.mark.parametrize(
-    ("agent_type", "model", "tool", "path_key", "include_key"),
-    [
-        ("openai_compatible", "qwen3.6-plus", "grep", "path", "include"),
-        ("gemini", GEMINI_MODEL, "grep_search", "dir_path", "include_pattern"),
-    ],
-    ids=["openai_compatible", "gemini"],
-)
-@pytest.mark.parametrize(
-    ("include", "options", "found"),
-    [
-        (
-            "*.{ts,tsx,json}",
-            " --include='*.ts' --include='*.tsx' --include='*.json'",
-            ["a.ts", "b.tsx", "sub/firebase.json"],
-        ),
-        ("**/*", "", ["a.ts", "b.tsx", "notes.md", "sub/firebase.json"]),
-        ("src/**/*.tsx", " --include='*.tsx'", ["b.tsx"]),
-    ],
-    ids=["braces", "every-file", "under-a-directory"],
-)
-async def test_a_search_takes_alternation_and_the_include_globs_models_send(
-    include: str,
-    options: str,
-    found: list[str],
-    agent_type: str,
-    model: str,
-    tool: str,
-    path_key: str,
-    include_key: str,
-    models: Models,
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "ws"
-    (root / "sub").mkdir(parents=True)
-    (root / "a.ts").write_text("// noExplicitAny\n")
-    (root / "b.tsx").write_text("// biome-ignore\n")
-    (root / "notes.md").write_text("noExplicitAny\n")
-    (root / "sub" / "firebase.json").write_text('{"lint": "biome-ignore"}\n')
-    search = {"pattern": "noExplicitAny|biome-ignore", path_key: str(root), include_key: include}
-    models.script([call(tool, **search), Turn(text="done")])
-    kind = AgentType(agent_type).cls
-
-    task = workspace_task(root)
-    (trace,) = (await task().run(kind(kind.config_cls(model=model)))).traces
-
-    (step,) = (step for step in trace.steps if isinstance(step, ToolStep))
-    assert step.result is not None
-    command, *lines = "".join(
-        block.text for block in step.result.content if isinstance(block, TextContent)
-    ).splitlines()
-    assert command == f"$ grep -rnE 'noExplicitAny|biome-ignore' {root}{options}"
-    assert (
-        sorted(line.split(":")[0].removeprefix(f"{root}/") for line in lines if ":" in line)
-        == found
-    )
-
-
 # Strict mode offers each position's type; the Chat Completions subset has no unions,
 # so a mixed tuple's items stay untyped.
 @pytest.mark.parametrize(
@@ -387,28 +329,48 @@ def test_an_openai_setting_the_installed_sdk_does_not_declare_is_refused() -> No
         )
 
 
+def _workspace(tmp_path: Path) -> Path:
+    """Fixture files, searched through a symlink to their directory."""
+    files = tmp_path / "files"
+    (files / "sub").mkdir(parents=True)
+    root = tmp_path / "ws"
+    root.symlink_to(files)
+    (root / "a.ts").write_text("// noExplicitAny\n")
+    (root / "b.tsx").write_text("// biome-ignore\n")
+    (root / "notes.md").write_text("noExplicitAny\n")
+    (root / "package.json").write_text('{"lint": "noExplicitAny"}\n')
+    (root / "sub" / "firebase.json").write_text('{"lint": "biome-ignore"}\n')
+    return root
+
+
+async def _tool_output(agent_type: str, model: str, root: Path) -> list[str]:
+    kind = AgentType(agent_type).cls
+    (trace,) = (await workspace_task(root)().run(kind(kind.config_cls(model=model)))).traces
+    (step,) = (step for step in trace.steps if isinstance(step, ToolStep))
+    assert step.result is not None
+    return "".join(
+        block.text for block in step.result.content if isinstance(block, TextContent)
+    ).splitlines()
+
+
 @pytest.mark.parametrize(
     ("agent_type", "model", "path_key"),
     [("openai_compatible", "qwen3.6-plus", "path"), ("gemini", GEMINI_MODEL, "dir_path")],
     ids=["openai_compatible", "gemini"],
 )
 @pytest.mark.parametrize(
-    ("pattern", "tests", "found"),
+    ("pattern", "found"),
     [
-        ("*.ts", "-name '*.ts'", ["a.ts"]),
-        (
-            "**/firebase.json",
-            "-path {root}/firebase.json -o -path '{root}/*/firebase.json'",
-            ["sub/firebase.json"],
-        ),
-        ("**/*.ts*", "-path '{root}/*.ts*' -o -path '{root}/*/*.ts*'", ["a.ts", "b.tsx"]),
-        ("sub/*", "-path '{root}/sub/*'", ["sub/firebase.json"]),
+        ("*.json", ["package.json", "sub/firebase.json"]),
+        ("**/firebase.json", ["sub/firebase.json"]),
+        ("**/*.ts*", ["a.ts", "b.tsx"]),
+        ("sub/*", ["sub/firebase.json"]),
+        ("*.{ts,md}", ["a.ts", "notes.md"]),
     ],
-    ids=["a-base-name", "at-any-depth", "at-no-depth", "under-a-directory"],
+    ids=["a-base-name", "at-any-depth", "at-no-depth", "under-a-directory", "braces"],
 )
-async def test_a_glob_with_directories_matches_the_path_below_the_search_root(
+async def test_a_glob_matches_names_at_any_depth_and_paths_below_the_search_root(
     pattern: str,
-    tests: str,
     found: list[str],
     agent_type: str,
     model: str,
@@ -416,20 +378,86 @@ async def test_a_glob_with_directories_matches_the_path_below_the_search_root(
     models: Models,
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "ws"
-    (root / "sub").mkdir(parents=True)
-    for name in ("a.ts", "b.tsx", "sub/firebase.json"):
-        (root / name).touch()
+    root = _workspace(tmp_path)
     models.script([call("glob", **{"pattern": pattern, path_key: str(root)}), Turn(text="done")])
-    kind = AgentType(agent_type).cls
 
-    task = workspace_task(root)
-    (trace,) = (await task().run(kind(kind.config_cls(model=model)))).traces
+    lines = await _tool_output(agent_type, model, root)
 
-    (step,) = (step for step in trace.steps if isinstance(step, ToolStep))
-    assert step.result is not None
-    command, *lines = "".join(
-        block.text for block in step.result.content if isinstance(block, TextContent)
-    ).splitlines()
-    assert command == f"$ find {root} {tests.format(root=root)}"
-    assert sorted(line.removeprefix(f"{root}/") for line in lines if line.startswith("/")) == found
+    assert (
+        sorted(line.removeprefix(f"{root}/") for line in lines if line.startswith(f"{root}/"))
+        == found
+    )
+
+
+@pytest.mark.parametrize(
+    ("agent_type", "model", "tool", "path_key", "include_key"),
+    [
+        ("openai_compatible", "qwen3.6-plus", "grep", "path", "include"),
+        ("gemini", GEMINI_MODEL, "grep_search", "dir_path", "include_pattern"),
+    ],
+    ids=["openai_compatible", "gemini"],
+)
+@pytest.mark.parametrize(
+    ("include", "found"),
+    [
+        ("", ["a.ts", "b.tsx", "notes.md", "package.json", "sub/firebase.json"]),
+        ("*.{ts,tsx}", ["a.ts", "b.tsx"]),
+        ("**/*.json", ["package.json", "sub/firebase.json"]),
+        ("sub/*.json", ["sub/firebase.json"]),
+    ],
+    ids=["every-file", "braces", "at-any-depth", "under-a-directory"],
+)
+async def test_a_search_takes_an_extended_regex_and_filters_files_by_glob(
+    include: str,
+    found: list[str],
+    agent_type: str,
+    model: str,
+    tool: str,
+    path_key: str,
+    include_key: str,
+    models: Models,
+    tmp_path: Path,
+) -> None:
+    root = _workspace(tmp_path)
+    search = {"pattern": "noExplicitAny|biome-ignore", path_key: str(root), include_key: include}
+    models.script([call(tool, **search), Turn(text="done")])
+
+    lines = await _tool_output(agent_type, model, root)
+
+    assert (
+        sorted(
+            line.split(":")[0].removeprefix(f"{root}/")
+            for line in lines
+            if line.startswith(f"{root}/")
+        )
+        == found
+    )
+
+
+@pytest.mark.parametrize(
+    ("agent_type", "model", "tool", "path_key"),
+    [
+        ("openai_compatible", "qwen3.6-plus", "grep", "path"),
+        ("gemini", GEMINI_MODEL, "grep_search", "dir_path"),
+    ],
+    ids=["openai_compatible", "gemini"],
+)
+@pytest.mark.parametrize("pattern", [";", "{}"])
+async def test_a_search_for_find_exec_syntax_reaches_grep(
+    pattern: str,
+    agent_type: str,
+    model: str,
+    tool: str,
+    path_key: str,
+    models: Models,
+    tmp_path: Path,
+) -> None:
+    root = _workspace(tmp_path)
+    (root / "loop.c").write_text("for (;;) {}\n")
+    models.script([call(tool, **{"pattern": pattern, path_key: str(root)}), Turn(text="done")])
+
+    lines = await _tool_output(agent_type, model, root)
+
+    assert [line for line in lines if line.startswith(f"{root}/")] == [
+        f"{root}/loop.c:1:for (;;) {{}}"
+    ]

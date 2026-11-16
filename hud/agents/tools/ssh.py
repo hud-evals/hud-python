@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import posixpath
 import re
 import shlex
 
@@ -27,28 +26,37 @@ def _remote_error(exc: asyncssh.ProcessError) -> str:
     return (stderr or "").strip() or f"exit {exc.exit_status}"
 
 
-def _find_tests(path: str, pattern: str) -> str:
-    """The ``find`` tests for a glob: its base name, or its whole path when it holds a ``/``.
+def _expand_braces(glob: str) -> list[str]:
+    """``glob`` with each ``{a,b}`` group expanded, innermost first."""
+    group = re.search(r"\{([^{}]*,[^{}]*)\}", glob)
+    if group is None:
+        return [glob]
+    return [
+        expanded
+        for option in group[1].split(",")
+        for expanded in _expand_braces(glob[: group.start()] + option + glob[group.end() :])
+    ]
 
-    ``**/`` stands for any number of directories, none included; ``-path`` lets ``*`` cross them.
+
+def _find_glob(root: str, glob: str) -> str:
+    """The ``find`` test for paths below ``root`` that match ``glob``.
+
+    Braces expand. A glob without ``/`` matches base names at any depth; one with ``/``
+    matches the path below ``root``, where ``**/`` stands for zero or more directories and,
+    as ``find -path`` does, ``*`` also crosses directories.
     """
-    if "/" not in pattern:
-        return f"-name {shlex.quote(pattern)}"
-    head, *rest = pattern.split("**/")
-    globs = [re.sub(r"([*?\[\\])", r"\\\1", path.rstrip("/")) + "/" + head]
-    for part in rest:
-        globs = [glob + directories + part for glob in globs for directories in ("", "*/")]
-    return " -o ".join(f"-path {shlex.quote(glob)}" for glob in globs)
-
-
-def _grep_includes(include: str) -> list[str]:
-    """``include`` as ``grep --include`` globs, which match base names and expand no braces."""
-    braces = re.fullmatch(r"(.*)\{([^{}]*)\}(.*)", include)
-    globs = (
-        [braces[1] + option + braces[3] for option in braces[2].split(",")] if braces else [include]
-    )
-    names = [posixpath.basename(glob) for glob in globs]
-    return [] if any(not name.strip("*") for name in names) else names
+    prefix = re.sub(r"([*?\[\\])", r"\\\1", root.rstrip("/")) + "/"
+    tests: list[str] = []
+    for option in _expand_braces(glob):
+        if "/" not in option:
+            tests.append(f"-name {shlex.quote(option)}")
+            continue
+        head, *rest = option.split("**/")
+        paths = [prefix + head]
+        for part in rest:
+            paths = [path + directories + part for path in paths for directories in ("", "*/")]
+        tests += [f"-path {shlex.quote(path)}" for path in paths]
+    return "\\( " + " -o ".join(tests) + " \\)"
 
 
 class SSHTool(AgentTool[SSHClient]):
@@ -72,14 +80,16 @@ class SSHTool(AgentTool[SSHClient]):
         )
 
     async def file_grep(self, pattern: str, path: str, include: str | None = None) -> ToolResult:
-        """Search files under ``path`` for an extended regular expression.
+        """Search files under ``path`` for an extended regex; ``include`` filters them by glob.
 
-        ``include`` is a file glob; one level of braces and leading directories are accepted.
+        The pattern reaches grep through ``PATTERN``, since ``find`` parses ``{}`` and ``;``
+        in its own ``-exec`` arguments.
         """
-        command = f"grep -rnE {shlex.quote(pattern)} {shlex.quote(path)}"
-        for name in _grep_includes(include or ""):
-            command += f" --include={shlex.quote(name)}"
-        return await self.bash(command)
+        files = f"find -H {shlex.quote(path)} -type f"
+        if include:
+            files += f" {_find_glob(path, include)}"
+        grep = """sh -c 'grep -HnE -e "$PATTERN" -- "$@"' sh {} +"""
+        return await self.bash(f"PATTERN={shlex.quote(pattern)} {files} -exec {grep}")
 
     async def file_read(self, path: str) -> ToolResult:
         try:
@@ -110,5 +120,5 @@ class SSHTool(AgentTool[SSHClient]):
         return tool_ok("\n".join(names) if names else "(empty)")
 
     async def file_glob(self, pattern: str, path: str) -> ToolResult:
-        """Find files under ``path`` whose name, or path below it, matches a glob."""
-        return await self.bash(f"find {shlex.quote(path)} {_find_tests(path, pattern)}")
+        """Find the paths under ``path`` that match a glob."""
+        return await self.bash(f"find -H {shlex.quote(path)} {_find_glob(path, pattern)}")
