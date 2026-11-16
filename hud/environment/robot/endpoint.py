@@ -10,8 +10,8 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from hud.capabilities.base import Capability
+from hud.environment import read_frame, send_frame
 from hud.environment.env import current_session_id
-from hud.environment.utils import read_frame, send_frame
 from hud.utils.process import create_process_group_exec
 
 from .bridge import HUD_STATE, PORT_ANNOUNCEMENT, SLOTS_FULL, RobotBridge, SlotsFull

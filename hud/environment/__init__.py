@@ -1,5 +1,8 @@
 """HUD environment authoring: workspaces, mounts, typed answers, and ``load_environment``.
 
+``read_frame``, ``send_frame``, ``reply`` and ``error`` are the control channel's
+framing (newline-delimited JSON-RPC 2.0), for a process that speaks it to the env.
+
 ``Environment`` itself is exported from ``hud``; ``hud.environment.server`` is the
 serving entry point hosts run. The robot runtime (``RobotBridge``,
 ``RobotEndpoint``, ``DirectControl``, ``wrap``) lives in ``hud.environment.robot``;
@@ -16,6 +19,7 @@ from hud.utils.deprecation import moved_to, resolve_retired
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
+from .utils import error, read_frame, reply, send_frame
 from .workspace import Mount, Workspace
 
 
@@ -93,7 +97,11 @@ __all__ = [
     "Answer",
     "Mount",
     "Workspace",
+    "error",
     "load_environment",
+    "read_frame",
+    "reply",
+    "send_frame",
 ]
 
 _RETIRED = {

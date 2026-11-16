@@ -24,7 +24,7 @@ import websockets.exceptions
 # The agent-side openpi codec, shared so both ends of the wire stay in lockstep.
 from hud.capabilities.base import Capability
 from hud.capabilities.robot import packb, unpackb
-from hud.environment.utils import error, read_frame, reply, send_frame
+from hud.environment import error, read_frame, reply, send_frame
 from hud.utils.modules import load_module
 
 if TYPE_CHECKING:

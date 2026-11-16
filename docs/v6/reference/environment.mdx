@@ -83,6 +83,17 @@ await serve(load_environment("env.py"), host="0.0.0.0", port=8765)
 | `await bind(env, host="127.0.0.1", port=0)` | Bind the control-channel socket and return an `asyncio.Server` without serving. |
 | `load_environment(path, *, name=None)` | Return the one `Environment` defined at `path` (a `.py` file or directory); `name` selects among several. |
 
+A process that talks to the environment over its control channel, such as a simulator the
+environment drives, frames each message with the same helpers the server uses. They are exported from
+`hud.environment`:
+
+| Function | Description |
+|----------|-------------|
+| `await read_frame(reader, *, max_bytes=None)` | Read one newline-delimited JSON frame from an `asyncio.StreamReader`; `None` at EOF. Raises `ValueError` for a frame that is not a JSON object or is larger than `max_bytes`; close the connection after a frame that is too large. |
+| `await send_frame(writer, msg, *, max_bytes=None)` | Write one frame to an `asyncio.StreamWriter` and drain it. |
+| `reply(msg_id, result)` | A JSON-RPC 2.0 success response. |
+| `error(msg_id, code, message)` | A JSON-RPC 2.0 error response. |
+
 <Note>
 A dependency that must **own the process main thread** (e.g. Isaac Sim / Omniverse) can't run under
 `hud serve`, which runs the asyncio loop on main. Run `serve(env, host, port)` on a worker thread
