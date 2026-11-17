@@ -60,25 +60,28 @@ and [Tasks & Tasksets](/v6/reference/tasks).
 ## Serving
 
 You rarely serve by hand - `hud eval`, [`task.run()`](/v6/reference/tasks), and `Taskset.run()` bring
-the environment up for you, and the [runtime](/v6/reference/runtime) you pass decides where. Serving
-itself belongs to `hud.environment.server`, the entry point every host runs: a
-[`SubprocessRuntime`](/v6/reference/runtime#subprocessruntime) child process, a container CMD, or `hud serve`.
+the environment up for you, and the [runtime](/v6/reference/runtime) you pass decides where. To serve one
+yourself, while you iterate or as a container CMD, run `hud serve`:
+
+```bash
+hud serve env.py                               # tcp://127.0.0.1:8765 while you iterate
+hud serve env.py --host 0.0.0.0 --port 8765    # a container CMD
+```
+
+`hud serve` loads the environment and serves it. To do the same from your own code:
+
+```python
+from hud.environment import load_environment
+from hud.environment.server import serve
+
+await serve(load_environment("env.py"), host="0.0.0.0", port=8765)
+```
 
 | Function | Description |
 |----------|-------------|
 | `await serve(env, host="127.0.0.1", port=0)` | Start daemons and serve the control channel until cancelled (blocks). |
 | `await bind(env, host="127.0.0.1", port=0)` | Bind the control-channel socket and return an `asyncio.Server` without serving. |
 | `load_environment(path, *, name=None)` | Return the one `Environment` defined at `path` (a `.py` file or directory); `name` selects among several. |
-
-The server module is the same entry point a container CMD runs:
-
-```bash
-python -m hud.environment.server <path> [--env NAME] [--host HOST] [--port PORT]
-```
-
-```bash
-hud serve env.py     # serve locally on tcp://127.0.0.1:8765 while you iterate
-```
 
 <Note>
 A dependency that must **own the process main thread** (e.g. Isaac Sim / Omniverse) can't run under
