@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 from hud.capabilities.base import Capability, CapabilityClient
-from hud.capabilities.cdp import CDPClient
 from hud.capabilities.mcp import MCPClient
 from hud.capabilities.rfb import RFBClient
 from hud.capabilities.ssh import SSHClient
@@ -45,7 +44,7 @@ _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
 DEFAULT_READY_TIMEOUT = 240.0
 
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
-    cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
+    cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient)
 }
 
 
