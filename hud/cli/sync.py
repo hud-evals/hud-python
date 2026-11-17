@@ -11,7 +11,6 @@ from typing import Any, cast
 from uuid import UUID
 
 import typer
-from pydantic import BaseModel, ConfigDict
 from typer.core import TyperGroup
 
 from hud.cli import (
@@ -22,61 +21,14 @@ from hud.cli import (
     DirectoryLink,
     DirectoryState,
 )
+from hud.cli.deploy import RegistryEnvironment
 from hud.cli.project import PROJECT_OPTION_HELP, Placement
-from hud.eval.sync import TasksetRecord, diff, resolve_taskset_id, upload_taskset
+from hud.cli.tasksets import diff, find_taskset, upload_taskset
 from hud.eval.taskset import Taskset
 from hud.settings import settings
 from hud.utils.exceptions import HudDeprecationWarning, HudRequestError
 from hud.utils.hud_console import HUDConsole
-from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import Page, PlatformClient
-
-
-class RegistryEnvironment(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    id: UUID
-    name: str
-
-    @classmethod
-    def resolve(cls, platform: PlatformClient, ref: str) -> RegistryEnvironment:
-        """The deployed environment with this ID or (normalized) name."""
-        try:
-            registry_id = str(UUID(ref))
-        except ValueError:
-            registry_id = None
-        if registry_id is None:
-            name = normalize_environment_name(ref, default="")
-            found = platform.get(
-                "/registry", Page[RegistryEnvironment], params={"search": name, "limit": 500}
-            )
-            matches = [env for env in found.items if env.name == name]
-            if not matches:
-                raise CliError(
-                    "not_found",
-                    f"No environment named {ref!r}.",
-                    suggestion="Run 'hud sync env' to pick from your environments.",
-                    input={"environment": ref},
-                )
-            if len(matches) > 1:
-                raise CliError(
-                    "usage",
-                    f"{len(matches)} environments are named {name!r}; pass an ID instead: "
-                    + ", ".join(str(env.id) for env in matches),
-                    input={"environment": ref},
-                )
-            return matches[0]
-        try:
-            return platform.get(f"/registry/{registry_id}", cls)
-        except HudRequestError as exc:
-            if exc.status_code != 404:
-                raise
-            raise CliError(
-                "not_found",
-                f"Environment {registry_id} is inaccessible or deleted.",
-                suggestion="Run 'hud sync env <name-or-id>' to link an accessible environment.",
-            ) from exc
-
 
 sync_app = CLI(
     name="sync",
@@ -229,18 +181,17 @@ def sync_tasks_command(
 
     # The remote taskset to diff against. --force diffs against an empty one so
     # every task uploads. A missing remote is created only for an explicit name,
-    # never for a stored id.
-    taskset_uuid, display = resolve_taskset_id(platform, target_ref)
-    if taskset_uuid:
-        record = platform.get(f"/tasksets/{taskset_uuid}", TasksetRecord)
+    # never for an id.
+    record = find_taskset(platform, target_ref)
+    if record is not None:
         remote_taskset = (
-            Taskset(record.name, [], taskset_id=taskset_uuid)
+            Taskset(record.name, [], taskset_id=str(record.id))
             if force
-            else Taskset.from_api(taskset_uuid)
+            else Taskset.from_api(str(record.id))
         )
-    elif taskset is not None:
-        hud_console.info(f"Taskset '{display}' not found; it will be created")
-        remote_taskset = Taskset(display, [])
+    elif taskset is not None and not _is_id(taskset):
+        hud_console.info(f"Taskset '{target_ref}' not found; it will be created")
+        remote_taskset = Taskset(target_ref, [])
     else:
         raise CliError(
             error="not_found",
@@ -450,3 +401,11 @@ def sync_callback(
     forwarded = [flag for flag, on in (("--yes", yes), ("--dry-run", dry_run)) if on]
     with command.make_context("tasks", forwarded, parent=ctx) as task_context:
         return command.invoke(task_context)
+
+
+def _is_id(ref: str) -> bool:
+    try:
+        UUID(ref)
+    except ValueError:
+        return False
+    return True

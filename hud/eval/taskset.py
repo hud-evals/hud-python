@@ -16,13 +16,13 @@ from hud.runtime.hosted import HostedRuntime
 from hud.runtime.hud import HUDRuntime
 from hud.runtime.local import LocalRuntime
 from hud.telemetry.exporter import flush
+from hud.utils.exceptions import HudRequestError
 from hud.utils.modules import iter_modules
 from hud.utils.platform import PlatformClient
 
 from .hosted import hosted_rollout
 from .job import Job, job_enter
 from .run import rollout, validate_rollout_timeouts
-from .sync import fetch_taskset_tasks, resolve_taskset_id
 from .task import Task
 
 if TYPE_CHECKING:
@@ -34,6 +34,22 @@ if TYPE_CHECKING:
     from hud.types import Trace
 
 logger = logging.getLogger("hud.eval.taskset")
+
+
+def taskset_id_for(platform: PlatformClient, name_or_id: str) -> str | None:
+    """The id of the platform taskset with this id or name; None when no taskset has the name."""
+    try:
+        return str(uuid.UUID(name_or_id))
+    except ValueError:
+        pass
+    items = platform.get("/tasksets", params={"name": name_or_id, "limit": 2})["items"]
+    if len(items) > 1:
+        ids = " and ".join(item["id"] for item in items)
+        raise ValueError(
+            f"Taskset name {name_or_id!r} matches more than one taskset, including {ids}; "
+            "pass the taskset id instead."
+        )
+    return items[0]["id"] if items else None
 
 
 def _is_container_row(task: Task) -> bool:
@@ -82,11 +98,32 @@ class Taskset:
     def from_api(cls, name: str) -> Taskset:
         """Load a platform taskset by name or id."""
         platform = PlatformClient.from_settings()
-        taskset_id, display = resolve_taskset_id(platform, name)
-        if not taskset_id:
+        taskset_id = taskset_id_for(platform, name)
+        if taskset_id is None:
             raise ValueError(f"taskset not found: {name}")
-        fetched_display, tasks = fetch_taskset_tasks(platform, taskset_id)
-        return cls(fetched_display or display, tasks, taskset_id=taskset_id)
+        try:
+            export = platform.get(f"/tasksets/{taskset_id}/export")
+        except HudRequestError as exc:
+            if exc.status_code == 404:
+                raise ValueError(f"taskset not found: {name}") from exc
+            raise
+        tasks = [
+            Task.model_validate(
+                {
+                    "env": row.get("env"),
+                    "id": row.get("scenario"),
+                    "args": row.get("args") or {},
+                    "slug": row.get("name"),
+                    "validation": row.get("validation"),
+                    "agent_config": row.get("agent_config"),
+                    "columns": row.get("columns"),
+                    "runtime_config": row.get("runtime_config"),
+                    "verifier": row.get("verifier"),
+                }
+            )
+            for row in export["tasks"]
+        ]
+        return cls(export["name"], tasks, taskset_id=taskset_id)
 
     def to_file(self, path: str | Path) -> Path:
         target = Path(path)

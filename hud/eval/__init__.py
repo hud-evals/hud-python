@@ -9,7 +9,7 @@ from hud.utils.deprecation import RUNTIME_NAMES, moved_to, resolve_retired
 _RETIRED = {
     **moved_to("hud", "Chat", "Grade", "Job", "Run", "Task", "Taskset", "Trace"),
     **moved_to("hud.eval.run", "rollout"),
-    **moved_to("hud.eval.sync", "SyncPlan"),
+    **moved_to("hud.cli.tasksets", "SyncPlan"),
     **moved_to("hud.runtime", *(name for name in RUNTIME_NAMES if name != "DockerBindMount")),
 }
 

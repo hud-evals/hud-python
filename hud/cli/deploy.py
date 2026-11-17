@@ -36,13 +36,12 @@ from hud.cli import (
     parse_key_value,
 )
 from hud.cli.project import PROJECT_OPTION_HELP, Placement
-from hud.cli.sync import RegistryEnvironment
 from hud.runtime.core import RuntimeConfig
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
-from hud.utils.platform import PlatformClient
+from hud.utils.platform import Page, PlatformClient
 from hud.utils.process import run_until_terminated
 
 hud_console = HUDConsole()
@@ -79,6 +78,52 @@ _UNSEARCHED_DIRS = {
 
 # The runtimes --runtime can save as a registry's default.
 _REGISTRY_RUNTIMES = ("hud", "modal")
+
+
+class RegistryEnvironment(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    name: str
+
+    @classmethod
+    def resolve(cls, platform: PlatformClient, ref: str) -> RegistryEnvironment:
+        """The deployed environment with this ID or (normalized) name."""
+        try:
+            registry_id = str(UUID(ref))
+        except ValueError:
+            registry_id = None
+        if registry_id is None:
+            name = normalize_environment_name(ref, default="")
+            found = platform.get(
+                "/registry", Page[RegistryEnvironment], params={"search": name, "limit": 500}
+            )
+            matches = [env for env in found.items if env.name == name]
+            if not matches:
+                raise CliError(
+                    "not_found",
+                    f"No environment named {ref!r}.",
+                    suggestion="Run 'hud sync env' to pick from your environments.",
+                    input={"environment": ref},
+                )
+            if len(matches) > 1:
+                raise CliError(
+                    "usage",
+                    f"{len(matches)} environments are named {name!r}; pass an ID instead: "
+                    + ", ".join(str(env.id) for env in matches),
+                    input={"environment": ref},
+                )
+            return matches[0]
+        try:
+            return platform.get(f"/registry/{registry_id}", cls)
+        except HudRequestError as exc:
+            if exc.status_code != 404:
+                raise
+            raise CliError(
+                "not_found",
+                f"Environment {registry_id} is inaccessible or deleted.",
+                suggestion="Run 'hud sync env <name-or-id>' to link an accessible environment.",
+            ) from exc
 
 
 def _dockerignore_re(pattern: str) -> re.Pattern[str]:

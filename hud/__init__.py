@@ -38,7 +38,7 @@ _RETIRED = {
     ),
     **moved_to("hud.capabilities", "Connection"),
     **moved_to("hud.clients", "connect"),
-    **moved_to("hud.eval.sync", "SyncPlan"),
+    **moved_to("hud.cli.tasksets", "SyncPlan"),
     **moved_to("hud.telemetry", "instrument"),
     **moved_to("hud.train", "TrainingClient"),
 }

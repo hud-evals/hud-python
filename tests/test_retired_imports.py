@@ -45,7 +45,7 @@ RETIRED = [
     *[("hud", name, "hud.runtime") for name in ROOT_RUNTIME_NAMES],
     ("hud", "Connection", "hud.capabilities"),
     ("hud", "connect", "hud.clients"),
-    ("hud", "SyncPlan", "hud.eval.sync"),
+    ("hud", "SyncPlan", "hud.cli.tasksets"),
     ("hud", "instrument", "hud.telemetry"),
     ("hud", "TrainingClient", "hud.train"),
     *[
@@ -53,7 +53,7 @@ RETIRED = [
         for name in ["Chat", "Grade", "Job", "Run", "Task", "Taskset", "Trace"]
     ],
     ("hud.eval", "rollout", "hud.eval.run"),
-    ("hud.eval", "SyncPlan", "hud.eval.sync"),
+    ("hud.eval", "SyncPlan", "hud.cli.tasksets"),
     *[("hud.eval", name, "hud.runtime") for name in RUNTIME_NAMES],
     *[("hud.eval.runtime", name, "hud.runtime") for name in [*RUNTIME_NAMES, "DockerBindMount"]],
     ("hud.environment", "Capability", "hud.capabilities"),
@@ -63,6 +63,12 @@ RETIRED = [
     ("hud.environment", "MountKind", "hud.environment.workspace"),
     ("hud.types", "EvaluationResult", "hud.graders"),
     ("hud.types", "SubScore", "hud.graders"),
+    ("hud.eval.sync", "SyncPlan", "hud.cli.tasksets"),
+    ("hud.eval.sync", "TaskUploadResult", "hud.cli.tasksets"),
+    ("hud.eval.sync", "diff", "hud.cli.tasksets"),
+    ("hud.eval.sync", "task_upload_payload", "hud.cli.tasksets"),
+    ("hud.eval.sync", "TasksetRecord", "hud.cli.tasksets"),
+    ("hud.eval.sync", "upload_taskset", "hud.cli.tasksets"),
 ]
 
 

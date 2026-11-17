@@ -23,17 +23,16 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from hud import imports
-from hud.cli import CLI, AuthScope, CliError, DirectoryLink, DirectoryState, Result
-from hud.cli.project import Placement, Project
-from hud.eval.sync import TasksetRecord, resolve_taskset_id
-from hud.integrations.harbor.importing import (
+from hud.cli import CLI, AuthScope, CliError, DirectoryLink, DirectoryState, Result, imports
+from hud.cli.harbor_bundle import (
     IMPORT_FORMAT,
     REPORT_SCHEMAS,
     ImportReport,
     TaskStatus,
     pack_bundle,
 )
+from hud.cli.project import Placement, Project
+from hud.cli.tasksets import TasksetRecord, find_taskset
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
@@ -218,7 +217,7 @@ def imports_command(
     platform = PlatformClient.from_settings()
     taskset_id = None
     if taskset is not None:
-        record = _find_taskset(platform, _taskset_ref(taskset))
+        record = find_taskset(platform, str(_taskset_ref(taskset)))
         if record is None:
             raise CliError("not_found", f"Taskset not found: {taskset}", input={"taskset": taskset})
         taskset_id = str(record.id)
@@ -360,21 +359,6 @@ def _taskset_ref(ref: str) -> uuid.UUID | str:
     return name
 
 
-def _find_taskset(platform: PlatformClient, ref: uuid.UUID | str) -> TasksetRecord | None:
-    """The taskset with this ID or normalized name, or None when there is none."""
-    if isinstance(ref, str):
-        taskset_id, _ = resolve_taskset_id(platform, ref)
-        if not taskset_id:
-            return None
-        ref = taskset_id
-    try:
-        return platform.get(f"/tasksets/{ref}", TasksetRecord)
-    except HudRequestError as exc:
-        if exc.status_code == 404:
-            return None
-        raise
-
-
 def _resolve_target(
     platform: PlatformClient,
     link: DirectoryLink,
@@ -389,7 +373,7 @@ def _resolve_target(
     """
     given = taskset or (str(link.taskset_id) if link.taskset_id else name)
     ref = _taskset_ref(given)
-    record = _find_taskset(platform, ref)
+    record = find_taskset(platform, str(ref))
     if record is None:
         if isinstance(ref, uuid.UUID):
             raise CliError(

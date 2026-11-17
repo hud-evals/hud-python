@@ -1,189 +1,23 @@
-"""Taskset sync with the platform: diff, fetch and upload."""
+"""Retired import paths for platform tasksets; hud v0.7.0 removes this module."""
 
 from __future__ import annotations
 
-import json
-import uuid
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter, field_validator, with_config
-from typing_extensions import TypedDict
+from hud.utils.deprecation import moved_to, resolve_retired
 
-from hud.utils.exceptions import HudRequestError
-
-from .task import Task
-
-if TYPE_CHECKING:
-    from hud.utils.platform import PlatformClient
-
-    from .taskset import Taskset
-
-
-class TasksetRecord(BaseModel):
-    """A taskset as ``GET /tasksets``, ``GET /tasksets/{id}`` and ``POST /tasksets`` return it."""
-
-    id: uuid.UUID
-    name: str
-    project_id: uuid.UUID | None = None
-    can_edit: bool = False
+_RETIRED = {
+    **moved_to(
+        "hud.cli.tasksets",
+        "SyncPlan",
+        "TaskUploadResult",
+        "diff",
+        "task_upload_payload",
+        "upload_taskset",
+        "TasksetRecord",
+    ),
+}
 
 
-@with_config(ConfigDict(extra="allow"))
-class TaskUploadResult(TypedDict):
-    """What ``POST /tasks/upload`` did, with every other field of its reply."""
-
-    taskset_id: str
-    tasks_created: int
-    tasks_updated: int
-
-
-class _TasksetPage(BaseModel):
-    items: list[TasksetRecord]
-
-
-class _TasksetExport(BaseModel):
-    name: str
-    tasks: list[Task]
-
-    @field_validator("tasks", mode="before")
-    @classmethod
-    def _as_rows(cls, records: Any) -> list[dict[str, Any]]:
-        """Map each platform export record onto the portable row shape."""
-        return [
-            {
-                "env": record.get("env"),
-                "id": record.get("scenario") or "",
-                "args": record.get("args") or {},
-                "slug": record.get("name"),
-                "validation": record.get("validation"),
-                "agent_config": record.get("agent_config"),
-                "columns": record.get("columns"),
-                "runtime_config": record.get("runtime_config"),
-                "verifier": record.get("verifier"),
-            }
-            for record in TypeAdapter(list[dict[str, Any]]).validate_python(records)
-        ]
-
-
-@dataclass(slots=True)
-class SyncPlan:
-    """Diff between a local taskset and a remote taskset."""
-
-    to_create: list[Task] = field(default_factory=list)
-    to_update: list[Task] = field(default_factory=list)
-    unchanged: list[Task] = field(default_factory=list)
-    remote_only: list[Task] = field(default_factory=list)
-    taskset_name: str = ""
-
-    @property
-    def to_apply(self) -> list[Task]:
-        return [*self.to_create, *self.to_update]
-
-    def summary(self) -> str:
-        lines = [f"Sync plan for '{self.taskset_name or 'taskset'}'"]
-        lines.append(f"  Create: {len(self.to_create)}")
-        lines.append(f"  Update: {len(self.to_update)}")
-        lines.append(f"  Unchanged: {len(self.unchanged)}")
-        lines.append(f"  Remote-only: {len(self.remote_only)}")
-        return "\n".join(lines)
-
-
-def diff(local: Taskset, remote: Taskset) -> SyncPlan:
-    """Classify local tasks against a remote taskset by slug + content signature."""
-    remote_by_slug = dict(remote.tasks)
-    to_create: list[Task] = []
-    to_update: list[Task] = []
-    unchanged: list[Task] = []
-
-    for slug, task in local.tasks.items():
-        existing = remote_by_slug.pop(slug, None)
-        if existing is None:
-            to_create.append(task)
-            continue
-        if _task_signature(task) == _task_signature(existing):
-            unchanged.append(task)
-        else:
-            to_update.append(task)
-
-    return SyncPlan(
-        to_create=to_create,
-        to_update=to_update,
-        unchanged=unchanged,
-        remote_only=list(remote_by_slug.values()),
-        taskset_name=remote.name or local.name,
-    )
-
-
-def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, str]:
-    """Resolve a taskset name or UUID to ``(uuid, name)``; uuid is "" for an unknown name."""
-    try:
-        uuid.UUID(name_or_id)
-        return name_or_id, name_or_id
-    except ValueError:
-        pass
-
-    page = platform.get("/tasksets", _TasksetPage, params={"name": name_or_id, "limit": 2})
-    if not page.items:
-        return "", name_or_id
-    if len(page.items) > 1:
-        ids = " and ".join(str(t.id) for t in page.items)
-        raise ValueError(
-            f"Taskset name {name_or_id!r} matches more than one taskset, including {ids}; "
-            "pass the taskset id instead."
-        )
-    return str(page.items[0].id), page.items[0].name
-
-
-def fetch_taskset_tasks(
-    platform: PlatformClient,
-    taskset_id: str,
-) -> tuple[str | None, list[Task]]:
-    try:
-        export = platform.get(f"/tasksets/{taskset_id}/export", _TasksetExport)
-    except HudRequestError as e:
-        if e.status_code == 404:
-            return None, []
-        raise
-    return export.name, export.tasks
-
-
-def upload_taskset(
-    platform: PlatformClient,
-    name: str,
-    tasks: list[Task],
-    *,
-    project_id: str | None = None,
-    taskset_id: str | None = None,
-) -> TaskUploadResult:
-    """Upload tasks to a platform taskset, creating it if needed."""
-    payload: dict[str, Any] = {
-        "taskset_name": name,
-        "tasks": [task_upload_payload(task) for task in tasks],
-    }
-    if project_id:
-        payload["project_id"] = project_id
-    if taskset_id:
-        payload["taskset_id"] = taskset_id
-    return platform.post("/tasks/upload", TaskUploadResult, json=payload)
-
-
-def task_upload_payload(task: Task) -> dict[str, Any]:
-    row = task.model_dump(mode="json", exclude_none=True)
-    return {
-        "name": row.pop("slug"),
-        "env": {"name": row.pop("env")},
-        "task_id": row.pop("id"),
-        **row,
-    }
-
-
-def _task_signature(task: Task) -> str:
-    # The slug keys the row; everything else, its env included, is what it runs.
-    sig_data = task.model_dump(mode="json", exclude_none=True, exclude={"slug"})
-    return json.dumps(
-        sig_data,
-        sort_keys=True,
-        default=str,
-        separators=(",", ":"),
-    )
+def __getattr__(name: str) -> Any:
+    return resolve_retired(__name__, name, _RETIRED)

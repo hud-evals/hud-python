@@ -185,8 +185,7 @@ raising, so one bad rollout never collapses a batch. For the end-to-end workflow
 Sync publishes a locally-authored taskset to [hud.ai](https://hud.ai) so you can run it there, compare
 models on it, and browse its traces; local runs never need it. The `hud sync tasks <name>` command
 uploads a taskset and only what changed, a workflow covered in
-[creating an environment](/v6/guides/creating-an-environment#deploying-to-the-platform). In code,
-`diff(local, remote)` returns a `SyncPlan` describing the comparison:
+[creating an environment](/v6/guides/creating-an-environment#deploying-to-the-platform).
 
 To create the taskset outside the team default Project, select a directory Project first or pass an
 explicit destination:
@@ -200,20 +199,6 @@ hud sync tasks my-taskset --project <project-id>
 ```
 
 See [Projects](/v6/reference/projects) for placement precedence and existing-resource behavior.
-
-```python
-from hud.eval.sync import diff
-
-plan = diff(Taskset.from_file("tasks.py"), Taskset.from_api("SheetBench-50"))
-print(plan.summary())
-```
-
-| Field | Description |
-|-------|-------------|
-| `to_create` | Local tasks not present remotely. |
-| `to_update` | Local tasks whose content differs from remote. |
-| `unchanged` | Local tasks that match remote. |
-| `remote_only` | Remote tasks with no local counterpart. |
 
 Once a reward separates good work from bad, [designing tasks](/v6/reference/advice) covers the
 difficulty and spread that make a taskset worth training on, and [graders](/v6/reference/graders) the
