@@ -10,7 +10,7 @@ Graders turn an agent's answer into a reward. HUD ships reusable ones so you don
 from hud.graders import (
     BashGrader, LLMJudgeGrader, Grader,
     SubScore, EvaluationResult,
-    combine, combine_any, combine_all,
+    combine,
 )
 ```
 
@@ -111,10 +111,8 @@ async def composed(answer: str = ""):
 | Function | Description |
 |----------|-------------|
 | `await combine(*items)` | Resolve `SubScore` / `Awaitable[SubScore]` in parallel → `EvaluationResult`. |
-| `combine_any(weight, subscores)` | Boolean OR: a `SubScore` that passes if any input passes (max). |
-| `combine_all(weight, subscores)` | Boolean AND: a `SubScore` that passes only if all inputs pass (min). |
 
-The subscores appear in the trace, so a partial reward is legible. `combine_any`/`combine_all` fold alternatives into a single component you can feed to `combine` - e.g. "tests pass via `pytest` OR via `make test`" as one 0/1 subscore. The combined `SubScore` keeps its inputs on `children`, so the full grading tree survives into the trace. Combinators nest: a `combine_all` over `combine_any` nodes produces a deeper tree.
+The subscores appear in the trace, so a partial reward is legible. A `SubScore` can keep the subscores it was derived from on `children`, so a grading tree survives into the trace.
 
 ## Custom graders
 

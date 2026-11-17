@@ -1,4 +1,4 @@
-"""``combine`` — the native subscore combiner, plus boolean combiners."""
+"""``combine`` — the native subscore combiner."""
 
 from __future__ import annotations
 
@@ -100,35 +100,3 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
             resolved[slot] = result
 
     return _combine_subscores(resolved)
-
-
-def _boolean_subscore(
-    name: str,
-    weight: float,
-    subscores: list[SubScore],
-    value: float,
-) -> SubScore:
-    children = [
-        subscore.model_copy(update={"name": unique_name})
-        for unique_name, subscore in zip(_dedupe_subscore_names(subscores), subscores, strict=True)
-    ]
-    return SubScore(
-        name=name,
-        value=value,
-        weight=weight,
-        children=children,
-    )
-
-
-def combine_any(weight: float, subscores: list[SubScore], *, name: str = "any") -> SubScore:
-    """Subscore that passes if any input passes (max); inputs kept as children."""
-    if not subscores:
-        raise ValueError("subscores must not be empty")
-    return _boolean_subscore(name, weight, subscores, max(s.value for s in subscores))
-
-
-def combine_all(weight: float, subscores: list[SubScore], *, name: str = "all") -> SubScore:
-    """Subscore that passes only if all inputs pass (min); inputs kept as children."""
-    if not subscores:
-        raise ValueError("subscores must not be empty")
-    return _boolean_subscore(name, weight, subscores, min(s.value for s in subscores))
