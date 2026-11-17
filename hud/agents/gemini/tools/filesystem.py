@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.agents.tools.base import AgentToolSpec, result_text
@@ -84,10 +83,9 @@ class GeminiSearchTool(SSHTool):
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
         include = arguments.get("include_pattern")
-        cmd = f"grep -rn {shlex.quote(pattern)} {shlex.quote(str(dir_path))}"
-        if isinstance(include, str) and include:
-            cmd += f" --include={shlex.quote(include)}"
-        return await self.bash(cmd)
+        return await self.file_grep(
+            pattern, str(dir_path), include if isinstance(include, str) else None
+        )
 
 
 class GeminiGlobTool(SSHTool):
@@ -113,8 +111,7 @@ class GeminiGlobTool(SSHTool):
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
-        cmd = f"find {shlex.quote(str(dir_path))} -name {shlex.quote(pattern)}"
-        return await self.bash(cmd)
+        return await self.file_glob(pattern, str(dir_path))
 
 
 class GeminiListTool(SSHTool):

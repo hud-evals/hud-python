@@ -14,9 +14,9 @@ from pydantic import ValidationError
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent
 from hud.agents.claude.tools.hosted import ClaudeToolSearchTool
 from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
-from hud.agents.types import ClaudeConfig, ClaudeEffort, GeminiConfig, OpenAIConfig
+from hud.agents.types import ClaudeConfig, ClaudeEffort, GeminiConfig, OpenAIConfig, ToolStep
 from hud.capabilities import Capability
-from hud.types import AgentType
+from hud.types import AgentType, TextContent
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call, stream_error
@@ -327,3 +327,137 @@ def test_an_openai_setting_the_installed_sdk_does_not_declare_is_refused() -> No
                 "format": {"type": "json_schema", "name": "answer", "schema": {}, "strictness": 1}
             }
         )
+
+
+def _workspace(tmp_path: Path) -> Path:
+    """Fixture files, searched through a symlink to their directory."""
+    files = tmp_path / "files"
+    (files / "sub").mkdir(parents=True)
+    root = tmp_path / "ws"
+    root.symlink_to(files)
+    (root / "a.ts").write_text("// noExplicitAny\n")
+    (root / "b.tsx").write_text("// biome-ignore\n")
+    (root / "notes.md").write_text("noExplicitAny\n")
+    (root / "package.json").write_text('{"lint": "noExplicitAny"}\n')
+    (root / "sub" / "firebase.json").write_text('{"lint": "biome-ignore"}\n')
+    return root
+
+
+async def _tool_output(agent_type: str, model: str, root: Path) -> list[str]:
+    kind = AgentType(agent_type).cls
+    (trace,) = (await workspace_task(root)().run(kind(kind.config_cls(model=model)))).traces
+    (step,) = (step for step in trace.steps if isinstance(step, ToolStep))
+    assert step.result is not None
+    return "".join(
+        block.text for block in step.result.content if isinstance(block, TextContent)
+    ).splitlines()
+
+
+@pytest.mark.parametrize(
+    ("agent_type", "model", "path_key"),
+    [("openai_compatible", "qwen3.6-plus", "path"), ("gemini", GEMINI_MODEL, "dir_path")],
+    ids=["openai_compatible", "gemini"],
+)
+@pytest.mark.parametrize(
+    ("pattern", "found"),
+    [
+        ("*.json", ["package.json", "sub/firebase.json"]),
+        ("**/firebase.json", ["sub/firebase.json"]),
+        ("**/*.ts*", ["a.ts", "b.tsx"]),
+        ("sub/*", ["sub/firebase.json"]),
+        ("*.{ts,md}", ["a.ts", "notes.md"]),
+    ],
+    ids=["a-base-name", "at-any-depth", "at-no-depth", "under-a-directory", "braces"],
+)
+async def test_a_glob_matches_names_at_any_depth_and_paths_below_the_search_root(
+    pattern: str,
+    found: list[str],
+    agent_type: str,
+    model: str,
+    path_key: str,
+    models: Models,
+    tmp_path: Path,
+) -> None:
+    root = _workspace(tmp_path)
+    models.script([call("glob", **{"pattern": pattern, path_key: str(root)}), Turn(text="done")])
+
+    lines = await _tool_output(agent_type, model, root)
+
+    assert (
+        sorted(line.removeprefix(f"{root}/") for line in lines if line.startswith(f"{root}/"))
+        == found
+    )
+
+
+@pytest.mark.parametrize(
+    ("agent_type", "model", "tool", "path_key", "include_key"),
+    [
+        ("openai_compatible", "qwen3.6-plus", "grep", "path", "include"),
+        ("gemini", GEMINI_MODEL, "grep_search", "dir_path", "include_pattern"),
+    ],
+    ids=["openai_compatible", "gemini"],
+)
+@pytest.mark.parametrize(
+    ("include", "found"),
+    [
+        ("", ["a.ts", "b.tsx", "notes.md", "package.json", "sub/firebase.json"]),
+        ("*.{ts,tsx}", ["a.ts", "b.tsx"]),
+        ("**/*.json", ["package.json", "sub/firebase.json"]),
+        ("sub/*.json", ["sub/firebase.json"]),
+    ],
+    ids=["every-file", "braces", "at-any-depth", "under-a-directory"],
+)
+async def test_a_search_takes_an_extended_regex_and_filters_files_by_glob(
+    include: str,
+    found: list[str],
+    agent_type: str,
+    model: str,
+    tool: str,
+    path_key: str,
+    include_key: str,
+    models: Models,
+    tmp_path: Path,
+) -> None:
+    root = _workspace(tmp_path)
+    search = {"pattern": "noExplicitAny|biome-ignore", path_key: str(root), include_key: include}
+    models.script([call(tool, **search), Turn(text="done")])
+
+    lines = await _tool_output(agent_type, model, root)
+
+    assert (
+        sorted(
+            line.split(":")[0].removeprefix(f"{root}/")
+            for line in lines
+            if line.startswith(f"{root}/")
+        )
+        == found
+    )
+
+
+@pytest.mark.parametrize(
+    ("agent_type", "model", "tool", "path_key"),
+    [
+        ("openai_compatible", "qwen3.6-plus", "grep", "path"),
+        ("gemini", GEMINI_MODEL, "grep_search", "dir_path"),
+    ],
+    ids=["openai_compatible", "gemini"],
+)
+@pytest.mark.parametrize("pattern", [";", "{}"])
+async def test_a_search_for_find_exec_syntax_reaches_grep(
+    pattern: str,
+    agent_type: str,
+    model: str,
+    tool: str,
+    path_key: str,
+    models: Models,
+    tmp_path: Path,
+) -> None:
+    root = _workspace(tmp_path)
+    (root / "loop.c").write_text("for (;;) {}\n")
+    models.script([call(tool, **{"pattern": pattern, path_key: str(root)}), Turn(text="done")])
+
+    lines = await _tool_output(agent_type, model, root)
+
+    assert [line for line in lines if line.startswith(f"{root}/")] == [
+        f"{root}/loop.c:1:for (;;) {{}}"
+    ]
