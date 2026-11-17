@@ -61,6 +61,8 @@ RETIRED = [
     ("hud.environment", "WorkspaceRoute", "hud.environment.egress"),
     ("hud.environment", "DEFAULT_SYSTEM_MOUNTS", "hud.environment.workspace"),
     ("hud.environment", "MountKind", "hud.environment.workspace"),
+    ("hud.types", "EvaluationResult", "hud.graders"),
+    ("hud.types", "SubScore", "hud.graders"),
 ]
 
 

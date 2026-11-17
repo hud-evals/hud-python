@@ -1,19 +1,121 @@
-"""``Grader`` — the async base class for reusable graders."""
+"""The grading contract: ``SubScore``, ``EvaluationResult``, and the ``Grader`` base class."""
 
 from __future__ import annotations
 
-from typing import Any
+import warnings
+from typing import Any, cast
 
-from hud.types import SubScore
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
+
 from hud.utils.serialization import json_safe_dict
+
+_SUMMARY_SERIALIZATION_CONTEXT = "hud_summary"
+
+
+class SubScore(BaseModel):
+    """One node in the grade breakdown tree.
+
+    A leaf subscore is a single measurement. A parent preserves the subscores
+    used to derive its value in ``children``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., description="Name of this subscore component")
+    weight: float = Field(
+        default=1.0,
+        description="Weight of this subscore (for weighted average). "
+        "Negative weights represent penalties.",
+    )
+    value: float = Field(..., ge=0.0, le=1.0, description="Value of this subscore, 0.0 to 1.0")
+    children: list[SubScore] | None = Field(
+        default=None,
+        description="Input subscores this node was combined from",
+    )
+    # Environments built before ``info`` was named send it as ``metadata``.
+    info: dict[str, Any] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("info", "metadata"),
+        description="Grader-specific details recorded on the evaluation span",
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize(
+        self,
+        handler: SerializerFunctionWrapHandler,
+        serialization_info: SerializationInfo,
+    ) -> dict[str, Any]:
+        data = cast("dict[str, Any]", handler(self))
+        if (serialization_info.context or {}).get(_SUMMARY_SERIALIZATION_CONTEXT):
+            data.pop("info", None)
+        return data
+
+    def to_summary(self) -> dict[str, Any]:
+        """Serialize the score breakdown without span-only info."""
+        return self.model_dump(
+            mode="json",
+            context={_SUMMARY_SERIALIZATION_CONTEXT: True},
+        )
+
+
+class EvaluationResult(BaseModel):
+    """The grade a task yields: a reward and an optional ``subscores`` breakdown."""
+
+    reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
+    done: bool = Field(default=True, description="Whether the task/episode is complete")
+    content: str | None = Field(default=None, description="Human-readable explanation")
+    info: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    isError: bool = Field(default=False, description="Whether the evaluation itself failed")
+    subscores: list[SubScore] | None = Field(
+        default=None,
+        description="Optional breakdown of score components for debugging",
+    )
+
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def _check_subscores(self) -> EvaluationResult:
+        if not self.subscores:
+            return self
+        names = [s.name for s in self.subscores]
+        dupes = [n for n in names if names.count(n) > 1]
+        if dupes:
+            warnings.warn(f"Duplicate subscore names: {set(dupes)}", stacklevel=2)
+        pos_weight_sum = sum(s.weight for s in self.subscores if s.weight > 0)
+        if abs(pos_weight_sum - 1.0) > 0.01:
+            warnings.warn(
+                f"Positive subscore weights should sum to ~1.0 (got {pos_weight_sum:.4f}). "
+                f"Weights represent proportional contributions to the reward.",
+                stacklevel=2,
+            )
+        weighted_sum = sum(s.value * s.weight for s in self.subscores)
+        if abs(weighted_sum - self.reward) > 0.01:
+            warnings.warn(
+                f"Subscores don't match reward: "
+                f"sum(value*weight)={weighted_sum:.4f} but reward={self.reward:.4f}",
+                stacklevel=2,
+            )
+        return self
+
+    @classmethod
+    def from_float(cls, value: float) -> EvaluationResult:
+        return cls(reward=value, done=True)
 
 
 class Grader:
     """Async base class for reusable graders.
 
-    Subclasses implement ``compute_score`` (async) and return a ``SubScore``.
-    The ``grade`` classmethod applies the caller's ``name`` override and
-    ``weight``, and records parameters in info for reproducibility.
+    Subclasses implement ``compute_score`` (async). ``grade`` runs it, applies the caller's
+    ``weight`` and optional ``name``, and records the call's parameters in ``info``.
     """
 
     name: str = "BaseGrader"
@@ -21,22 +123,19 @@ class Grader:
     @classmethod
     async def grade(cls, weight: float, name: str | None = None, **kwargs: Any) -> SubScore:
         """Run the grader and package the result as a ``SubScore``."""
-        result: Any = await cls.compute_score(**kwargs)
-        if isinstance(result, tuple):
-            score, info = result
-            result = SubScore(name=cls.name, value=float(score), info=info)
-        elif not isinstance(result, SubScore):
-            result = SubScore(name=cls.name, value=float(result))
-
-        return result.model_copy(
+        score = await cls.compute_score(**kwargs)
+        if not isinstance(score, SubScore):
+            value, info = score if isinstance(score, tuple) else (score, None)
+            score = SubScore(name=cls.name, value=float(value), info=info)
+        return score.model_copy(
             update={
                 "name": name or cls.name,
                 "weight": weight,
-                "info": {**(result.info or {}), "_parameters": json_safe_dict(kwargs)},
+                "info": {**(score.info or {}), "_parameters": json_safe_dict(kwargs)},
             }
         )
 
     @classmethod
-    async def compute_score(cls, **kwargs: Any) -> SubScore:
-        """Compute and describe a score between ``0.0`` and ``1.0``."""
+    async def compute_score(cls, **kwargs: Any) -> SubScore | float | tuple[float, dict[str, Any]]:
+        """Score between ``0.0`` and ``1.0``; a bare float or ``(float, info)`` is also accepted."""
         raise NotImplementedError("Subclasses must implement compute_score")

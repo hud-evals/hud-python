@@ -9,10 +9,9 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.types import SubScore
 from hud.utils.gateway import build_gateway_client
 
-from .base import Grader
+from .base import Grader, SubScore
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -63,14 +62,17 @@ class LLMJudgeGrader(Grader):
     @classmethod
     async def compute_score(
         cls,
-        answer: str | Any = "",
+        answer: Any = "",
         criteria: list[str | tuple[str, float]] | None = None,
         question: str = "",
         model: str = "claude-sonnet-5-5",
-        **kwargs: Any,
+        **unexpected: Any,
     ) -> SubScore:
         """Evaluate ``answer`` against ``criteria`` via parallel LLM judgments."""
-        del kwargs
+        if unexpected:
+            raise TypeError(
+                f"LLMJudgeGrader got unexpected arguments: {', '.join(sorted(unexpected))}"
+            )
         parsed = _parse_criteria(criteria)
         if not parsed:
             return SubScore(name=cls.name, value=0.0, info={"error": "no criteria provided"})

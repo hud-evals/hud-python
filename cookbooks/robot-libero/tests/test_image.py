@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from hud import Task
-from hud.agents.base import Agent
+from hud.agents import Agent
 from hud.eval.run import rollout
 from hud.runtime import DockerRuntime
 

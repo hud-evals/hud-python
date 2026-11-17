@@ -16,7 +16,7 @@ import tinker
 from dotenv import load_dotenv
 from fireworks.training.sdk import FiretitanServiceClient
 from hud import Run, Taskset, Trace
-from hud.agents.base import Agent
+from hud.agents import Agent
 from hud.agents.types import AgentStep, Sample, Usage
 from hud.runtime import HUDRuntime, LocalRuntime, Provider
 from tinker_cookbook.renderers import get_renderer, get_text_content

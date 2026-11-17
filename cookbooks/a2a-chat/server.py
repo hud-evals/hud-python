@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
 
-    from hud.agents.base import Agent
+    from hud.agents import Agent
     from hud.runtime import Provider
     from hud import Trace
 

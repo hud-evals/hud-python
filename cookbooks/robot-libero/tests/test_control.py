@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 import pytest
 from hud import Environment, Task
-from hud.agents.base import Agent
+from hud.agents import Agent
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime

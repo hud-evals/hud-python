@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from hud.agents.base import Agent
+    from hud.agents import Agent
     from tests.conftest import HudEnv
     from tests.fixtures.models import Models
 

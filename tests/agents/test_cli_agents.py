@@ -13,8 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from hud import Environment
-from hud.agents import ClaudeCLIAgent, CodexCLIAgent
-from hud.agents.base import Agent
+from hud.agents import Agent, ClaudeCLIAgent, CodexCLIAgent
 from hud.agents.types import ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability
 from hud.environment.egress import ANY_HOST
