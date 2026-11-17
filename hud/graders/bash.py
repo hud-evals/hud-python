@@ -6,10 +6,9 @@ import asyncio
 import logging
 from typing import Any
 
-from hud.types import SubScore
 from hud.utils.process import create_process_group_exec
 
-from .base import Grader
+from .base import Grader, SubScore
 
 logger = logging.getLogger(__name__)
 

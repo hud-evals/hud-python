@@ -9,10 +9,9 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.types import SubScore
 from hud.utils.gateway import build_gateway_client
 
-from .base import Grader
+from .base import Grader, SubScore
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI

@@ -19,7 +19,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from hud.capabilities.connection import Connection
 from hud.environment import load_environment
-from hud.types import EvaluationResult
+from hud.graders import EvaluationResult
 from hud.utils.process import run_until_terminated
 
 from .egress import WorkspaceRoute
