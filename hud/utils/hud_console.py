@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import traceback
 from typing import Any
@@ -202,35 +201,6 @@ class HUDConsole:
         except (KeyboardInterrupt, EOFError):
             raise typer.Exit(1) from None
         return options[number - 1][1]
-
-    def format_tool_call(self, name: str, arguments: dict[str, Any] | str | None = None) -> str:
-        """Format a tool call as compact Rich markup."""
-        args_str = ""
-        if arguments:
-            try:
-                args_str = json.dumps(arguments, separators=(",", ":"))
-                if len(args_str) > 60:
-                    args_str = args_str[:57] + "..."
-            except (TypeError, ValueError):
-                args_str = str(arguments)[:60]
-
-        escaped_name = escape(name)
-        escaped_args = escape(args_str)
-        return (
-            f"[{GOLD}]→[/{GOLD}] [bold {TEXT}]{escaped_name}[/bold {TEXT}]"
-            f"[{DIM}]({escaped_args})[/{DIM}]"
-        )
-
-    def format_tool_result(self, content: str, is_error: bool = False) -> str:
-        """Format a tool result as compact Rich markup."""
-        if len(content) > 80:
-            content = content[:77] + "..."
-
-        escaped_content = escape(content)
-        if is_error:
-            return f"  [{RED}]✗[/{RED}] [{DIM}]{escaped_content}[/{DIM}]"
-        else:
-            return f"  [{GREEN}]✓[/{GREEN}] [{TEXT}]{escaped_content}[/{TEXT}]"
 
     def confirm(self, message: str, default: bool = True) -> bool:
         """Prompt for a yes/no confirmation; Ctrl+C / EOF answers no."""

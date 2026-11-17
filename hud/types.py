@@ -23,7 +23,6 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
-from rich.markup import escape
 from typing_extensions import TypeVar
 
 from hud.telemetry.context import get_current_trace_id
@@ -36,7 +35,6 @@ from hud.telemetry.span import (
     new_span_id,
     normalize_trace_id,
 )
-from hud.utils.hud_console import hud_console
 from hud.utils.serialization import JsonObject
 from hud.utils.time import now_iso
 
@@ -222,12 +220,6 @@ class ToolCall(BaseModel):
             s += f"  # {self.annotation}"
         return s
 
-    def __rich__(self) -> str:
-        s = hud_console.format_tool_call(self.name, self.arguments)
-        if self.annotation:
-            s += f"  [bright_black]# {escape(self.annotation)}[/bright_black]"
-        return s
-
 
 class ToolResult(BaseModel):
     content: list[ContentBlock]
@@ -263,10 +255,6 @@ class ToolResult(BaseModel):
             return f"✗ {content_summary}"
         else:
             return f"✓ {content_summary}"
-
-    def __rich__(self) -> str:
-        content_summary = self._get_content_summary()
-        return hud_console.format_tool_result(content_summary, self.isError)
 
 
 # Schema tag of the core step stream (the tool-agent family shares it).
