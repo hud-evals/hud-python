@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import math
 import traceback
 import uuid
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
@@ -141,21 +140,10 @@ def _episode_bindings(started: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def parse_grade(frame: dict[str, Any]) -> Grade:
-    score = frame.get("score")
-    if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
-        raise HudProtocolError(
-            -32603, f"tasks.grade: result must include a finite numeric 'score', got {score!r}"
-        )
-    info = frame.get("info")
-    content = frame.get("content")
-    return Grade(
-        reward=float(score),
-        done=bool(frame.get("done", True)),
-        content=content if isinstance(content, str) else None,
-        info=info if isinstance(info, dict) else {},
-        is_error=bool(frame.get("isError", False)),
-        raw=dict(frame),
-    )
+    try:
+        return Grade.from_frame(frame)
+    except ValueError as exc:
+        raise HudProtocolError(-32603, f"tasks.grade: {exc}") from exc
 
 
 class Run:

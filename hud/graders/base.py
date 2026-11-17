@@ -16,6 +16,7 @@ from pydantic import (
     model_validator,
 )
 
+from hud.utils.exceptions import HudDeprecationWarning
 from hud.utils.serialization import json_safe_dict
 
 _SUMMARY_SERIALIZATION_CONTEXT = "hud_summary"
@@ -68,7 +69,7 @@ class SubScore(BaseModel):
 
 
 class EvaluationResult(BaseModel):
-    """The grade a task yields: a reward and an optional ``subscores`` breakdown."""
+    """Deprecated: a task's grade, now ``hud.Grade``. Construction warns until hud v0.7.0."""
 
     reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
     done: bool = Field(default=True, description="Whether the task/episode is complete")
@@ -81,6 +82,15 @@ class EvaluationResult(BaseModel):
     )
 
     model_config = ConfigDict(extra="allow")
+
+    def __init__(self, **data: Any) -> None:
+        warnings.warn(
+            "`EvaluationResult` is deprecated and will be removed in hud v0.7.0; "
+            "yield a `hud.Grade` (`is_error=` in place of `isError=`, and extra fields in `info`).",
+            HudDeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(**data)
 
     @model_validator(mode="after")
     def _check_subscores(self) -> EvaluationResult:

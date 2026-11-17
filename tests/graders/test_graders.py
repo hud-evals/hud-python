@@ -10,14 +10,16 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
+from hud import Environment, Grade
 from hud.graders import (
     BashGrader,
+    EvaluationResult,
     Grader,
     LLMJudgeGrader,
     SubScore,
     combine,
 )
+from hud.utils.exceptions import HudDeprecationWarning
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.models import Turn
 
@@ -282,3 +284,39 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
             (c["name"], c["weight"], c["value"], c["info"]["reason"]) for c in judge["children"]
         ] == children
     assert [request.credential for request in models.requests()] == ["k"] * len(criteria)
+
+
+@pytest.mark.parametrize("form", ["grade", "evaluation-result"])
+async def test_a_grade_reads_the_same_whether_the_task_yields_a_grade_or_an_evaluation_result(
+    form: str,
+) -> None:
+    subscores = [
+        SubScore(name="tests", value=1.0, weight=0.75),
+        SubScore(name="style", value=0.0, weight=0.25),
+    ]
+    env = Environment("graders")
+
+    @env.template()
+    async def check():
+        yield "go"
+        if form == "grade":
+            yield Grade(reward=0.75, content="tests pass", info={"run": 1}, subscores=subscores)
+        else:
+            # An environment built before Grade grades with this shape.
+            with pytest.warns(HudDeprecationWarning, match="`hud.Grade`"):
+                result = EvaluationResult(
+                    reward=0.75, content="tests pass", info={"run": 1}, subscores=subscores
+                )
+            yield result
+
+    (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
+
+    grade = trace.grade
+    assert (grade.reward, grade.content, grade.info, grade.is_error) == (
+        0.75,
+        "tests pass",
+        {"run": 1},
+        False,
+    )
+    assert grade.subscores == subscores
+    assert trace.evaluation["subscores"] == [leaf("tests", 0.75, 1.0), leaf("style", 0.25, 0.0)]

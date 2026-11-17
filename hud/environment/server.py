@@ -20,6 +20,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from hud.capabilities.connection import Connection
 from hud.environment import load_environment
 from hud.graders import EvaluationResult
+from hud.types import Grade
 from hud.utils.process import run_until_terminated
 
 from .egress import WorkspaceRoute
@@ -170,6 +171,8 @@ class TaskRunner:
                     f"'score' (keys: {sorted(evaluation)})"
                 )
             frame = cast("dict[str, Any]", _jsonable(evaluation))
+        elif isinstance(evaluation, Grade):
+            frame = evaluation.to_frame()
         elif isinstance(evaluation, EvaluationResult):
             # Forward the whole frame so its metadata survives; the wire names ``reward`` "score".
             frame = evaluation.model_dump(mode="json")

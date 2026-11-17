@@ -25,8 +25,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from hud import Environment
-from hud.graders import EvaluationResult
+from hud import Environment, Grade
 from hud.types import PromptMessage, TextContent
 
 env = Environment(name="chat")
@@ -61,7 +60,7 @@ async def chat_full(messages: list[PromptMessage]):
     answer = yield f"{instruction}\n\n{transcript(messages)}"
 
     answer_str = answer or ""
-    yield EvaluationResult(
+    yield Grade(
         reward=1.0,
         content=answer_str,
         info={

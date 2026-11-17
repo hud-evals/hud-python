@@ -115,17 +115,16 @@ not include a final answer.
 ## Define the task and reward
 
 The environment is a normal HUD environment. The task yields a prompt, receives the model response,
-and returns an `EvaluationResult`:
+and returns a `Grade`:
 
 ```python env.py
 import re
 
-from hud import Environment
-from hud.graders import EvaluationResult
+from hud import Environment, Grade
 
 env = Environment(name="fireworks-arithmetic")
 
-def grade_final_integer(answer: object, expected: int) -> EvaluationResult:
+def grade_final_integer(answer: object, expected: int) -> Grade:
     text = (answer if isinstance(answer, str) else str(answer)).strip()
     final = text.splitlines()[-1].strip() if text else ""
     got = (
@@ -133,7 +132,7 @@ def grade_final_integer(answer: object, expected: int) -> EvaluationResult:
         if re.fullmatch(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)", final)
         else None
     )
-    return EvaluationResult(
+    return Grade(
         reward=1.0 if got == expected else 0.0,
         content=text,
         info={"expected": expected, "got": got},

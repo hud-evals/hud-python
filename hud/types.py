@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeAlias, cast
@@ -340,13 +341,18 @@ StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
 
 
 class Grade(BaseModel):
-    """The environment's verdict: ``raw`` is its grade frame, ``content`` its message."""
+    """A task's verdict: what a task yields to grade itself, and what its trace records.
+
+    ``subscores`` is the optional breakdown that ``combine`` builds. On the controller,
+    ``raw`` is the grade frame the environment sent; a task leaves it empty.
+    """
 
     reward: float = 0.0
     done: bool = True
     content: str | None = None
     info: dict[str, Any] = Field(default_factory=dict)
     is_error: bool = False
+    subscores: list[grading.SubScore] | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -369,6 +375,48 @@ class Grade(BaseModel):
         ``info`` is span-only, like each subscore's; read it from ``Grade.info``.
         """
         return dict(self._evaluation)
+
+    @classmethod
+    def from_frame(cls, frame: dict[str, Any]) -> Grade:
+        """Read a ``tasks.grade`` result frame; raises ``ValueError`` without a finite ``score``.
+
+        Environments on every SDK version send this shape, ``EvaluationResult`` ones included.
+        """
+        score = frame.get("score")
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, (int, float))
+            or not math.isfinite(score)
+        ):
+            raise ValueError(f"a grade frame needs a finite numeric 'score', got {score!r}")
+        info = frame.get("info")
+        content = frame.get("content")
+        subscores = frame.get("subscores")
+        return cls(
+            reward=float(score),
+            done=bool(frame.get("done", True)),
+            content=content if isinstance(content, str) else None,
+            info=info if isinstance(info, dict) else {},
+            is_error=bool(frame.get("isError", False)),
+            subscores=(
+                [grading.SubScore.model_validate(item) for item in subscores]
+                if isinstance(subscores, list)
+                else None
+            ),
+            raw=dict(frame),
+        )
+
+    def to_frame(self) -> dict[str, Any]:
+        """The ``tasks.grade`` result frame an environment sends for this grade."""
+        data = self.model_dump(mode="json", exclude={"raw"})
+        return {
+            "score": data["reward"],
+            "done": data["done"],
+            "content": data["content"],
+            "info": data["info"],
+            "isError": data["is_error"],
+            "subscores": data["subscores"],
+        }
 
     @classmethod
     def ungraded(cls) -> Grade:

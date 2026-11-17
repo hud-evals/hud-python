@@ -28,17 +28,19 @@ client for manual driving; after the block, `run.trace` holds the graded trace.
 
 ## `Grade`
 
-The environment's verdict on one evaluation (`trace.grade`), parsed from the wire grade frame
-(`{"score": ..., "done": ..., "isError": ..., ...}`).
+A task's verdict on one evaluation. A task yields one as its grade (`combine` builds it from
+subscores), and the trace records the one the environment sent (`trace.grade`). On the wire it travels
+as a grade frame (`{"score": ..., "done": ..., "isError": ..., "subscores": ..., ...}`).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `reward` | `float` | The frame's `score`. |
+| `reward` | `float` | The reward; the frame's `score`. |
 | `done` | `bool` | Whether the task is complete. |
 | `content` | `str \| None` | Human-readable grade content. |
 | `info` | `dict` | Extra metadata. |
 | `is_error` | `bool` | Whether grading failed or never happened. |
-| `raw` | `dict` | The full original frame. |
+| `subscores` | `list[SubScore] \| None` | The breakdown, as `combine` builds it; see [Graders](/v6/reference/graders#subscore). |
+| `raw` | `dict` | On a recorded grade, the full original frame; a task leaves it empty. |
 
 ## `Job`
 
@@ -133,8 +135,7 @@ agent submits them as part of the answer.
 
 ### Grading shapes
 
-`SubScore` and `EvaluationResult` live with the graders - see
-[Graders](/v6/reference/graders#subscore-and-evaluationresult).
+`SubScore` lives with the graders - see [Graders](/v6/reference/graders#subscore).
 
 ## Typed task I/O
 

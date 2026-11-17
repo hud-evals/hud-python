@@ -6,12 +6,19 @@ import asyncio
 import warnings
 from collections import Counter
 from collections.abc import Awaitable
+from typing import TYPE_CHECKING
 
-from .base import EvaluationResult, SubScore
+# The module, not the name: hud.types imports hud.graders, so Grade is read at call time.
+import hud.types
+
+from .base import SubScore
+
+if TYPE_CHECKING:
+    from hud.types import Grade
 
 
-async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
-    """Combine subscores into a result, awaiting any grader coroutines among them concurrently.
+async def combine(*items: SubScore | Awaitable[SubScore]) -> Grade:
+    """Combine subscores into a ``Grade``, awaiting any grader coroutines among them concurrently.
 
     Positive weights are normalized to sum to ``1.0``; negative weights are penalties.
     Duplicate names get numeric suffixes.
@@ -50,7 +57,7 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
             subscores, _unique_names([s.name for s in subscores]), strict=True
         )
     ]
-    return EvaluationResult(
+    return hud.types.Grade(
         reward=float(sum(item.value * item.weight for item in normalized)),
         done=True,
         subscores=normalized,

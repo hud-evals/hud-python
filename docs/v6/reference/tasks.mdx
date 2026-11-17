@@ -43,8 +43,8 @@ This shape is deliberate. Everything the agent does - every step, tool call, and
 in the gap between the two yields, so you describe a task as plain Python: ask on one line, score on the
 next. The agent loop in the middle is HUD's job, not yours.
 
-The second yield can be a bare `float`, an [`EvaluationResult`](/v6/reference/graders#subscore-and-evaluationresult),
-or a dict with a numeric `score`; the env layer normalizes any of them to the reward.
+The second yield can be a bare `float`, a [`Grade`](/v6/reference/types#grade), or a dict with a
+numeric `score`; the env layer normalizes any of them to the reward.
 
 ## Template
 
