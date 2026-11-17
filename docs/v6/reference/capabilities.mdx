@@ -275,6 +275,8 @@ Spinning up a capability is the environment side. The harness side is the mirror
 
 The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
 
+To open a protocol the SDK has no client for, register your own; see [a client for a new protocol](/v6/advanced/extending#a-client-for-a-new-protocol).
+
 ## Workspace
 
 A `Workspace` is not itself a capability - it's the built-in workspace daemon. It serves `ssh` for agent access and, when enabled, file tracking for rollout telemetry. For `mcp`, `cdp`, and `rfb` you stand up the daemon yourself.
