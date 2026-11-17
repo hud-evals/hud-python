@@ -86,6 +86,11 @@ template for wrapping other frameworks over whichever capability they need (`ssh
 
 ### Any OpenAI-compatible endpoint
 
+<Warning>
+`OpenAIChatAgent` is a deprecated [provider agent](/v6/reference/agents#provider-agents); hud v0.7.0
+removes it.
+</Warning>
+
 `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so vLLM servers, local models, and hosted
 checkpoints all work - point `base_url` at the server:
 
