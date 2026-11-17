@@ -256,11 +256,9 @@ class ToolResult(BaseModel):
 
 # Schema tag of the core step stream (the tool-agent family shares it).
 STEP_SCHEMA = "hud.step.v1"
-ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 
 StepSource: TypeAlias = Literal["user", "agent", "tool", "task", "subagent", "system"]
-RobotStepSource: TypeAlias = Literal["observation", "inference", "video_segment"]
-SourceT_co = TypeVar("SourceT_co", covariant=True, default=StepSource | RobotStepSource)
+SourceT_co = TypeVar("SourceT_co", covariant=True, default=StepSource)
 
 
 class TaskCall(BaseModel):
@@ -281,8 +279,8 @@ class Step(BaseModel, Generic[SourceT_co]):
 
     Agent families subclass it with their own payload fields (such as
     ``hud.agents.types.AgentStep``) and, for a new wire schema, their own ``schema_tag``.
-    A family parametrizes ``Step`` with its own ``source`` values
-    (``Step[StepSource]``, ``Step[RobotStepSource]``); a bare ``Step`` takes any family's.
+    A family parametrizes ``Step`` with its own ``source`` values; a bare ``Step`` takes
+    ``StepSource``.
     """
 
     # The platform's serializer registry dispatches on this tag.

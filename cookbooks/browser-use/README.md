@@ -5,7 +5,7 @@ attaches to the browser an environment publishes as a `cdp` capability and runs 
 own loop; the run records browser-use's final answer.
 
 `agent.py` is the whole adapter: copy it as a template for wrapping another agent
-framework over the capability it needs (`ssh`, `mcp`, `rfb`, `robot`).
+framework over the capability it needs (`ssh`, `mcp`, `rfb`).
 
 ## Run
 

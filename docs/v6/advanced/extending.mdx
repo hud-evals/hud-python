@@ -82,7 +82,32 @@ this for you.
 The [browser-use cookbook](https://github.com/hud-evals/hud-python/tree/main/cookbooks/browser-use)
 is exactly this adapter - `browser-use` driving the `cdp` (browser) capability. Use it as a
 template for wrapping other frameworks over whichever capability they need (`ssh`, `mcp`,
-`rfb`, `robot`).
+`rfb`).
+
+### A client for a new protocol
+
+`run.client.open(ref)` constructs the client registered for the binding's protocol: `ssh`, `mcp` and
+`rfb` come with the SDK. For any other protocol, subclass `CapabilityClient` with that `protocol` and
+register it with `register_client` from `hud.clients`, which also works as a class decorator:
+
+```python
+from hud.capabilities import Capability, CapabilityClient
+from hud.clients import register_client
+
+@register_client
+class SimClient(CapabilityClient):
+    protocol = "sim/1"
+
+    @classmethod
+    async def connect(cls, cap: Capability) -> "SimClient": ...
+
+    async def close(self) -> None: ...
+```
+
+The environment publishes the binding as a plain `Capability(name="sim", protocol="sim/1", url=...)`,
+and the harness opens it with `await run.client.open("sim")`. Registering a second class for a protocol
+that already has one raises `ValueError`. Without a registered client, `open` raises `ValueError`; read
+the binding's address with `run.client.binding(ref)` and connect yourself.
 
 ### Any OpenAI-compatible endpoint
 

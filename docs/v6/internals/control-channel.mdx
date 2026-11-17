@@ -16,7 +16,7 @@ Three roles meet at this boundary:
 | --- | --- |
 | **Agent** | Drives a `Run`, reads the prompt, and opens capabilities through `HudClient`. |
 | **Environment** | Serves task templates and the backing daemons named by its capability bindings. |
-| **Capability** | Describes a live protocol endpoint such as `ssh`, `mcp`, `cdp`, `rfb`, or `robot`. |
+| **Capability** | Describes a live protocol endpoint such as `ssh`, `mcp`, `cdp`, or `rfb`. |
 
 The channel contains two related contracts:
 
@@ -39,7 +39,7 @@ sequenceDiagram
     Env-->>Agent: prompt
     rect rgb(238,238,238)
     Note over Agent,Caps: agent work uses separate capability streams
-    Agent->>Caps: shell · browser · tools · robot
+    Agent->>Caps: shell · browser · tools
     Caps-->>Agent: observations
     end
     Agent->>Env: tasks.grade

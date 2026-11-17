@@ -4,7 +4,7 @@ description: "Reference for the HUD Environment object: registering tasks, capab
 icon: "cube"
 ---
 
-An **environment** is the world an agent acts in - a shell, a browser, a desktop, a robot simulator.
+An **environment** is the world an agent acts in - a shell, a browser, a desktop, a simulator.
 The `Environment` object is the wire-protocol control handle for one: it holds the capabilities and
 tasks registered against it and answers an agent harness over the [control channel](/v6/internals/control-channel).
 Authoring an `env.py` lives in [creating an environment](/v6/guides/creating-an-environment); this
@@ -40,7 +40,6 @@ becomes part of what the environment advertises when it serves.
 | `env.add_capability(cap)` | Publish concrete wire data, replacing any same-named entry. Call it from an `@env.initialize` hook once a daemon the env runs is up. |
 | `env.capability(name)` | Look up a published [capability](/v6/reference/capabilities) by name. |
 | `env.workspace(root, *, name="shell", track_files=None, **kwargs)` | Attach a [`Workspace`](/v6/reference/capabilities#workspace) serving `name` over `ssh/2`, wiring its start, publish, and stop lifecycle. File tracking runs by default (`track_files` defaults to `HUD_FILE_TRACKING_ENABLED`). |
-| `env.gym(target, *, name="robot", **kwargs)` | Attach a gym-style sim serving `name` over the `robot` protocol. `target` is a factory, a gymnasium id such as `"CartPole-v1"`, or a registry env. Returns a `RobotEndpoint` (`sim.reset`, `sim.result`); see [robots](/v6/advanced/robots#gym-style-envs). |
 | `await env.end_task()` | Run the `@env.task_teardown` hooks directly; one that fails is logged and the rest still run. |
 | `env.start()` / `env.stop()` | Run the `@env.initialize` / `@env.shutdown` hooks directly (`start` is idempotent until `stop`). |
 | `env.tasks` | The registered templates by id. |
@@ -83,10 +82,21 @@ await serve(load_environment("env.py"), host="0.0.0.0", port=8765)
 | `await bind(env, host="127.0.0.1", port=0)` | Bind the control-channel socket and return an `asyncio.Server` without serving. |
 | `load_environment(path, *, name=None)` | Return the one `Environment` defined at `path` (a `.py` file or directory); `name` selects among several. |
 
+A process that talks to the environment over its control channel, such as a simulator the
+environment drives, frames each message with the same helpers the server uses. They are exported from
+`hud.environment`:
+
+| Function | Description |
+|----------|-------------|
+| `await read_frame(reader, *, max_bytes=None)` | Read one newline-delimited JSON frame from an `asyncio.StreamReader`; `None` at EOF. Raises `ValueError` for a frame that is not a JSON object or is larger than `max_bytes`; close the connection after a frame that is too large. |
+| `await send_frame(writer, msg, *, max_bytes=None)` | Write one frame to an `asyncio.StreamWriter` and drain it. |
+| `reply(msg_id, result)` | A JSON-RPC 2.0 success response. |
+| `error(msg_id, code, message)` | A JSON-RPC 2.0 error response. |
+
 <Note>
 A dependency that must **own the process main thread** (e.g. Isaac Sim / Omniverse) can't run under
 `hud serve`, which runs the asyncio loop on main. Run `serve(env, host, port)` on a worker thread
-instead and keep the main thread for the dependency - see [Robots](/v6/advanced/robots#environment-side).
+instead and keep the main thread for the dependency.
 </Note>
 
 See [creating an environment](/v6/guides/creating-an-environment) to author one,

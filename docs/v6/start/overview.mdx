@@ -52,7 +52,7 @@ HUD maps each of these abstractions to a core concept you can compose and reuse:
 | [**Environment**](/v6/reference/environment) | The closed container the agent acts in - its contents, state, and lifecycle. |
 | [**Tasks & Tasksets**](/v6/reference/tasks) | A single task bound to an environment, each with its own prompt; bundle many task instances into a taskset. |
 | [**Graders**](/v6/reference/graders) | The mechanism associated with a specific task that scores an attempt and turns it into a reward. |
-| [**Capabilities**](/v6/reference/capabilities) | The interfaces the agent drives to act - shell, browser, screen, robot. |
+| [**Capabilities**](/v6/reference/capabilities) | The interfaces the agent drives to act - shell, browser, screen. |
 
 All of these abstractions appear in the `env.py` file - the central declarative file that describes
 everything there is to a HUD environment. For a dedicated overview, see our guide on [creating environments](/v6/guides/creating-an-environment).
@@ -91,7 +91,7 @@ async def some_task_1(...):
 ```
 
 This scaffold is general on purpose - it describes _any_ environment. A one-line shell task, a full GUI
-desktop, a robot simulator - they're all just environments with some bespoke **content**, **tasks**, and
+desktop, a simulator - they're all just environments with some bespoke **content**, **tasks**, and
 associated **capabilities**. The complexity hidden under this file is hidden in the
 [HUD control channel](/v6/internals/control-channel). Its thin envelope lets any model or harness plug into any environment.
 

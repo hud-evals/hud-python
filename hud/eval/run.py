@@ -178,8 +178,8 @@ class Run:
         self.runtime_config = runtime_config
         self.connections = {connection.name: connection for connection in connections}
         self.prompt: str | list[Any] | None = None
-        # Episode-scoped connection data (a robot slot token, a per-episode url)
-        # refining the manifest's env-lifetime bindings.
+        # Episode-scoped connection data (a slot token, a per-episode url) refining the
+        # manifest's env-lifetime bindings.
         self.bindings: dict[str, dict[str, Any]] = {}
         self.trace = Trace()
 

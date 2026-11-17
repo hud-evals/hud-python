@@ -38,8 +38,8 @@ LOGGER = logging.getLogger("hud.environment")
 P = ParamSpec("P")
 T = TypeVar("T")
 
-# The control session whose task call is running; session-keyed state (robot slot
-# claims, per-session state dirs) keys on it.
+# The control session whose task call is running; session-keyed state (per-session
+# state dirs, claims a capability's server ties to one session) keys on it.
 current_session_id: ContextVar[str | None] = ContextVar("hud_current_session_id", default=None)
 
 
@@ -336,35 +336,6 @@ class Environment:
             await ws.stop()
 
         return ws
-
-    def gym(self, target: Any, *, name: str = "robot", **kwargs: Any) -> Any:
-        """Attach a gym-style sim serving ``name`` over the ``robot`` protocol.
-
-        ``target`` is a factory, gymnasium id (``"CartPole-v1"``), or constructed
-        registry env (reduced to its spec). Registers spawn → publish → teardown
-        on this env's hooks; nothing runs until serve. Returns a
-        ``RobotEndpoint`` (``sim.reset`` / ``sim.result``).
-
-        Every capability the bridge declares is published, not just the wire —
-        a ``bridge=`` subclass serving its own tools from the sim process shows
-        up in the manifest alongside ``name``.
-        """
-        from hud.environment.robot.endpoint import RobotEndpoint
-        from hud.environment.robot.gym import gym_command
-
-        sim = RobotEndpoint.spawn(gym_command(target, **kwargs)).attach(self)
-
-        @self.initialize
-        async def _up() -> None:
-            await sim.start()
-            for cap in await sim.capabilities(name):
-                self.add_capability(cap)
-
-        @self.shutdown
-        async def _down() -> None:
-            await sim.stop()
-
-        return sim
 
     async def start(self) -> None:
         """Run ``@env.initialize`` hooks. Idempotent until ``stop``.

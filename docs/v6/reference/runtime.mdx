@@ -293,8 +293,8 @@ A lease pool with one host per environment and runtime config: a host boots thro
 first lease for its key and lives for the enclosing `async with` scope, or until its run timeout,
 when the next lease boots a fresh one. Every rollout of one environment and config in that scope is
 handed the same address - agents
-that need to share, compete, or coordinate in the same environment (a vectorized sim's `num_envs`
-slots, see [robots](/v6/advanced/robots#vectorized-envs-and-evals), are one case). Lease
+that need to share, compete, or coordinate in the same environment (the slots of a vectorized
+simulator are one case). Lease
 `width + 1` waits for a slot to free instead of erroring, so `group` and `max_concurrent` keep
 their ordinary meanings. `Taskset.run` scopes a context-manager placement to the call, so a bare
 `runtime=Shared(...)` boots once per `run(...)`; open the scope yourself to keep the host

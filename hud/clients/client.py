@@ -10,7 +10,7 @@ import math
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 from hud.capabilities.base import Capability, CapabilityClient
@@ -43,9 +43,29 @@ _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
 # How long a client waits for a freshly provisioned env to serve when nothing sets a limit.
 DEFAULT_READY_TIMEOUT = 240.0
 
-_CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
-    cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient)
-}
+ClientT = TypeVar("ClientT", bound=type[CapabilityClient])
+
+_CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {}
+
+
+def register_client(cls: ClientT) -> ClientT:
+    """Make ``HudClient.open`` use ``cls`` for bindings whose protocol is ``cls.protocol``.
+
+    Returns ``cls``, so it also works as a class decorator. Raises ``ValueError`` when
+    another class is already registered for the protocol.
+    """
+    registered = _CLIENT_REGISTRY.setdefault(cls.protocol, cls)
+    if registered is not cls:
+        raise ValueError(
+            f"protocol {cls.protocol!r} is already registered to "
+            f"{registered.__module__}.{registered.__qualname__}; "
+            f"cannot register {cls.__module__}.{cls.__qualname__}"
+        )
+    return cls
+
+
+for _client in (SSHClient, RFBClient, MCPClient):
+    register_client(_client)
 
 
 async def _connect_capability(
@@ -265,11 +285,6 @@ class HudClient:
         cap_client = self._opened.get(cap.name)
         if cap_client is None:
             client_cls = _CLIENT_REGISTRY.get(cap.protocol)
-            if client_cls is None and cap.protocol == "openpi/0":
-                # RobotClient needs the robot extra, so it joins the registry on first open.
-                from hud.capabilities.robot import RobotClient
-
-                client_cls = _CLIENT_REGISTRY[RobotClient.protocol] = RobotClient
             if client_cls is None:
                 raise ValueError(
                     f"no client registered for protocol {cap.protocol!r}; "

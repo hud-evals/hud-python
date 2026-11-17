@@ -103,19 +103,3 @@ jobs:
         run: >-
           uv run --locked --python 3.12 --all-extras
           pytest -m "e2e and docker" tests/integrations/harbor -n 4 --timeout 1800 --durations 20
-
-  lerobot:
-    name: LeRobot
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
-
-      - name: Run LeRobot scenarios
-        run: >-
-          uv run --locked --python 3.12 --all-extras --with 'lerobot[dataset]'
-          python -m pytest -m "e2e and lerobot" -n 4 --timeout 600 --durations 20
