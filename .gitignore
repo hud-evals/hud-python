@@ -54,8 +54,3 @@ experiments/
 !.codex/environments/
 .codex/environments/*
 !.codex/environments/environment.toml
-
-!environments/featured/**/uv.lock
-!environments/featured/file-analysis/fixtures/*.csv
-!environments/featured/libbet/games/test/
-!environments/featured/libbet/games/test/**
