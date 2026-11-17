@@ -1,6 +1,6 @@
 ---
 title: "Agents"
-description: "Agents in HUD: built-in agents like Claude, OpenAI, and Gemini, the HUD gateway for routing models, and how to wire your own agent into a task run."
+description: "Agents in HUD: the Claude Code and Codex CLI agents, create_agent and the HUD gateway, the deprecated provider agents, and how to wire your own agent into a task run."
 icon: "robot"
 mode: "wide"
 ---
@@ -18,82 +18,38 @@ loop.
 
 ## Built-in agents
 
-The SDK ships one agent per major provider, reached two ways:
+The SDK's agents run a coding agent's own CLI inside the environment's workspace:
 
-- **`create_agent(model)`** - the preferred path. It selects the matching provider agent for a model id
-  and routes every call through the **HUD gateway**.
-- **a provider agent directly** (e.g. `ClaudeAgent(ClaudeConfig(...))`) - the same class constructed
-  yourself, for full config control or to call the provider with your own key instead of the gateway.
+| Agent | Runs | Config | Default model |
+|-------|------|--------|---------------|
+| `ClaudeCLIAgent` | Claude Code (`claude`) | `ClaudeCLIConfig` | `claude-sonnet-5` |
+| `CodexCLIAgent` | Codex (`codex exec`) | `CodexCLIConfig` | `gpt-5.6-sol` |
 
 ```python
 from hud.agents import create_agent
 
-agent = create_agent("claude-sonnet-4-5")   # routed through the gateway
+agent = create_agent("claude_cli")
 ```
 
-The HUD gateway is an OpenAI-compatible endpoint (`settings.hud_gateway_url`, default
-`https://inference.hud.ai`) that fronts every provider behind your single `HUD_API_KEY`, so you
-switch between Claude, GPT, and Gemini by name alone, with unified tracing. `create_agent` accepts any id
-the gateway knows (`claude-...`, `gpt-...`, `gemini-...`); extra kwargs pass through to the agent's
-config.
+Each config lives in `hud.agents.types`, and every setting (`model`, `timeout_seconds`,
+`reasoning_effort`, ...) lives on it; `__call__(run)` takes only the run. `timeout_seconds` bounds the
+whole run, and `ClaudeCLIConfig.max_steps` is Claude Code's `--max-turns`.
 
-Built-in agents are **catalog-driven**: each run they read the environment's manifest, open the
-capabilities they support, build the matching provider tools, and loop against `run.prompt_messages`.
-Declaring a capability on the environment is enough; you never wire tools.
+The SDK also ships HUD's older [provider agents](#provider-agents), which are deprecated.
 
-### Provider agents
+### What a CLI agent needs
 
-Each model maps to a provider agent - the class that speaks that provider's API. Construct one directly
-to set its full config or use your own provider key:
-
-```python
-from hud.agents import ClaudeAgent
-from hud.agents.types import ClaudeConfig
-
-agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_steps=30))
-```
-
-| Agent | Config | Default model |
-|-------|--------|---------------|
-| `ClaudeAgent` | `ClaudeConfig` | `claude-sonnet-4-6` |
-| `OpenAIAgent` | `OpenAIConfig` | `gpt-5.6` |
-| `GeminiAgent` | `GeminiConfig` | `gemini-3.1-pro-preview` |
-| `OpenAIChatAgent` | `OpenAIChatConfig` | `gpt-5.4-mini` |
-| `ClaudeCLIAgent` | `ClaudeCLIConfig` | `claude-sonnet-5` |
-| `CodexCLIAgent` | `CodexCLIConfig` | `gpt-5.6-sol` |
-
-Each config lives in `hud.agents.types`. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so it
-points at any compatible server (vLLM, a local model) via `base_url`. `ClaudeCLIAgent` and
-`CodexCLIAgent` run the `claude` and `codex exec` CLIs over an `ssh` capability, against the env's
-filesystem. SSH-only runs support POSIX and Windows workspaces; `ClaudeCLIAgent` computer use over an
-`rfb` capability currently requires a POSIX workspace. The CLIs never hold a model key inside a
-sandboxed workspace: they reach their model through the rollout's `inference` connection, which a
-caller can pass in `rollout(connections=...)` and which `rollout` otherwise binds to the gateway with
-`HUD_API_KEY` when the agent routes to the gateway and the workspace has a network of its own;
-an agent on its provider key is refused there rather than rerouted. Only an unsandboxed workspace, whose
-`ssh` capability declares `isolation="none"` as one without `bwrap` does, gives the CLI its key
-directly. Every knob
-(`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
-config; `__call__(run)` takes only the run.
-
-`ClaudeConfig.reasoning_effort` accepts `low`, `medium`, `high`, `xhigh`, or `max`, subject to the model, and is sent as the request's `output_config.effort`; unset uses the model's default.
-
-`OpenAIConfig.max_output_tokens` and `GeminiConfig.max_output_tokens` are unset by default, so each request gets the model's own output limit. Set them to cap output per turn. Gemini counts thinking tokens toward the cap, so a low cap can truncate a thinking model before it answers.
-
-`GeminiConfig.temperature`, `top_p`, and `top_k` are unset by default, so each request uses the model's own sampling; Gemini 4 models ignore them. `GeminiConfig.thinking_level` accepts `minimal`, `low`, `medium`, or `high`, subject to the model (Gemini 4 Argon rejects `minimal`); unset uses the model's default.
-
-`GeminiAgent` streams each turn. For Gemini 4 long decode, set `max_output_tokens` above 65,536 and install `google-genai` 2.30.1 or later; the turn then runs past the per-request output cap and is recorded as one turn. Otherwise a turn that reaches the cap ends the run with `stop_reason="length"`. Keep `include_thoughts` on for long-thinking runs, since without it the model sends nothing while it thinks and a long think can hit the stream's first-chunk deadline.
-
-`OpenAIConfig` generates a stable `prompt_cache_key` for the agent and sends it with every Responses
-request. Pass your own key when multiple agent instances should share the same cached prompt prefix.
-
-`timeout_seconds` bounds the complete agent phase. For provider tool agents, `tool_timeout_seconds` bounds each complete SSH-backed tool call, including multi-operation editor calls. It is unset by default except on `ClaudeConfig`, where it defaults to 120 seconds. A timeout is returned to the model as a tool error so the agent can continue. The CLI agents do not apply this setting because each SSH process is the complete CLI agent, not one tool call.
-
-```python
-agent = OpenAIChatAgent(
-    OpenAIChatConfig(tool_timeout_seconds=30 * 60)
-)
-```
+- **A workspace.** The agent runs its CLI over the environment's `ssh` capability, against the
+  workspace filesystem. POSIX and Windows workspaces both work; `ClaudeCLIAgent` computer use over an
+  `rfb` capability needs a POSIX workspace.
+- **The CLI.** `claude` or `codex` must be installed in the workspace, unless the runtime provides a
+  managed copy.
+- **A model route.** In a sandboxed workspace the CLI never holds a model key. It reaches its model
+  through the rollout's `inference` connection, which you can pass in `rollout(connections=...)`;
+  otherwise `rollout` binds it to the gateway with `HUD_API_KEY` when the agent routes to the gateway
+  and the workspace has a network of its own. An agent on its provider key is refused there rather
+  than rerouted. Only an unsandboxed workspace (its `ssh` capability declares `isolation="none"`, as
+  one without `bwrap` does) gives the CLI its key directly.
 
 ## Create agent
 
@@ -101,30 +57,83 @@ agent = OpenAIChatAgent(
 create_agent(model: str, **kwargs) -> GatewayAgent
 ```
 
-The `create_agent` function resolves `model` to a gateway agent type and returns that provider agent
-wired to the gateway. Extra `kwargs` forward to the matched config (the `*Config` for the resolved
-type), with `model` filled in, `gateway=True` set, and `model_client` left unset; the agent routes
-through the gateway at runtime, even when that provider's own key is also set. Passing an agent type
-itself (`create_agent("claude_cli")`) keeps that config's default model. This
-keeps the config serializable for [`HostedRuntime`](/v6/reference/runtime#hostedruntime). Constructed
-directly (`ClaudeAgent(ClaudeConfig(...))`), an agent uses the provider key when one is set and the
-gateway otherwise; `gateway=True` on the config forces the gateway there too. `api_key` and `base_url` are rejected here;
-instantiate the provider agent directly for custom/BYOK credentials. Passing `completion_kwargs` only
-works when `model` resolves to `OpenAIChatAgent`, since `completion_kwargs` lives only on
-`OpenAIChatConfig`.
+`create_agent` resolves `model` to an agent type and returns that agent routed through the **HUD
+gateway**, an OpenAI-compatible endpoint (`settings.hud_gateway_url`, default
+`https://inference.hud.ai`) that fronts every provider behind your `HUD_API_KEY`. `model` is either an
+agent type (`create_agent("claude_cli")` runs that agent on its config's default model) or any model id
+the gateway knows (`claude-...`, `gpt-...`, `gemini-...`; `hud models list` shows them all), which
+selects that model's default agent type. To run an agent type on another model, construct the agent
+directly with `gateway=True` on its config.
 
-A model id or agent type name maps to one of the registered agent types (`AgentType`):
+Extra `kwargs` go to the agent's config, with `model` filled in and `gateway=True` set, so the config
+stays serializable for [`HostedRuntime`](/v6/reference/runtime#hostedruntime).
+`api_key` and `base_url` are rejected.
 
-| `AgentType` | Agent class |
-|-------------|-------------|
-| `claude` | `ClaudeAgent` |
-| `claude_cli` | `ClaudeCLIAgent` |
-| `codex_cli` | `CodexCLIAgent` |
-| `openai` | `OpenAIAgent` |
-| `gemini` | `GeminiAgent` |
-| `openai_compatible` | `OpenAIChatAgent` |
+To call a provider with your own key, construct the agent directly:
 
-For a provider key instead of the gateway, construct the agent directly.
+```python
+from hud.agents import ClaudeCLIAgent
+from hud.agents.types import ClaudeCLIConfig
+
+agent = ClaudeCLIAgent(ClaudeCLIConfig(model="claude-sonnet-5", max_steps=30))
+```
+
+Constructed directly, an agent uses the provider key when one is set and the gateway otherwise;
+`gateway=True` on the config forces the gateway.
+
+### Agent types
+
+An agent type names an agent in `hud eval`, in `create_agent`, and in what `HostedRuntime` sends:
+
+| `AgentType` | Agent now | From hud v0.7.0 |
+|-------------|-----------|-----------------|
+| `claude_cli` | `ClaudeCLIAgent` | `ClaudeCLIAgent` (alias of `claude`) |
+| `codex_cli` | `CodexCLIAgent` | `CodexCLIAgent` (alias of `openai`) |
+| `claude` | `ClaudeAgent` | `ClaudeCLIAgent` |
+| `openai` | `OpenAIAgent` | `CodexCLIAgent` |
+| `gemini` | `GeminiAgent` | a Gemini CLI agent |
+| `openai_compatible` | `OpenAIChatAgent` | removed |
+
+## Provider agents
+
+<Warning>
+The provider agents are deprecated and hud v0.7.0 removes them. Each one warns when it is constructed.
+Use `ClaudeCLIAgent` in place of `ClaudeAgent` and `CodexCLIAgent` in place of `OpenAIAgent`.
+`GeminiAgent` and `OpenAIChatAgent` have no CLI replacement yet.
+</Warning>
+
+A provider agent is HUD's own tool-call loop over one provider's API. Each run it reads the
+environment's manifest, opens the capabilities it supports, builds the matching provider tools, and
+loops against `run.prompt_messages`.
+
+| Agent | API | Config | Default model |
+|-------|-----|--------|---------------|
+| `ClaudeAgent` | Anthropic Messages | `ClaudeConfig` | `claude-sonnet-4-6` |
+| `OpenAIAgent` | OpenAI Responses | `OpenAIConfig` | `gpt-5.6` |
+| `GeminiAgent` | Gemini | `GeminiConfig` | `gemini-3.1-pro-preview` |
+| `OpenAIChatAgent` | OpenAI Chat Completions, any compatible server via `base_url` | `OpenAIChatConfig` | `gpt-5.4-mini` |
+
+Settings specific to these agents:
+
+- **`tool_timeout_seconds`** bounds each SSH-backed tool call, including multi-operation editor calls,
+  and returns a timeout to the model as a tool error. Unset by default except on `ClaudeConfig`
+  (120 seconds).
+- **`ClaudeConfig.reasoning_effort`**: `low`, `medium`, `high`, `xhigh` or `max`, subject to the
+  model; sent as `output_config.effort`.
+- **`OpenAIConfig.max_output_tokens`** and **`GeminiConfig.max_output_tokens`** are unset by default,
+  so each request gets the model's own limit. Gemini counts thinking tokens toward the cap.
+- **`OpenAIConfig.prompt_cache_key`** is generated per agent and sent with every request; pass your own
+  to share a cached prompt prefix across agent instances.
+- **`GeminiConfig.temperature`, `top_p`, `top_k`** are unset by default; Gemini 4 models ignore them.
+  **`thinking_level`** accepts `minimal`, `low`, `medium` or `high`, subject to the model (Gemini 4
+  Argon rejects `minimal`).
+- **`OpenAIChatConfig.completion_kwargs`** pass through to the Chat Completions request.
+
+`GeminiAgent` streams each turn. For Gemini 4 long decode, set `max_output_tokens` above 65,536 and
+install `google-genai` 2.30.1 or later; the turn then runs past the per-request output cap and is
+recorded as one turn. Otherwise a turn that reaches the cap ends the run with `stop_reason="length"`.
+Keep `include_thoughts` on for long-thinking runs: without it the model sends nothing while it thinks,
+and a long think can hit the stream's first-chunk deadline.
 
 ## Agent
 
@@ -149,14 +158,14 @@ from hud import Taskset
 from hud.agents import create_agent
 from hud.runtime import LocalRuntime
 
-agent = create_agent("claude-sonnet-4-5")
+agent = create_agent("claude_cli")
 taskset = Taskset.from_file("tasks.py")        # scaffolded tasks.py exports a list of tasks
 job = await taskset.run(agent, runtime=LocalRuntime("env.py"))
 print(job.reward)
 ```
 
-**From the CLI**, `hud eval` takes a task source and an agent name (`claude`, `claude_cli`,
-`codex_cli`, `openai`, `gemini`, `openai_compatible`); see [running an eval](/v6/guides/running-an-eval) for the walkthrough and the
+**From the CLI**, `hud eval` takes a task source and an [agent type](#agent-types); see
+[running an eval](/v6/guides/running-an-eval) for the walkthrough and the
 [CLI reference](/v6/reference/cli#hud-eval) for the full flag set.
 
 ## Bring your own harness

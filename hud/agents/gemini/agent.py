@@ -57,6 +57,10 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         GeminiComputerTool,
         GeminiMCPProxyTool,
     )
+    _removal_notice = (
+        "`GeminiAgent` is deprecated and will be removed in hud v0.7.0, when agent type "
+        "`gemini` runs a Gemini CLI agent."
+    )
 
     def __init__(self, config: GeminiConfig | None = None) -> None:
         super().__init__(config)

@@ -38,17 +38,20 @@ and launch - no CLI required. See [evaluations on the platform](/platform/evalua
 
 ### Choosing an agent
 
-The agent name (`claude`, `openai`, `gemini`) selects a provider harness. It calls the provider with
-its own key when one is set, and otherwise the [HUD gateway](/v6/reference/agents) with `HUD_API_KEY`;
-`--gateway` forces the gateway. The `claude_cli` and `codex_cli` harnesses run an installed CLI inside
-the environment; `--gateway` routes their model calls through HUD too. Switching models is a single
-flag, and `hud models list` shows every model the gateway knows.
+The agent name is an [agent type](/v6/reference/agents#agent-types). `claude_cli` and `codex_cli` run
+Claude Code and Codex inside the environment's workspace. An agent calls its provider with its own key
+when one is set, and otherwise the [HUD gateway](/v6/reference/agents#create-agent) with `HUD_API_KEY`;
+`--gateway` forces the gateway. Switching models is a single flag, and `hud models list` shows every
+model the gateway knows.
 
 ```bash
-hud eval "My Taskset" claude --model claude-haiku-4-5   # a cheaper model for fast iteration
-hud eval "My Taskset" openai --model gpt-5
-hud eval "My Taskset" gemini
+hud eval "My Taskset" claude_cli --model claude-haiku-4-5   # a cheaper model for fast iteration
+hud eval "My Taskset" codex_cli --model gpt-5.6-sol
 ```
+
+`claude`, `openai`, `gemini` and `openai_compatible` still run HUD's
+[provider agents](/v6/reference/agents#provider-agents), which are deprecated and warn when they start.
+From hud v0.7.0, `claude` runs Claude Code and `openai` runs Codex.
 
 For a custom loop - a fine-tuned model, a framework you already use - see
 [bring your own harness](/v6/advanced/extending#bring-your-own-harness).
@@ -114,7 +117,7 @@ different infra - call `Taskset.run` directly and hand it a [runtime](/v6/refere
 is the same eval `hud eval` runs, written out in Python.
 
 `create_agent` always uses the gateway and needs `HUD_API_KEY`; to call a provider directly,
-[construct its agent](/v6/reference/agents#provider-agents).
+[construct its agent](/v6/reference/agents#create-agent).
 
 ```python run.py
 import asyncio
