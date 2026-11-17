@@ -57,7 +57,6 @@ FAILING: dict[str, tuple[list[str], dict[str, str]]] = {
     "version": (["version", "--no-such-option"], {}),  # rejected while parsing
     "set": (["set", "NOT_A_PAIR"], {}),  # the command raises a usage error
     "task list": (["task", "list", "--source", "missing.json"], {}),  # a missing file
-    "jobs": (["jobs"], {}),  # a group run without a subcommand
     "jobs list": (["jobs", "list"], {}),  # a platform read
     "deploy": (["deploy", "--no-env", "--yes"], ENVIRONMENT),  # an async command
 }
@@ -75,9 +74,8 @@ MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
             },
         },
     ),
-    # The group forwards --yes and --dry-run to ``sync tasks``.
-    "sync": (
-        ["sync"],
+    "sync tasks": (
+        ["sync", "tasks"],
         {"tasks.py": TASKS_PY, ".hud/config.json": json.dumps({"taskset_id": TASKSET_ID})},
         {
             f"GET /v2/tasksets/{TASKSET_ID}": {"id": TASKSET_ID, "name": "demo"},
@@ -112,8 +110,8 @@ LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = 
         {},
         [Task(env="example", id="solve", args={"n": n}).slug for n in (1, 2)],
     ),
-    "jobs": (
-        ["jobs"],
+    "jobs list": (
+        ["jobs", "list"],
         {},
         {"GET /v2/jobs": {"items": [{"id": "job-1"}, {"id": "job-2"}], "total": 2}},
         ["job-1", "job-2"],

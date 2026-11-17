@@ -140,13 +140,13 @@ def test_a_task_moved_to_another_env_uploads_again(platform: FakeServices, hud: 
     ]
 
 
-def test_a_bare_sync_uses_the_linked_taskset_by_its_remote_name(
+def test_syncing_tasks_without_a_taskset_uses_the_linked_one_by_its_remote_name(
     platform: FakeServices, hud: Hud
 ) -> None:
     holding(platform, TASKSET_ID, "renamed", exported(1, 2))
     link(hud, taskset_id=TASKSET_ID)
 
-    result = hud("sync", "--json")
+    result = hud("sync", "tasks", "--json")
 
     assert (result.exit_code, result.json["status"], result.json["taskset"]) == (
         0,

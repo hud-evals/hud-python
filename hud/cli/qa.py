@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import warnings
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
@@ -24,7 +25,7 @@ from hud.cli import (
     map_exception,
 )
 from hud.settings import settings
-from hud.utils.exceptions import HudException, HudTimeoutError
+from hud.utils.exceptions import HudDeprecationWarning, HudException, HudTimeoutError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -354,16 +355,22 @@ def qa_command(
         None, "--level", case_sensitive=False, help="Only the checks that run at this level."
     ),
 ) -> Any:
-    """List QA checks (same as hud qa list), or run and inspect them with a subcommand.
+    """List, run, and inspect QA checks.
 
     [not dim]Examples:
-        hud qa
+        hud qa list
         hud qa list --json
         hud qa run failure_analysis <trace-id>
         hud qa run task_reward_exploit <task-id>[/not dim]
     """
     if ctx.invoked_subcommand is not None:
         return None
+    warnings.warn(
+        "`hud qa` without a subcommand is deprecated and will be removed in hud v0.7.0; "
+        "use `hud qa list`.",
+        HudDeprecationWarning,
+        stacklevel=2,
+    )
     return list_command(quiet=quiet, level=level)
 
 

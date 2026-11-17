@@ -107,12 +107,19 @@ def version() -> dict[str, str]:
 def root_command(
     ctx: typer.Context,
     show_help: bool = typer.Option(False, "--help", help="Show help."),
-    show_version: bool = typer.Option(False, "--version", help="Show version."),
+    show_version: bool = typer.Option(
+        False, "--version", help="Show version (deprecated; use `hud version`)."
+    ),
 ) -> None:
     if show_help:
         typer.echo(ctx.get_help())
         raise typer.Exit
     if show_version:
+        warnings.warn(
+            "`hud --version` is deprecated and will be removed in hud v0.7.0; use `hud version`.",
+            HudDeprecationWarning,
+            stacklevel=2,
+        )
         version()
         raise typer.Exit
     if ctx.invoked_subcommand is None:

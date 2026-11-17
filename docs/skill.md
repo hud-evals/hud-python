@@ -371,7 +371,7 @@ Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 **Inspect runs after the fact** with `hud jobs` and `hud trace`:
 
 ```bash
-hud jobs                    # list recent jobs
+hud jobs list               # list recent jobs
 hud jobs get <job-id>       # list traces in a job (reward, status, error per rollout)
 hud trace get <trace-id>        # render one rollout — agent turns, tool calls, results
 hud trace get <trace-id> --json # raw event list (pipe to jq for filtering)
