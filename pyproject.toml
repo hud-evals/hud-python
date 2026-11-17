@@ -78,13 +78,6 @@ bedrock = [
     "anthropic[bedrock]>=2.1,<3",
 ]
 
-robot = [
-    "numpy>=1.24,<3",
-    "openpi-client>=0.1.2,<1",
-    "av>=12,<20",
-    "gymnasium>=1.0,<2",
-]
-
 modal = [
     "modal>=1.0,<2",
 ]
@@ -154,11 +147,9 @@ lint.ignore = [
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
 # Typer reads command annotations at runtime.
 "hud/cli/*.py" = ["TC003"]
-"hud/environment/robot/**" = ["T201"]
 # Imports inside functions: optional extras and provider SDKs load where they are used.
 "hud/runtime/daytona.py" = ["PLC0415"]
 "hud/runtime/modal.py" = ["PLC0415"]
-"hud/environment/robot/gym.py" = ["PLC0415"]
 "hud/train/client.py" = ["PLC0415"]
 "hud/utils/gateway.py" = ["PLC0415"]
 "hud/clients/client.py" = ["PLC0415"]
@@ -171,7 +162,6 @@ lint.ignore = [
 "hud/eval/task.py" = ["PLC0415"]
 # Imports inside functions: Windows-only modules.
 "hud/environment/workspace.py" = ["PLC0415"]
-"hud/agents/robot/**" = ["T201"]
 "*.ipynb" = ["ALL"]
 "**/cookbooks/**/*.py" = ["ALL"]
 
@@ -208,7 +198,6 @@ markers = [
     "e2e: needs something outside the test process; runs only when selected with -m",
     "docker: needs a running Docker daemon",
     "modal: needs a Modal account (a token in the environment or ~/.modal.toml)",
-    "lerobot: needs the lerobot[dataset] package",
     "sandbox: needs Linux, root, and bubblewrap",
     "live: needs a real HUD account (HUD_API_KEY) and spends credits",
     "hosted: deploys to and runs on the HUD platform",

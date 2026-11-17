@@ -742,8 +742,7 @@ This reading path exposes the boundaries encoded by the rollout engine.
 - **A control channel holds one suspended task per session.** A `_ControlChannel` keys its
   suspended `TaskRunner`s by session id, so concurrent sessions each own their own, and a dropped
   connection parks its session's task for a later one to grade (see the
-  [control channel](/v6/internals/control-channel#the-suspended-task)). Vectorized robot sims reuse that
-  shape: N sessions on one control port, each claiming a bridge slot by token.
+  [control channel](/v6/internals/control-channel#the-suspended-task)).
 - **The agent loop runs in the caller's process.** Every provider except `HostedRuntime` is
   *client-here*: the host can be anywhere, but `agent(run)` executes locally. With the
   default `LocalRuntime` the env serves in this same process too, so its hooks share the caller's

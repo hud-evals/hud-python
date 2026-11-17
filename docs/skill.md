@@ -3,7 +3,7 @@ name: hud-environment-builder
 description: >-
   Build and evaluate AI agents on RL environments with HUD. Use whenever
   someone wants to create an RL environment, benchmark, eval, or training task —
-  for a coding, computer-use, browser, or robotics agent — or run and grade tasks
+  for a coding, computer-use, or browser agent — or run and grade tasks
   across any model (Claude, OpenAI, Gemini, or open/self-hosted models). Also use
   it to review task quality and catch reward hacking, missing within-group reward
   spread, contaminated or public-benchmark substrate, single-shot tasks, and
@@ -65,7 +65,7 @@ env.workspace("/workspace")
 ```
 
 `ssh` (shell+files; `env.workspace(root)` runs the sandbox for you),
-`mcp`, `cdp` (browser), `rfb` (computer-use), `robot` (robot policies). Cite
+`mcp`, `cdp` (browser), `rfb` (computer-use). Cite
 [Environments](/v6/reference/environment) and
 [Capabilities](/v6/reference/capabilities).
 

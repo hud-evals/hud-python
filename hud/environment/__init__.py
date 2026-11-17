@@ -4,9 +4,7 @@
 framing (newline-delimited JSON-RPC 2.0), for a process that speaks it to the env.
 
 ``Environment`` itself is exported from ``hud``; ``hud.environment.server`` is the
-serving entry point hosts run. The robot runtime (``RobotBridge``,
-``RobotEndpoint``, ``DirectControl``, ``wrap``) lives in ``hud.environment.robot``;
-import it directly, since it needs the ``robot`` extra.
+serving entry point hosts run.
 """
 
 from __future__ import annotations

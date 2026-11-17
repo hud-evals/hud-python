@@ -19,7 +19,7 @@
   --tw-prose-td-borders: #27272a;
 }
 
-/* Sidebar page tags (e.g. the "Beta" pill on Robots): render quiet gray
+/* Sidebar page tags (e.g. a "Beta" pill): render quiet gray
    instead of the primary accent — informational, not a call to action. */
 .nav-tag-pill-text {
   color: #71717a !important;

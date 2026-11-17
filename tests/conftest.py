@@ -244,7 +244,6 @@ def write_files(root: Path, files: Mapping[str, bytes | str]) -> None:
 
 
 STEP_SCHEMA = "hud.step.v1"
-ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 
 
 def spans(trace_id: str | None, span_dir: Path | None = None) -> list[dict[str, Any]]:
@@ -267,7 +266,7 @@ def spans(trace_id: str | None, span_dir: Path | None = None) -> list[dict[str, 
 def steps(
     trace_id: str | None, span_dir: Path | None = None, *, schema: str = STEP_SCHEMA
 ) -> list[dict[str, Any]]:
-    """The step payloads of a run, in order; ``schema=ROBOT_STEP_SCHEMA`` for robot telemetry."""
+    """The step payloads of a run with the given schema, in order."""
     return [
         span["attributes"]["hud.payload"]
         for span in spans(trace_id, span_dir)
@@ -475,10 +474,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         ),
         "live": (lambda: real_hud_api_key() is not None, "needs HUD_API_KEY"),
         "modal": (lambda: real_modal_token() is not None, "needs a Modal account"),
-        "lerobot": (
-            lambda: importlib.util.find_spec("lerobot") is not None,
-            "needs lerobot[dataset]",
-        ),
     }
     available: dict[str, bool] = {}
     for item in items:

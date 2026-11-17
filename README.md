@@ -6,7 +6,7 @@
   </picture>
 </div>
 
-HUD is a platform for building RL environments for AI agents, across coding, browser, computer-use, and robotics. Define an environment, write tasks, and run them as evals across any model, at any scale.
+HUD is a platform for building RL environments for AI agents, across coding, browser, and computer-use. Define an environment, write tasks, and run them as evals across any model, at any scale.
 
 To learn more, see the [documentation](https://docs.hud.ai) and [environment reference](https://docs.hud.ai/v6/reference/environment).
 
@@ -55,7 +55,7 @@ HUD is **protocol-first**. An agent and an environment exchange just three thing
 sequenceDiagram
     participant Agent
     participant Env as Environment
-    participant Caps as Capabilities (ssh · mcp · cdp · rfb · robot)
+    participant Caps as Capabilities (ssh · mcp · cdp · rfb)
     Note over Env,Caps: environment holds & serves these
     Agent->>Env: hello
     Env-->>Agent: manifest (capabilities)
@@ -63,7 +63,7 @@ sequenceDiagram
     Env-->>Agent: prompt
     rect rgb(238,238,238)
     Note over Agent,Caps: the agent works, driving capabilities directly
-    Agent->>Caps: shell · browser · GUI · tools · robot
+    Agent->>Caps: shell · browser · GUI · tools
     Caps-->>Agent: observations
     end
     Agent->>Env: tasks.grade
@@ -109,7 +109,7 @@ Run it immediately against any model:
 hud eval tasks.py claude --group 3
 ```
 
-Each graded evaluation is a **trace** (the SDK's live handle is a `Run`). With `HUD_API_KEY` set, every rollout is recorded on [hud.ai](https://hud.ai). Tasks that need a shell, browser, GUI, or robot declare **capabilities** (below); everything else — variants, grading, batching — stays identical.
+Each graded evaluation is a **trace** (the SDK's live handle is a `Run`). With `HUD_API_KEY` set, every rollout is recorded on [hud.ai](https://hud.ai). Tasks that need a shell, browser, or GUI declare **capabilities** (below); everything else — variants, grading, batching — stays identical.
 
 → [Quickstart](https://docs.hud.ai/v6/start/quickstart) · [Tasks & tasksets](https://docs.hud.ai/v6/reference/tasks)
 
@@ -123,13 +123,12 @@ A **capability** is a connection the environment exposes; a **harness** attaches
 | **`mcp`** | Tools over the Model Context Protocol |
 | **`cdp`** | Browser control over the Chrome DevTools Protocol |
 | **`rfb`** | Full computer-use over VNC: screen + keyboard/mouse |
-| **`robot`** *(beta)* | Schema-driven robot observation/action loop over WebSocket |
 
 **Ships natively:** Claude, OpenAI (Responses), OpenAI-compatible endpoints, and Gemini via `create_agent("claude-sonnet-4-5")` (or `gpt-…`, `gemini-…`). The harness wires capability-backed tools for the model you choose at run time.
 
-**Bring your own:** a harness attaches to a capability and defines a tool spec — wrap `browser-use` on `cdp`, a VLA policy on `robot`, or your own agent on `ssh` / `mcp`. No protocol work required.
+**Bring your own:** a harness attaches to a capability and defines a tool spec — wrap `browser-use` on `cdp`, or your own agent on `ssh` / `mcp`. No protocol work required.
 
-→ [Capabilities](https://docs.hud.ai/v6/reference/capabilities) · [Models](https://docs.hud.ai/v6/reference/agents) · [Robots](https://docs.hud.ai/v6/advanced/robots)
+→ [Capabilities](https://docs.hud.ai/v6/reference/capabilities) · [Models](https://docs.hud.ai/v6/reference/agents)
 
 ## Deploy on the platform
 

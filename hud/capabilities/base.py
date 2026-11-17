@@ -184,24 +184,6 @@ class Capability:
             params["auth_token"] = auth_token
         return cls(name=name, protocol="mcp/2025-11-25", url=normalized, params=params)
 
-    @classmethod
-    def robot(
-        cls,
-        *,
-        name: str = "robot",
-        url: str,
-        contract: dict[str, Any],
-    ) -> Capability:
-        """``openpi/0`` — schema-driven action/observation loop over WebSocket.
-
-        ``contract`` is the env's self-describing config, passed verbatim through the
-        manifest: ``robot_type``, ``control_rate``, and ``features``, each declaring
-        its ``role`` (``"action"`` or ``"observation"``), layout and normalization
-        ``stats``.
-        """
-        normalized = normalize_url(url, default_scheme="ws", default_port=9091)
-        return cls(name=name, protocol="openpi/0", url=normalized, params={"contract": contract})
-
 
 class CapabilityClient(ABC):
     """Live connection to a ``Capability``; subclasses expose protocol-native methods."""
