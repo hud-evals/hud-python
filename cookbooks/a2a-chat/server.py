@@ -1,6 +1,6 @@
 """Serve a HUD chat task over the A2A protocol.
 
-A2A (and any other wire protocol) is a frontend over ``hud.Chat``: the
+A2A (and any other wire protocol) is a frontend over ``Chat`` (``chat.py``): the
 executor below translates A2A requests into ``chat.send()`` calls, keeping an
 independent ``Chat`` (and so an independent conversation) per A2A context.
 """
@@ -8,7 +8,6 @@ independent ``Chat`` (and so an independent conversation) per A2A context.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -24,20 +23,19 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
-    Artifact,
     Message,
     Part,
     Role,
-    TaskArtifactUpdateEvent,
     TaskState,
     TaskStatus,
     TaskStatusUpdateEvent,
     TextPart,
 )
 
-from hud import Chat, Task
-from hud.agents import create_agent
-from hud.agents.types import AgentStep
+from chat import Chat
+from hud import Task
+from hud.agents import ClaudeCLIAgent
+from hud.agents.types import ClaudeCLIConfig
 from hud.runtime import LocalRuntime, Runtime
 
 if TYPE_CHECKING:
@@ -46,7 +44,6 @@ if TYPE_CHECKING:
 
     from hud.agents import Agent
     from hud.runtime import Provider
-    from hud import Trace
 
 LOGGER = logging.getLogger("a2a_chat_server")
 
@@ -67,29 +64,6 @@ def _status_event(
             ),
         )
     return TaskStatusUpdateEvent(context_id=context_id, task_id=task_id, final=final, status=status)
-
-
-def _citations_event(context_id: str, task_id: str, trace: Trace) -> TaskArtifactUpdateEvent | None:
-    """Transport the final reply's citations as a structured artifact, if any."""
-    citations = trace.final(lambda s: s.citations if isinstance(s, AgentStep) else None)
-    if not citations:
-        return None
-    payload = {
-        "type": "hud_reply_metadata",
-        "citations": [c.model_dump(mode="json", exclude_none=True) for c in citations],
-        "data": None,
-    }
-    return TaskArtifactUpdateEvent(
-        context_id=context_id,
-        task_id=task_id,
-        append=False,
-        last_chunk=True,
-        artifact=Artifact(
-            artifact_id=str(uuid.uuid4()),
-            name="hud_reply_metadata",
-            parts=[Part(root=TextPart(text=json.dumps(payload)))],
-        ),
-    )
 
 
 class ChatExecutor(AgentExecutor):
@@ -130,9 +104,6 @@ class ChatExecutor(AgentExecutor):
             async with self._locks.setdefault(context_id, asyncio.Lock()):
                 result = await self._chat(context_id).send(message)
 
-            citations = _citations_event(context_id, task_id, result)
-            if citations is not None:
-                await event_queue.enqueue_event(citations)
             await event_queue.enqueue_event(
                 _status_event(
                     context_id,
@@ -195,9 +166,12 @@ def main() -> None:
 
     serve(
         Task(env=env_name, id=task_id),
-        create_agent(
-            os.getenv("HUD_MODEL", "claude-haiku-4-5"),
-            max_steps=int(os.getenv("HUD_MAX_STEPS", "50")),
+        ClaudeCLIAgent(
+            ClaudeCLIConfig(
+                model=os.getenv("HUD_MODEL", "claude-haiku-4-5"),
+                max_steps=int(os.getenv("HUD_MAX_STEPS", "50")),
+                gateway=True,
+            )
         ),
         runtime=placement,
         host=os.getenv("HUD_A2A_HOST", "0.0.0.0"),

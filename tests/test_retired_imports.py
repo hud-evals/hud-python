@@ -48,10 +48,7 @@ RETIRED = [
     ("hud", "SyncPlan", "hud.cli.tasksets"),
     ("hud", "instrument", "hud.telemetry"),
     ("hud", "TrainingClient", "hud.train"),
-    *[
-        ("hud.eval", name, "hud")
-        for name in ["Chat", "Grade", "Job", "Run", "Task", "Taskset", "Trace"]
-    ],
+    *[("hud.eval", name, "hud") for name in ["Grade", "Job", "Run", "Task", "Taskset", "Trace"]],
     ("hud.eval", "rollout", "hud.eval.run"),
     ("hud.eval", "SyncPlan", "hud.cli.tasksets"),
     *[("hud.eval", name, "hud.runtime") for name in RUNTIME_NAMES],

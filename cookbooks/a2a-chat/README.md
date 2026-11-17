@@ -3,12 +3,14 @@
 Serve a HUD chat task over the [A2A protocol](https://github.com/google/a2a),
 and talk to it from Python clients.
 
-`hud.Chat` is protocol-agnostic — these scripts are the protocol layer, kept
-outside the SDK on purpose. Copy and adapt them.
+`Chat` (`chat.py`) folds a chat-style task over a growing conversation and is
+protocol-agnostic. It and these scripts are kept outside the SDK on purpose.
+Copy and adapt them.
 
 | File | What it does |
 |------|--------------|
-| `server.py` | A2A server: one `Chat` (conversation) per A2A context, agent card, citations artifact |
+| `chat.py` | `Chat`: a conversation folded over a chat-style task, one rollout per turn |
+| `server.py` | A2A server: one `Chat` (conversation) per A2A context, agent card, Claude Code as the agent |
 | `client.py` | Minimal A2A client: send messages, print replies |
 | `llm_client.py` | LLM-fronted client: an OpenAI model decides when to call the A2A agent as a tool |
 | `chat_env.py` | Sample chat environment with `messages`-style tasks to serve |
@@ -26,7 +28,8 @@ uv run client.py            # plain client
 uv run llm_client.py        # LLM-fronted client
 ```
 
-Configuration is via env vars: `HUD_MODEL` picks the agent's model (gateway,
+The agent is Claude Code, so `claude` must be on your PATH. Configuration is via
+env vars: `HUD_MODEL` picks the agent's model (gateway,
 needs `HUD_API_KEY`), `HUD_TASK`/`HUD_ENV` pick the task row, `HUD_SOURCE`
 spawns a different env source, and `HUD_ENV_URL` attaches each turn to an
 already-served control channel (e.g. `hud serve chat_env.py` →
