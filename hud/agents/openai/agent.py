@@ -63,6 +63,10 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         OpenAIComputerTool,
         OpenAIMCPProxyTool,
     )
+    _removal_notice = (
+        "`OpenAIAgent` is deprecated and will be removed in hud v0.7.0, when agent type "
+        "`openai` runs `CodexCLIAgent`; use `CodexCLIAgent` (agent type `codex_cli`)."
+    )
 
     def __init__(self, config: OpenAIConfig | None = None) -> None:
         super().__init__(config)
