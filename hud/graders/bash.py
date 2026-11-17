@@ -18,7 +18,7 @@ class BashGrader(Grader):
 
     name = "BashGrader"
 
-    default_timeout: int = 600
+    default_timeout: float = 600
 
     @classmethod
     async def compute_score(
@@ -26,38 +26,24 @@ class BashGrader(Grader):
         command: str | None = None,
         cwd: str | None = None,
         timeout_seconds: float | None = None,
-        **kwargs: Any,
+        **unexpected: Any,
     ) -> SubScore:
         """Run ``command`` via ``bash -lc`` and score by exit code."""
+        if unexpected:
+            raise TypeError(f"BashGrader got unexpected arguments: {', '.join(sorted(unexpected))}")
         if command is None:
             raise ValueError("BashGrader requires command")
-        if timeout_seconds is None:
-            timeout_seconds = cls.default_timeout
-        del kwargs
-        logger.info(
-            "Running grader command: %s (cwd=%s, timeout=%ss)", command, cwd, timeout_seconds
+        timeout = cls.default_timeout if timeout_seconds is None else timeout_seconds
+        logger.info("Running grader command: %s (cwd=%s, timeout=%ss)", command, cwd, timeout)
+        process = await create_process_group_exec(
+            "/bin/bash",
+            "-lc",
+            command,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        try:
-            process = await create_process_group_exec(
-                "/bin/bash",
-                "-lc",
-                command,
-                cwd=cwd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            return SubScore(
-                name=cls.name,
-                value=0.0,
-                info={
-                    "exit_code": None,
-                    "stdout": "",
-                    "stderr": "/bin/bash not found",
-                    "timed_out": False,
-                },
-            )
-        result = await process.complete(max_wait=timeout_seconds)
+        result = await process.complete(max_wait=timeout)
         stdout = result.stdout.decode(errors="replace")
         stderr = result.stderr.decode(errors="replace")
         if result.timed_out:
@@ -69,13 +55,11 @@ class BashGrader(Grader):
                     "stdout": stdout,
                     "stderr": stderr,
                     "timed_out": True,
-                    "timeout": timeout_seconds,
+                    "timeout": timeout,
                 },
             )
-
-        returncode = result.returncode if result.returncode is not None else 1
         return SubScore(
             name=cls.name,
-            value=1.0 if returncode == 0 else 0.0,
-            info={"exit_code": returncode, "stdout": stdout, "stderr": stderr},
+            value=1.0 if result.returncode == 0 else 0.0,
+            info={"exit_code": result.returncode, "stdout": stdout, "stderr": stderr},
         )

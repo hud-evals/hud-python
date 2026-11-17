@@ -114,9 +114,8 @@ class EvaluationResult(BaseModel):
 class Grader:
     """Async base class for reusable graders.
 
-    Subclasses implement ``compute_score`` (async) and return a ``SubScore``.
-    The ``grade`` classmethod applies the caller's ``name`` override and
-    ``weight``, and records parameters in info for reproducibility.
+    Subclasses implement ``compute_score`` (async). ``grade`` runs it, applies the caller's
+    ``weight`` and optional ``name``, and records the call's parameters in ``info``.
     """
 
     name: str = "BaseGrader"
@@ -124,22 +123,19 @@ class Grader:
     @classmethod
     async def grade(cls, weight: float, name: str | None = None, **kwargs: Any) -> SubScore:
         """Run the grader and package the result as a ``SubScore``."""
-        result: Any = await cls.compute_score(**kwargs)
-        if isinstance(result, tuple):
-            score, info = result
-            result = SubScore(name=cls.name, value=float(score), info=info)
-        elif not isinstance(result, SubScore):
-            result = SubScore(name=cls.name, value=float(result))
-
-        return result.model_copy(
+        score = await cls.compute_score(**kwargs)
+        if not isinstance(score, SubScore):
+            value, info = score if isinstance(score, tuple) else (score, None)
+            score = SubScore(name=cls.name, value=float(value), info=info)
+        return score.model_copy(
             update={
                 "name": name or cls.name,
                 "weight": weight,
-                "info": {**(result.info or {}), "_parameters": json_safe_dict(kwargs)},
+                "info": {**(score.info or {}), "_parameters": json_safe_dict(kwargs)},
             }
         )
 
     @classmethod
-    async def compute_score(cls, **kwargs: Any) -> SubScore:
-        """Compute and describe a score between ``0.0`` and ``1.0``."""
+    async def compute_score(cls, **kwargs: Any) -> SubScore | float | tuple[float, dict[str, Any]]:
+        """Score between ``0.0`` and ``1.0``; a bare float or ``(float, info)`` is also accepted."""
         raise NotImplementedError("Subclasses must implement compute_score")

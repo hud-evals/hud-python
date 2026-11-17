@@ -7,11 +7,7 @@ icon: "scale-balanced"
 Graders turn an agent's answer into a reward. HUD ships reusable ones so you don't hand-build common scoring logic. Yield the result (a `float` or an `EvaluationResult`) as the task's second yield.
 
 ```python
-from hud.graders import (
-    BashGrader, LLMJudgeGrader, Grader,
-    SubScore, EvaluationResult,
-    combine,
-)
+from hud.graders import BashGrader, EvaluationResult, Grader, LLMJudgeGrader, SubScore, combine
 ```
 
 ## What grading scores
@@ -49,7 +45,7 @@ async def capital(country: str = "France"):
 
 ## `BashGrader`
 
-Runs a shell command via `/bin/bash -lc` and scores by exit code (`1.0` if it exits `0`). Async; returns a `SubScore`. Needs bash - macOS, Linux, WSL, or a built image; on native Windows it scores `0.0` with a `/bin/bash not found` error.
+Runs a shell command via `/bin/bash -lc` and scores by exit code (`1.0` if it exits `0`). Async; returns a `SubScore`. Needs `/bin/bash`: macOS, Linux, WSL, or a built image.
 
 ```python
 @env.template()
@@ -95,7 +91,7 @@ without a `MET` or `UNMET` verdict is a grading error.
 
 ## `combine` - compose multiple graders
 
-`combine` resolves `SubScore`s and grader coroutines in parallel and combines them into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties.
+`await combine(*items)` takes `SubScore`s and grader coroutines, runs the coroutines in parallel, and combines the results into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties. Repeated names get numeric suffixes (`BashGrader-1`, `BashGrader-2`).
 
 ```python
 @env.template()
@@ -108,11 +104,7 @@ async def composed(answer: str = ""):
     )
 ```
 
-| Function | Description |
-|----------|-------------|
-| `await combine(*items)` | Resolve `SubScore` / `Awaitable[SubScore]` in parallel → `EvaluationResult`. |
-
-The subscores appear in the trace, so a partial reward is legible. A `SubScore` can keep the subscores it was derived from on `children`, so a grading tree survives into the trace.
+Each subscore appears in the trace, so a partial reward is legible. A `SubScore` can keep the subscores it was derived from on `children`, so a grading tree survives into the trace.
 
 ## Custom graders
 
@@ -131,8 +123,8 @@ result = await LengthGrader.grade(weight=1.0, answer=answer, target=200)
 
 Use `info` for grader-specific details and `children` for nested results such as rubric
 verdicts. `grade` applies the caller's weight and optional name override, then records the call
-parameters under `_parameters`. Legacy float and `(float, info)` returns are still coerced to
-`SubScore` for backwards compatibility.
+parameters under `_parameters`. `compute_score` may also return a bare float or a `(float, info)`
+pair, which `grade` wraps in a `SubScore`.
 
 ## `SubScore` and `EvaluationResult`
 
