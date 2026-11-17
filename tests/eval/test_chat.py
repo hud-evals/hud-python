@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud import Chat, Environment, Task
-from hud.agents.base import Agent
+from hud.agents import Agent
 from hud.runtime import LocalRuntime
 from hud.types import ImageContent, TextContent
 

@@ -14,7 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 from browser_use import Agent as BrowserUse
 from browser_use import Browser, ChatAnthropic
 
-from hud.agents.base import Agent
+from hud.agents import Agent
 from hud.agents.types import AgentConfig, AgentStep
 from hud import Run
 

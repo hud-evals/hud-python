@@ -5,6 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, cast
 
+from hud.agents.base import Agent
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
@@ -61,6 +62,7 @@ _LAZY_EXPORTS = {
 }
 
 __all__ = [
+    "Agent",
     "ClaudeAgent",
     "ClaudeCLIAgent",
     "CodexCLIAgent",

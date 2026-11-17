@@ -23,7 +23,7 @@ work, and write the answer to `run.trace.content` (graded on exit):
 
 ```python harness.py
 from hud import Run
-from hud.agents.base import Agent
+from hud.agents import Agent
 
 class MyHarness(Agent):
     async def __call__(self, run: Run) -> None:
@@ -66,7 +66,7 @@ The `run` is the one object you work with for the whole task. Three things you d
 
 There are two base classes, depending on how much of HUD's loop you want:
 
-- **`Agent`** (`hud.agents.base`) - the bare seam above. Best for wrapping an external framework or a
+- **`Agent`** (`hud.agents`) - the bare seam above. Best for wrapping an external framework or a
   fully custom loop.
 - **`ToolAgent`** (`hud.agents.tool_agent`) - HUD's catalog-driven
   tool-call loop, the base every provider agent subclasses. Implement the provider hooks

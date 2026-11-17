@@ -128,7 +128,7 @@ For a provider key instead of the gateway, construct the agent directly.
 
 ## Agent
 
-Every agent implements the `Agent` base class (`hud.agents.base`): one abstract method,
+Every agent implements the `Agent` base class (`hud.agents`): one abstract method,
 `__call__(run: Run) -> None`. An agent drives the live [`Run`](/v6/reference/types#run) to completion,
 filling `run.trace` in place; the graded answer is `run.trace.content`. An agent is stateless per run -
 everything comes from `run` - so one instance drives many concurrent rollouts.

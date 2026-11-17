@@ -11,7 +11,7 @@ import mcp.types as mcp_types
 import pytest
 
 from hud import Environment, Task
-from hud.agents.base import Agent
+from hud.agents import Agent
 from hud.agents.types import AgentConfig
 from hud.capabilities import Connection
 from hud.eval.run import rollout
