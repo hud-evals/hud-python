@@ -45,12 +45,23 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
 
       - name: Install the agent CLIs
-        run: npm install --global @anthropic-ai/claude-code @openai/codex @earendil-works/pi-coding-agent@1.5.2
+        run: npm install --global @anthropic-ai/claude-code @openai/codex
 
       - name: Put Codex's native binary on PATH
         run: >-
           ln -sf "$(find "$(npm root -g)/@openai/codex" -path '*/vendor/*/bin/codex' -type f)"
           "$(command -v codex)"
+
+      # Pi's native build, the one a managed bundle carries; its npm build needs a newer
+      # Node than the runner may have.
+      - name: Install Pi
+        run: |
+          curl -fsSLO https://github.com/earendil-works/pi/releases/download/v1.5.2/pi-linux-x64.tar.gz
+          echo "811c6f2c9e7aaee252b5404252e556fb713aa209c1f7f924226aa77d4ef70cb5  pi-linux-x64.tar.gz" | sha256sum -c
+          # Under /usr, which a sandboxed workspace shows.
+          sudo tar xzf pi-linux-x64.tar.gz -C /usr/local/lib
+          sudo ln -sf /usr/local/lib/pi/pi /usr/local/bin/pi
+          pi --version
 
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

@@ -56,7 +56,8 @@ The SDK also ships HUD's older [provider agents](#provider-agents), which are de
   and `ClaudeCLIAgent` computer use over an `rfb` capability, need a POSIX workspace.
 - **The CLI.** `claude`, `codex` or `pi` must be installed in the workspace, unless the runtime
   provides a managed copy. Pi ships a native binary per platform on its GitHub releases, and the npm
-  package `@earendil-works/pi-coding-agent`.
+  package `@earendil-works/pi-coding-agent`, whose 1.5.2 release fails to start on Node 20 and on
+  Node 22 before 22.18.
 - **A model route.** In a sandboxed workspace the CLI never holds a model key. It reaches its model
   through the rollout's `inference` connection, which you can pass in `rollout(connections=...)`;
   otherwise `rollout` binds it to the gateway with `HUD_API_KEY` when the agent routes to the gateway
