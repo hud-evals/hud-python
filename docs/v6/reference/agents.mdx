@@ -47,6 +47,31 @@ workspaces and has no computer use yet.
 agent = create_agent("pi")
 ```
 
+`PiConfig.extensions` loads your own [Pi extensions](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md) into the run. It
+maps a file name (`*.ts` or `*.js`) to the extension's source, and Pi loads each one as it does
+extensions in its own config directory. An extension can register tools and hook Pi's events, such as
+`tool_call`, `tool_result` and `before_provider_request`. It can import the packages Pi provides
+(`@earendil-works/pi-coding-agent`, `typebox`, ...), but not npm dependencies of its own. Extensions
+an environment ships in its workspace's `.pi/extensions` load too. This one gives every `bash` call a
+two-minute timeout unless the model sets its own:
+
+```python
+BASH_TIMEOUT = """
+import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  pi.on("tool_call", (event) => {
+    if (isToolCallEventType("bash", event)) event.input.timeout ??= 120;
+  });
+}
+"""
+
+agent = PiAgent(PiConfig(extensions={"bash-timeout.ts": BASH_TIMEOUT}))
+```
+
+A hook that changes a tool's input changes what runs, while the trace keeps the arguments the model
+sent.
+
 The SDK also ships HUD's older [provider agents](#provider-agents), which are deprecated.
 
 ### What a CLI agent needs
@@ -78,6 +103,8 @@ request settings keep their names:
 | `completion_kwargs` (including `extra_body`) | `completion_kwargs`, merged over Pi's own request fields |
 | `system_prompt` | `system_prompt`, appended to Pi's system prompt |
 | `max_steps` | `max_steps` (unlimited by default; `hud eval` passes `--max-steps`) |
+| `tool_timeout_seconds` | An extension that sets `bash`'s `timeout` (above) |
+| none | `extensions`: your own Pi extensions, which add tools and hook Pi's events |
 | none | `model_info`: Pi's metadata for the model, such as `contextWindow`, `input: ["text", "image"]` for a vision model, and `compat` for a server's request quirks (for example `{"maxTokensField": "max_tokens"}`) |
 
 Before:
@@ -107,8 +134,8 @@ In `.hud_eval.toml`, rename the `[openai_compatible]` section to `[pi]` and move
 workspace, so it needs an `ssh` workspace; an environment with only MCP tools still needs
 `openai_compatible`. Pi reaches only streamable-HTTP MCP servers, where `OpenAIChatAgent` also
 reached SSE and websocket ones. Pi records no token ids or logprobs, so training rollouts stay on
-`OpenAIChatAgent` (`completion_kwargs` with `return_token_ids` is refused). `tool_timeout_seconds`,
-`stop_on` and `auto_respond` have no Pi equivalent.
+`OpenAIChatAgent` (`completion_kwargs` with `return_token_ids` is refused). `stop_on` and
+`auto_respond` have no Pi equivalent.
 
 ## Create agent
 

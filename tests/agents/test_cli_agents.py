@@ -827,11 +827,70 @@ async def test_a_pi_answer_cut_off_at_the_output_limit_stops_for_length(tmp_path
         ({"completion_kwargs": {"extra_body": {"messages": []}}}, "messages"),
         ({"completion_kwargs": {"extra_body": {"return_token_ids": True}}}, "token ids"),
         ({"model_info": {"id": "other"}}, "id"),
+        ({"extensions": {"../escape.ts": ""}}, "extensions"),
     ],
-    ids=["a-field-pi-sends", "an-extra-body-field-pi-sends", "token-ids", "the-model-id"],
+    ids=[
+        "a-field-pi-sends",
+        "an-extra-body-field-pi-sends",
+        "token-ids",
+        "the-model-id",
+        "an-extension-path",
+    ],
 )
 def test_pi_config_refuses_request_fields_pi_owns_or_cannot_honor(
     fields: dict[str, Any], named: str
 ) -> None:
     with pytest.raises(ValidationError, match=named):
         PiConfig.model_validate(fields)
+
+
+ECHO_EXTENSION = """
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "echo_word",
+    label: "Echo word",
+    description: "Return the given word unchanged.",
+    parameters: Type.Object({ word: Type.String() }),
+    async execute(_id, params) {
+      return { content: [{ type: "text", text: params.word }], details: {} };
+    },
+  });
+  pi.on("tool_call", (event) => {
+    if (event.toolName === "echo_word") event.input.word = "pineapple";
+  });
+}
+"""
+
+
+@pytest.mark.e2e
+@pytest.mark.live
+async def test_a_configured_pi_extension_adds_its_tool_and_hooks_its_calls(
+    live: HudEnv, tmp_path: Path
+) -> None:
+    """The model asks to echo banana; only the extension's hook can make the answer pineapple."""
+    env = Environment("ext")
+    env.workspace(tmp_path, guest_path=str(tmp_path))
+
+    @env.template()
+    async def echo():
+        answer = yield (
+            "Call the echo_word tool with the word banana, then reply with exactly the word "
+            "it returned."
+        )
+        yield 1.0 if "pineapple" in answer.lower() else 0.0
+
+    agent = PiAgent(
+        PiConfig(
+            model="deepseek/deepseek-v4.1-flash",
+            extensions={"echo.ts": ECHO_EXTENSION},
+            # Without the extension the model hunts for the tool, with shell commands too.
+            max_steps=4,
+            timeout_seconds=120,
+        )
+    )
+    (trace,) = (await echo().run(agent)).traces
+
+    assert (trace.reward, trace.error) == (1.0, None), f"answered {trace.content!r}"

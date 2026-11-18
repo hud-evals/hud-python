@@ -46,6 +46,8 @@ ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 # A name a shell assignment accepts.
 EnvironmentName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+# A single-file pi extension.
+PiExtensionFile = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]+\.(ts|js)$")]
 
 
 class AgentConfig(BaseModel):
@@ -258,6 +260,10 @@ class PiConfig(AgentConfig):
     # ``input`` (add "image" for a vision model), ``reasoning`` and ``compat`` (the
     # served model's request quirks).
     model_info: dict[str, Any] = Field(default_factory=dict)
+    # Pi extensions, by file name to source, loaded like extensions in pi's own agent
+    # directory: they can register tools and hook pi's events (``tool_call``,
+    # ``tool_result``, ``before_provider_request``, ...). They import only what pi provides.
+    extensions: dict[PiExtensionFile, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_request_fields(self) -> Self:

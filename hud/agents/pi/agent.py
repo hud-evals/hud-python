@@ -270,6 +270,11 @@ class PiAgent(CLIAgent[PiConfig]):
             # A file, since pi reads a value naming an existing file as that file.
             files["system.md"] = self.config.system_prompt
             cli += ' --append-system-prompt "$pi_home/system.md"'
+        # Pi discovers the extensions in its agent directory; the step limit stays outside it,
+        # so no configured extension can replace it.
+        files.update(
+            {f"extensions/{name}": source for name, source in self.config.extensions.items()}
+        )
         if self.config.max_steps > 0:
             files["max-steps.js"] = _MAX_STEPS_EXTENSION % self.config.max_steps
             cli += ' --extension "$pi_home/max-steps.js"'
@@ -279,6 +284,8 @@ class PiAgent(CLIAgent[PiConfig]):
         if connection is None:
             statements.append("trap 'rm -rf -- \"$pi_home\"' EXIT")
         statements.append('export PI_CODING_AGENT_DIR="$pi_home"')
+        if self.config.extensions:
+            statements.append('mkdir "$pi_home/extensions"')
         statements.extend(
             f'printf %s {shlex.quote(body)} > "$pi_home/{name}"' for name, body in files.items()
         )
