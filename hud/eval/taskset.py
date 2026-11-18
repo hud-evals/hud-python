@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from hud.agents.base import Agent
-    from hud.runtime.core import Provider, Runtime
+    from hud.runtime.core import Provider, Runtime, RuntimeConfig
     from hud.types import Trace
 
 logger = logging.getLogger("hud.eval.taskset")
@@ -137,9 +137,9 @@ class Taskset:
         data = [task.model_dump(mode="json", exclude_none=True, context=context) for task in self]
 
         if target.suffix == ".json":
-            target.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
+            target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         else:
-            lines = (json.dumps(entry, default=str) for entry in data)
+            lines = (json.dumps(entry) for entry in data)
             target.write_text("\n".join(lines) + ("\n" if data else ""), encoding="utf-8")
         return target
 
@@ -274,26 +274,22 @@ class Taskset:
         group = (job.group if job else 1) if group is None else group
         if group < 1:
             raise ValueError("group must be >= 1")
-        for task in task_list:
+
+        def runtime_config(row: Task) -> RuntimeConfig | None:
             if isinstance(placement, HostedRuntime):
-                actor_runtime_config = task.runtime_config
-                verifier_runtime_config = (
-                    task.verifier.runtime_config if task.verifier is not None else None
-                )
-            else:
-                assert placement is not None
-                actor_runtime_config = resolve_runtime_config(placement, task)
-                verifier_runtime_config = (
-                    resolve_runtime_config(placement, task.verifier)
-                    if task.verifier is not None
-                    else None
-                )
+                return row.runtime_config
+            assert placement is not None
+            return resolve_runtime_config(placement, row)
+
+        for task in task_list:
             validate_rollout_timeouts(
                 task,
                 agent,
                 rollout_timeout,
-                actor_runtime_config=actor_runtime_config,
-                verifier_runtime_config=verifier_runtime_config,
+                actor_runtime_config=runtime_config(task),
+                verifier_runtime_config=(
+                    runtime_config(task.verifier) if task.verifier is not None else None
+                ),
             )
 
         # A task's repeats share a group_id (the GRPO group).
@@ -311,13 +307,13 @@ class Taskset:
             )
             await job_enter(job.id, name=job.name, group=group, taskset_id=self.taskset_id)
         job_id = job.id
-        sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
+        limit = asyncio.Semaphore(max_concurrent) if max_concurrent else contextlib.nullcontext()
 
-        async def _run(task: Task, group_id: str) -> list[Trace]:
+        async def _one(task: Task, group_id: str) -> Trace:
             assert placement is not None
-            if isinstance(placement, HostedRuntime):
-                return [
-                    await hosted_rollout(
+            async with limit:
+                if isinstance(placement, HostedRuntime):
+                    return await hosted_rollout(
                         placement,
                         task,
                         agent,
@@ -325,9 +321,7 @@ class Taskset:
                         group_id=group_id,
                         rollout_timeout=rollout_timeout,
                     )
-                ]
-            return [
-                await rollout(
+                return await rollout(
                     task,
                     agent,
                     runtime=placement,
@@ -335,13 +329,6 @@ class Taskset:
                     group_id=group_id,
                     rollout_timeout=rollout_timeout,
                 )
-            ]
-
-        async def _one(task: Task, group_id: str) -> list[Trace]:
-            if sem is None:
-                return await _run(task, group_id)
-            async with sem:
-                return await _run(task, group_id)
 
         logger.info(
             "running %d rollouts (%d tasks x %d group)%s",
@@ -354,8 +341,8 @@ class Taskset:
             # A pooled placement such as Shared lives for this call unless already open.
             if isinstance(placement, contextlib.AbstractAsyncContextManager):
                 await stack.enter_async_context(placement)
-            parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-        job.traces.extend(trace for part in parts for trace in part)
+            traces = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
+        job.traces.extend(traces)
         # flush waits for in-flight uploads; the timeout only caps a wedged network.
         if not await asyncio.to_thread(flush, timeout=120.0):
             logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")
