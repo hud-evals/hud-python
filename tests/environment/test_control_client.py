@@ -6,20 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import ClassVar, Self
 from urllib.parse import urlsplit
 
 import pytest
 
-from hud.capabilities import (
-    Capability,
-    CapabilityClient,
-    find_capability,
-    open_client,
-    register_client,
-)
+from hud.capabilities import find_capability
 from hud.runtime import Runtime
-from tests.clients.conftest import Action, control_peer
+from tests.fixtures.control_peer import Action, control_peer
 
 HELLO = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
 BINDINGS = [
@@ -28,24 +21,6 @@ BINDINGS = [
     {"name": "screen-1", "protocol": "rfb/3.8", "url": "rfb://environment:5901"},
     {"name": "custom", "protocol": "custom/1", "url": "tcp://environment:7000"},
 ]
-
-
-@register_client
-class EchoClient(CapabilityClient):
-    """A client for a protocol the SDK does not know, registered the way a harness package would."""
-
-    protocol: ClassVar[str] = "echo/1"
-
-    def __init__(self, capability: Capability) -> None:
-        self.capability = capability
-        self.closed = False
-
-    @classmethod
-    async def connect(cls, cap: Capability) -> Self:
-        return cls(cap)
-
-    async def close(self) -> None:
-        self.closed = True
 
 
 @pytest.mark.parametrize("immediately", [True, False], ids=["on-accept", "during-hello"])
@@ -156,21 +131,3 @@ async def test_a_stream_the_env_refuses_ends_the_local_connection() -> None:
         writer.close()
 
     assert received == b""
-
-
-async def test_a_registered_client_class_opens_its_protocols_capabilities() -> None:
-    echo = Capability(name="echo", protocol="echo/1", url="tcp://environment:7100")
-    async with open_client(echo) as opened:
-        assert isinstance(opened, EchoClient)
-        assert not opened.closed
-
-    assert (opened.capability.name, opened.closed) == ("echo", True)
-
-
-def test_a_second_client_class_for_a_registered_protocol_is_refused() -> None:
-    class OtherEchoClient(EchoClient):
-        pass
-
-    with pytest.raises(ValueError, match=r"'echo/1' is already registered to .*\.EchoClient"):
-        register_client(OtherEchoClient)
-    assert register_client(EchoClient) is EchoClient

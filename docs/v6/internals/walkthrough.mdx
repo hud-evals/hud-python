@@ -463,7 +463,7 @@ for every binding and records the routed local URL, so all capability traffic re
 control address. An optional `session_id` attaches to an open session instead of opening a fresh one;
 the [suspended task](/v6/internals/control-channel#the-suspended-task) section describes that path.
 
-```python hud/clients/client.py · HudClient.hello
+```python hud/environment/client.py · HudClient.hello
 async def hello(self, session_id=None):
     params = {} if session_id is None else {"session_id": session_id}
     result = await self._call("hello", params)      # -> server session
@@ -510,7 +510,7 @@ if raw_prompt is not None:
     run.trace.record(Step(source="user", messages=prompt))
 ```
 
-```python hud/clients/client.py · HudClient.start_task
+```python hud/environment/client.py · HudClient.start_task
 async def start_task(self, task_id, args=None):
     return await self._call("tasks.start", {"id": task_id, "args": args or {}})
 ```

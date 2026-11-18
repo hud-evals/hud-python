@@ -182,7 +182,7 @@ the client creates one loopback forwarder for every returned binding. Each
 forwarder accepts local connections, opens a `tunnel.open` connection to the
 control endpoint, and splices the local client to that tunnel.
 
-```python hud/clients/client.py · HudClient.hello
+```python hud/environment/client.py · HudClient.hello
 bindings = [Capability.from_manifest(binding) for binding in result["bindings"]]
 
 for capability in bindings:

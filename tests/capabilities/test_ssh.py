@@ -20,8 +20,8 @@ from hud import Environment, Task
 from hud.capabilities import SSHClient, find_capability, open_client
 from hud.runtime import LocalRuntime, Runtime
 from tests.capabilities.conftest import relayed
-from tests.clients.conftest import Action, control_peer
 from tests.conftest import eventually
+from tests.fixtures.control_peer import Action, control_peer
 from tests.fixtures.relay import FlakyRelay, relay
 
 if TYPE_CHECKING:

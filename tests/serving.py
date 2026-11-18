@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from hud.clients import HudClient
+from hud.environment.client import HudClient
 from hud.environment.server import bind
 from hud.runtime import Runtime
 

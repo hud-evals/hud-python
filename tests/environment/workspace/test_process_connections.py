@@ -25,8 +25,7 @@ import pytest
 
 from hud import Environment, Task
 from hud.capabilities import Connection, SSHClient, find_capability, open_client
-from hud.clients import HudProtocolError
-from hud.environment import process_guard
+from hud.environment import HudProtocolError, process_guard
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT, Peer, WorkspaceRoute
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.runtime import LocalRuntime

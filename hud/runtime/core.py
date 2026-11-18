@@ -20,12 +20,12 @@ from pydantic import (
     model_validator,
 )
 
-from hud.clients.client import HudClient
-from hud.clients.dial import dialer
+from hud.environment.client import HudClient
 from hud.environment.session import validate_session_id
 from hud.environment.utils import HudProtocolError
 
 from .compose import ComposeProject
+from .dial import dialer
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence

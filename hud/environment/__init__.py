@@ -18,7 +18,7 @@ from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
 from .session import session_state_dir
-from .utils import error, read_frame, reply, send_frame
+from .utils import HudProtocolError, error, read_frame, reply, send_frame
 from .workspace import Mount, Workspace
 
 
@@ -94,6 +94,7 @@ def load_environment(
 
 __all__ = [
     "Answer",
+    "HudProtocolError",
     "Mount",
     "Workspace",
     "error",

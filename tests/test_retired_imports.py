@@ -15,7 +15,8 @@ from importlib import import_module
 import pytest
 
 from hud import Environment, Task
-from hud.clients import HudClient, connect
+from hud.clients import connect
+from hud.environment.client import HudClient
 from hud.runtime import SubprocessRuntime
 from hud.utils.exceptions import HudDeprecationWarning
 
@@ -43,6 +44,8 @@ RETIRED = [
     ("hud", "Connection", "hud.capabilities"),
     ("hud", "connect", "hud.clients"),
     ("hud.clients", "register_client", "hud.capabilities"),
+    ("hud.clients", "HudProtocolError", "hud.environment"),
+    *[("hud.clients", name, "hud.environment.client") for name in ["HudClient", "Manifest"]],
     ("hud", "SyncPlan", "hud.cli.tasksets"),
     ("hud", "instrument", "hud.telemetry"),
     ("hud", "TrainingClient", "hud.train"),

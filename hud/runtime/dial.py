@@ -21,7 +21,7 @@ from websockets.exceptions import ConnectionClosedOK, InvalidStatus
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
 
-LOGGER = logging.getLogger("hud.clients")
+LOGGER = logging.getLogger("hud.runtime")
 
 Streams = tuple[asyncio.StreamReader, asyncio.StreamWriter]
 
