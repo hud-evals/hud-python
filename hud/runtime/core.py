@@ -8,7 +8,7 @@ import json
 import logging
 import math
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
 
 from pydantic import (
@@ -23,6 +23,7 @@ from pydantic import (
 from hud.environment.client import HudClient
 from hud.environment.session import validate_session_id
 from hud.environment.utils import HudProtocolError
+from hud.utils.deprecation import warn_retired_member
 
 from .compose import ComposeProject
 from .dial import dialer
@@ -169,18 +170,32 @@ class Runtime:
     sends ``headers`` with its handshake. ``config`` is the runtime configuration its
     provider applied. Constructed directly, a runtime is also a provider that yields itself
     and leaves teardown to whoever provisioned the host.
+
+    ``params`` is v0.6.23's untyped form of ``ready_timeout`` and ``headers``, accepted with
+    a warning until hud v0.7.0.
     """
 
     url: str
-    ready_timeout: float = READY_TIMEOUT_SECONDS
+    params: InitVar[Mapping[str, Any] | None] = None
     config: RuntimeConfig | None = None
-    headers: Mapping[str, str] = field(default_factory=dict)
+    ready_timeout: float = field(default=READY_TIMEOUT_SECONDS, kw_only=True)
+    headers: Mapping[str, str] = field(default_factory=dict, kw_only=True)
 
     # Whether ``snapshot_session`` can export a control session for another runtime to
     # restore. Without it, a verifier must run beside the actor.
     transports_sessions: ClassVar[bool] = False
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, params: Mapping[str, Any] | None) -> None:
+        if params is not None:
+            warn_retired_member(
+                "Runtime", "params", "pass `ready_timeout` and `headers` instead", stacklevel=4
+            )
+            if (ready_timeout := params.get("ready_timeout")) is not None:
+                if isinstance(ready_timeout, bool) or not isinstance(ready_timeout, int | float):
+                    raise ValueError("Runtime params['ready_timeout'] must be a number of seconds")
+                object.__setattr__(self, "ready_timeout", float(ready_timeout))
+            if (headers := params.get("headers")) is not None:
+                object.__setattr__(self, "headers", dict(headers))
         if not 0 < self.ready_timeout < math.inf:
             raise ValueError("Runtime ready_timeout must be a positive, finite number of seconds")
 

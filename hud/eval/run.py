@@ -15,15 +15,19 @@ from pydantic import ValidationError
 
 from hud.agents.cli import CLIAgent
 from hud.agents.types import AgentConfig
+from hud.capabilities.base import find_capability
 from hud.capabilities.connection import Connection
 from hud.capabilities.mcp import get_mcp_trace_id
+from hud.capabilities.registry import open_client
+from hud.environment.client import Manifest
 from hud.environment.utils import HudProtocolError
 from hud.graders.base import Grade, grade_problems
 from hud.runtime.core import resolve_runtime_config
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
-from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
+from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace, text_of
+from hud.utils.deprecation import warn_retired_member
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -34,7 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
 
     from hud.agents.base import Agent
-    from hud.capabilities.base import Capability
+    from hud.capabilities.base import Capability, CapabilityClient
     from hud.environment.egress import WorkspaceRoute
     from hud.environment.file_tracker import FileTrackingOp
     from hud.runtime.core import Provider, RuntimeConfig
@@ -215,6 +219,94 @@ class Run:
     capabilities: list[Capability]
     connections: dict[str, Connection] = field(default_factory=dict)
     trace: Trace = field(default_factory=Trace)
+    _v0623: _V0623Run | None = field(default=None, kw_only=True, repr=False, compare=False)
+
+    # v0.6.23's members, served with a warning until hud v0.7.0 removes them.
+
+    @property
+    def prompt_messages(self) -> list[PromptMessage]:
+        warn_retired_member("Run", "prompt_messages", "read `run.prompt`")
+        return self.prompt
+
+    @property
+    def prompt_text(self) -> str:
+        warn_retired_member("Run", "prompt_text", "use `hud.types.text_of(run.prompt)`")
+        return text_of(self.prompt)
+
+    def record(self, step: Step) -> None:
+        warn_retired_member("Run", "record", "call `run.trace.record(step)`")
+        self.trace.record(step)
+
+    @property
+    def client(self) -> _V0623Client:
+        warn_retired_member(
+            "Run",
+            "client",
+            "find a capability in `run.capabilities` with `hud.capabilities.find_capability` "
+            "and open it with `hud.capabilities.open_client`",
+        )
+        return _V0623Client(self, self._started("client"))
+
+    @property
+    def task_id(self) -> str:
+        warn_retired_member("Run", "task_id", "read the id from the task you ran")
+        return self._started("task_id").task_id
+
+    @property
+    def bindings(self) -> dict[str, dict[str, Any]]:
+        warn_retired_member(
+            "Run", "bindings", "read the episode's data from its capability in `run.capabilities`"
+        )
+        return self._started("bindings").bindings
+
+    @property
+    def runtime_config(self) -> RuntimeConfig | None:
+        warn_retired_member(
+            "Run", "runtime_config", "read the runtime config from the task or its provider"
+        )
+        return self._started("runtime_config").runtime_config
+
+    def _started(self, member: str) -> _V0623Run:
+        if self._v0623 is None:
+            raise AttributeError(f"Run.{member} exists only on a run that start_run yields")
+        return self._v0623
+
+
+@dataclass
+class _V0623Run:
+    """What v0.6.23's ``Run`` members read, until hud v0.7.0 removes them."""
+
+    task_id: str
+    session_id: str
+    bindings: dict[str, dict[str, Any]]
+    runtime_config: RuntimeConfig | None
+    opened: dict[str, CapabilityClient] = field(default_factory=dict)
+    clients: contextlib.AsyncExitStack = field(default_factory=contextlib.AsyncExitStack)
+
+
+class _V0623Client:
+    """v0.6.23's ``run.client``, as far as an agent used it: the manifest, and finding and
+    opening capabilities. Clients it opens close when the agent's access ends."""
+
+    def __init__(self, run: Run, started: _V0623Run) -> None:
+        self._run = run
+        self._started = started
+
+    @property
+    def manifest(self) -> Manifest:
+        bindings = [replace(cap, url=cap.env_url) for cap in self._run.capabilities]
+        return Manifest(self._started.session_id, bindings)
+
+    def binding(self, ref: str) -> Capability:
+        return find_capability(self._run.capabilities, ref)
+
+    async def open(self, ref: str) -> CapabilityClient:
+        capability = self.binding(ref)
+        client = self._started.opened.get(capability.name)
+        if client is None:
+            client = await self._started.clients.enter_async_context(open_client(capability))
+            self._started.opened[capability.name] = client
+        return client
 
 
 @asynccontextmanager
@@ -225,11 +317,13 @@ async def start_run(
     *,
     connections: Sequence[Connection] = (),
     best_effort_grade: bool = False,
+    runtime_config: RuntimeConfig | None = None,
 ) -> AsyncGenerator[Run]:
     """Start ``task_id`` on ``session`` and yield the agent's ``Run``.
 
     When the block exits, the agent's access ends, file tracking takes its final capture,
     and the trace is graded: best-effort if the block failed, not at all if it was cancelled.
+    ``runtime_config`` is what the deprecated ``Run.runtime_config`` reports.
     """
     trace = Trace()
     started = await _start(session, task_id, args, trace)
@@ -239,11 +333,13 @@ async def start_run(
         if raw_prompt is None or isinstance(raw_prompt, str)
         else [message for item in raw_prompt for message in _prompt_messages(item)]
     )
+    v0623 = _V0623Run(task_id, session.session_id, started.get("bindings") or {}, runtime_config)
     run = Run(
         prompt,
         _episode_capabilities(session.capabilities, started),
         {connection.name: connection for connection in connections},
         trace,
+        _v0623=v0623,
     )
     if raw_prompt is not None:
         trace.record(Step(source="user", messages=prompt))
@@ -254,6 +350,7 @@ async def start_run(
             finally:
                 # Access ends before the final file capture, which ends before grading.
                 run.connections.clear()
+                await v0623.clients.aclose()
                 await session.revoke()
     except (asyncio.CancelledError, KeyboardInterrupt):
         trace.status = "error" if trace.stop_reason == "timeout" else "cancelled"
@@ -445,6 +542,7 @@ async def rollout(
                         task.args,
                         connections=bound,
                         best_effort_grade=task.verifier is not None,
+                        runtime_config=addr.config or actor_runtime_config,
                     ) as live:
                         run = live  # set once live; earlier failures yield Trace.failed
                         run.trace.runtime = addr.url
