@@ -203,15 +203,26 @@ async def test_a_cli_run_that_reaches_its_turn_limit_stops_at_max_steps(tmp_path
 
 
 @BACKINGS
+@pytest.mark.parametrize(
+    ("cli", "agent", "config"),
+    [
+        pytest.param("claude", ClaudeCLIAgent, {}, id="claude_cli"),
+        pytest.param("pi", PiAgent, {"model_info": {"input": ["text", "image"]}}, id="pi"),
+    ],
+)
 async def test_the_cli_drives_the_screen_through_the_computer_bridge(
-    backing: dict[str, Any], tmp_path: Path
+    cli: str,
+    agent: type[Agent],
+    config: dict[str, Any],
+    backing: dict[str, Any],
+    tmp_path: Path,
 ) -> None:
     actions: list[dict[str, Any]] = [
         {"action": "left_click", "coordinate": [3, 4]},
         {"action": "frobnicate"},
     ]
     stub = clis.Stub(
-        tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"), computer=actions
+        tmp_path / "ws" / ".stub", cli, stdout=clis.answer(cli, "done"), computer=actions
     )
     stub.install()
 
@@ -222,7 +233,7 @@ async def test_the_cli_drives_the_screen_through_the_computer_bridge(
             capabilities=(Capability.rfb(url=screen.url),),
             **backing,
         )
-        (trace,) = (await task().run(ClaudeCLIAgent())).traces
+        (trace,) = (await task().run(agent(agent.config_cls(**config)))).traces
 
     (capture,) = stub.captures()
     assert trace.status == "completed"
@@ -234,6 +245,21 @@ async def test_the_cli_drives_the_screen_through_the_computer_bridge(
         (3, 4, 1),
         (3, 4, 0),
     ]
+
+
+async def test_pi_on_a_text_only_model_is_refused_a_screen(tmp_path: Path) -> None:
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "pi", stdout=clis.answer("pi", "done"))
+    stub.install()
+
+    async with fake_screen() as screen:
+        task = workspace_task(
+            tmp_path / "ws", env=stub.shell_env(), capabilities=(Capability.rfb(url=screen.url),)
+        )
+        (trace,) = (await task().run(PiAgent())).traces
+
+    assert trace.status == "error" and trace.error is not None
+    assert 'model_info["input"]' in trace.error
+    assert stub.captures() == []
 
 
 @UNSANDBOXED

@@ -19,10 +19,10 @@ from hud.agents.cli import (
     resolve_executable,
     run_jsonl,
 )
+from hud.agents.computer import mcp as computer_mcp
 from hud.agents.types import ClaudeCLIConfig
 from hud.utils.time import now_iso
 
-from . import computer_mcp
 from .events import ClaudeEvents
 
 if TYPE_CHECKING:

@@ -245,6 +245,8 @@ class PiConfig(AgentConfig):
     request body, with ``extra_body`` entries at the top level. ``model_info`` holds Pi's
     ``models.json`` fields for ``model``, such as ``contextWindow``, ``input`` and ``compat``.
     ``extensions`` maps a file name to the source of a Pi extension loaded into the run.
+    Each ``rfb`` screen becomes a ``computer`` MCP tool, so ``model_info["input"]`` must
+    include ``"image"`` when the environment has one.
     """
 
     model_name: str = "Pi"
@@ -255,6 +257,7 @@ class PiConfig(AgentConfig):
     checkpoint: str | None = None
     model_info: dict[str, Any] = Field(default_factory=dict)
     extensions: dict[PiExtensionFile, str] = Field(default_factory=dict)
+    screenshot_encoding: ScreenshotEncoding = Field(default_factory=PngScreenshotEncoding)
 
     @model_validator(mode="after")
     def _check_token_ids(self) -> Self:

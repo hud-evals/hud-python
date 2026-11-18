@@ -103,21 +103,25 @@ def drive_computer(server, actions):
 
 
 
-# The url and headers this CLI was configured with for MCP server ``name``: pi reads
-# mcp.json from its agent directory, Claude Code its --mcp-config file, codex -c overrides.
+# The entry for MCP server ``name`` in this CLI's config file, if it has one: pi reads
+# mcp.json from its agent directory, Claude Code its --mcp-config file.
+def configured_server(name):
+    home = os.environ.get("PI_CODING_AGENT_DIR")
+    path = os.path.join(home, "mcp.json") if home else ".hud_mcp_config.json"
+    return json.load(open(path))["mcpServers"][name] if os.path.exists(path) else None
+
+
+# The url and headers this CLI was configured with for MCP server ``name``; codex takes
+# its servers as -c overrides. Pi expands ${{VAR}} in headers.
 def mcp_server(name):
     import re
 
-    home = os.environ.get("PI_CODING_AGENT_DIR")
-    if home and os.path.exists(os.path.join(home, "mcp.json")):
-        server = json.load(open(os.path.join(home, "mcp.json")))["mcpServers"][name]
+    server = configured_server(name)
+    if server is not None:
         return server["url"], {{
             key: re.sub(r"\\$\\{{(\\w+)\\}}", lambda m: os.environ[m.group(1)], value)
             for key, value in server.get("headers", {{}}).items()
         }}
-    if os.path.exists(".hud_mcp_config.json"):
-        server = json.load(open(".hud_mcp_config.json"))["mcpServers"][name]
-        return server["url"], server.get("headers", {{}})
     prefix = "mcp_servers." + name + "."
     config = {{}}
     for flag, value in zip(sys.argv[1:], sys.argv[2:]):
@@ -165,8 +169,7 @@ def call_mcp_tool(name, tool, arguments):
 
 
 if behavior.get("computer"):
-    servers = json.load(open(".hud_mcp_config.json"))["mcpServers"]
-    record["computer"] = drive_computer(servers["computer-use"], behavior["computer"])
+    record["computer"] = drive_computer(configured_server("computer-use"), behavior["computer"])
 
 if behavior.get("mcp"):
     record["mcp"] = [call_mcp_tool(**call) for call in behavior["mcp"]]

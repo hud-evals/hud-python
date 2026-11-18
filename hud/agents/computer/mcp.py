@@ -1,4 +1,4 @@
-"""MCP server that exposes computer-use over VNC."""
+"""The computer-use MCP server, bridged into a CLI agent's workspace over SSH."""
 
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ async def bridge_computer_mcp(
 ) -> AsyncGenerator[dict[str, Any]]:
     """Bridge a controller-side computer MCP process into a remote POSIX shell."""
     if shell in WINDOWS_SHELLS:
-        raise RuntimeError("ClaudeCLIAgent computer use requires a POSIX workspace")
+        raise RuntimeError(f"computer use needs a POSIX workspace, not a {shell} shell")
 
     token = secrets.token_hex(16)
     request = shlex.quote(str(_REMOTE_TMP / f"hud-computer-{token}.request"))
@@ -140,7 +140,7 @@ async def bridge_computer_mcp(
         local = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
-            "hud.agents.claude.cli.computer_mcp",
+            "hud.agents.computer.mcp",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
