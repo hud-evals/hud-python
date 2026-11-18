@@ -46,6 +46,7 @@ ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 # A name a shell assignment accepts.
 EnvironmentName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+PiExtensionFile = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]+\.(ts|js)$")]
 
 
 class AgentConfig(BaseModel):
@@ -234,6 +235,43 @@ class CodexCLIConfig(AgentConfig):
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     # Maps to ``model_reasoning_effort``; unset leaves the CLI's own default.
     reasoning_effort: CodexReasoningEffort | None = None
+
+
+class PiConfig(AgentConfig):
+    """Pi calls ``model`` over Chat Completions: through the HUD gateway, or at
+    ``OPENAI_BASE_URL`` with ``OPENAI_API_KEY``.
+
+    ``system_prompt`` is appended to Pi's own. ``completion_kwargs`` is merged into every
+    request body, with ``extra_body`` entries at the top level. ``model_info`` holds Pi's
+    ``models.json`` fields for ``model``, such as ``contextWindow``, ``input`` and ``compat``.
+    ``extensions`` maps a file name to the source of a Pi extension loaded into the run.
+    """
+
+    model_name: str = "Pi"
+    model: str = Field(default="deepseek/deepseek-v4.1-flash", validation_alias=_model_alias)
+    system_prompt: str | None = None
+    completion_kwargs: dict[str, Any] = Field(default_factory=dict)
+    # The checkpoint of ``model`` the HUD gateway routes to, rather than its active one.
+    checkpoint: str | None = None
+    model_info: dict[str, Any] = Field(default_factory=dict)
+    extensions: dict[PiExtensionFile, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_token_ids(self) -> Self:
+        if "return_token_ids" in self.request_body:
+            raise ValueError(
+                "pi does not record token ids or logprobs; training rollouts need OpenAIChatAgent"
+            )
+        return self
+
+    @property
+    def request_body(self) -> dict[str, Any]:
+        """The fields Pi merges into every request body."""
+        body = {key: value for key, value in self.completion_kwargs.items() if key != "extra_body"}
+        body.update(self.completion_kwargs.get("extra_body") or {})
+        if self.checkpoint is not None:
+            body["checkpoint"] = self.checkpoint
+        return body
 
 
 class Citation(BaseModel):

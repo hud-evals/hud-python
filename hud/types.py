@@ -50,6 +50,7 @@ class AgentType(StrEnum):
     OPENAI = "openai"
     GEMINI = "gemini"
     OPENAI_COMPATIBLE = "openai_compatible"
+    PI = "pi"
 
     @property
     def is_cli(self) -> bool:
@@ -84,6 +85,10 @@ class AgentType(StrEnum):
                 from hud.agents.openai_compatible.agent import OpenAIChatAgent
 
                 return OpenAIChatAgent
+            case AgentType.PI:
+                from hud.agents.pi.agent import PiAgent
+
+                return PiAgent
 
     @property
     def config_cls(self) -> type[AgentConfig]:
@@ -95,6 +100,7 @@ class AgentType(StrEnum):
             GeminiConfig,
             OpenAIChatConfig,
             OpenAIConfig,
+            PiConfig,
         )
 
         match self:
@@ -110,6 +116,8 @@ class AgentType(StrEnum):
                 return GeminiConfig
             case AgentType.OPENAI_COMPATIBLE:
                 return OpenAIChatConfig
+            case AgentType.PI:
+                return PiConfig
 
     @classmethod
     def of(cls, agent: object) -> AgentType | None:

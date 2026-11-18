@@ -92,7 +92,7 @@ Pass the file that **lists runnable tasks**. In the split layout (`hud init`) th
 </Accordion>
 
 <Accordion title="Can I use my own model or a local endpoint?">
-For now, yes: `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so any compatible server (vLLM, a local model, a hosted checkpoint) works - point `base_url` at it, or use the `openai_compatible` agent from the CLI. It is a deprecated [provider agent](/v6/reference/agents#provider-agents) that hud v0.7.0 removes. See [Extending HUD](/v6/advanced/extending) for a custom harness.
+Yes: the `pi` agent ([`PiAgent`](/v6/reference/agents#built-in-agents)) speaks the OpenAI Chat Completions API, so any compatible server (vLLM, a local model, a hosted checkpoint) works - set `OPENAI_BASE_URL` and `OPENAI_API_KEY` for it. The deprecated `OpenAIChatAgent` (`openai_compatible`) also does, through `base_url`, until hud v0.7.0 removes it. See [Extending HUD](/v6/advanced/extending) for a custom harness.
 </Accordion>
 
 <Accordion title="Do I have to train, or can I just run evals?">

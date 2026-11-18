@@ -111,24 +111,25 @@ the binding's address with `run.client.binding(ref)` and connect yourself.
 
 ### Any OpenAI-compatible endpoint
 
-<Warning>
-`OpenAIChatAgent` is a deprecated [provider agent](/v6/reference/agents#provider-agents); hud v0.7.0
-removes it.
-</Warning>
+[`PiAgent`](/v6/reference/agents#built-in-agents) speaks the OpenAI Chat Completions API, so vLLM
+servers, local models, and hosted checkpoints all work. Point `OPENAI_BASE_URL` at the server and set
+`OPENAI_API_KEY`:
 
-`OpenAIChatAgent` speaks the OpenAI Chat Completions API, so vLLM servers, local models, and hosted
-checkpoints all work - point `base_url` at the server:
+```bash
+export OPENAI_BASE_URL=http://localhost:8000/v1
+export OPENAI_API_KEY=local
+```
 
 ```python run.py
-from hud.agents import OpenAIChatAgent
-from hud.agents.types import OpenAIChatConfig
+from hud.agents import PiAgent
+from hud.agents.types import PiConfig
 
-agent = OpenAIChatAgent(OpenAIChatConfig(
-    model="my-model",
-    base_url="http://localhost:8000/v1",
-    api_key="local",
-))
+agent = PiAgent(PiConfig(model="my-model"))
 ```
+
+The deprecated `OpenAIChatAgent` does the same through `base_url` and `api_key` on its config until
+hud v0.7.0 removes it; [moving to Pi](/v6/reference/agents#moving-from-openai_compatible-to-pi) shows
+the change.
 
 ## Composing richer environments
 

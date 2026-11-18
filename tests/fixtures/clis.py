@@ -1,4 +1,4 @@
-"""Stand-ins for the ``claude`` and ``codex`` executables a CLI agent launches.
+"""Stand-ins for the ``claude``, ``codex`` and ``pi`` executables a CLI agent launches.
 
 Each records what the agent handed it (argv, the variables it set, stdin, ``.hud_*``
 files), prints the JSONL stream the real CLI would, and exits as told. Like the real
@@ -28,6 +28,7 @@ AGENT_VARIABLES = (
     "HUD_",
     "INFERENCE_",
     "IS_SANDBOX",
+    "PI_",
 )
 
 # Replaces itself with the session's python3 running SCRIPT, so the agent's process is
@@ -102,9 +103,54 @@ def drive_computer(server, actions):
 
 
 
+# Call ``tool`` on MCP server ``name`` over streamable HTTP, as pi would from the agent
+# directory it was given; return its result's text.
+def call_mcp_tool(name, tool, arguments):
+    import re, urllib.request
+
+    home = os.environ["PI_CODING_AGENT_DIR"]
+    server = json.load(open(os.path.join(home, "mcp.json")))["mcpServers"][name]
+    headers = {{
+        key: re.sub(r"\\$\\{{(\\w+)\\}}", lambda m: os.environ[m.group(1)], value)
+        for key, value in server.get("headers", {{}}).items()
+    }}
+    session = {{}}
+
+    def post(message):
+        request = urllib.request.Request(
+            server["url"], data=json.dumps(message).encode(), method="POST"
+        )
+        for key, value in {{**headers, **session,
+                           "Content-Type": "application/json",
+                           "Accept": "application/json, text/event-stream"}}.items():
+            request.add_header(key, value)
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if "mcp-session-id" in response.headers:
+                session["mcp-session-id"] = response.headers["mcp-session-id"]
+            body = response.read().decode()
+        if "id" not in message:
+            return None
+        if body.lstrip().startswith("{{"):
+            return json.loads(body)
+        return json.loads(next(
+            line[len("data:"):] for line in body.splitlines() if line.startswith("data:")
+        ))
+
+    post({{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {{
+        "protocolVersion": "2025-06-18", "capabilities": {{}},
+        "clientInfo": {{"name": "stub", "version": "0"}}}}}})
+    post({{"jsonrpc": "2.0", "method": "notifications/initialized"}})
+    reply = post({{"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                  "params": {{"name": tool, "arguments": arguments}}}})
+    return [block.get("text") for block in reply["result"]["content"]]
+
+
 if behavior.get("computer"):
     servers = json.load(open(".hud_mcp_config.json"))["mcpServers"]
     record["computer"] = drive_computer(servers["computer-use"], behavior["computer"])
+
+if behavior.get("mcp"):
+    record["mcp"] = [call_mcp_tool(**call) for call in behavior["mcp"]]
 
 # Named by time, not pid: sandboxed invocations share pids across pid namespaces.
 with open(os.path.join({captures!r}, f"{{time.time_ns()}}-{{os.getpid()}}.json"), "w") as capture:
@@ -136,6 +182,9 @@ class Stub:
     exit: int = 0
     hang: bool = False
     computer: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    # Each ``{"name": server, "tool": ..., "arguments": {...}}`` is called on the MCP
+    # server the CLI was configured with.
+    mcp: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     shebang: bool = False
 
     @property
@@ -161,6 +210,7 @@ class Stub:
                     "exit": self.exit,
                     "hang": self.hang,
                     "computer": self.computer,
+                    "mcp": self.mcp,
                 }
             )
         )
@@ -280,17 +330,58 @@ CODEX_COMPLETED = {
 }
 
 
+def pi_assistant(
+    *content: dict[str, Any], stop: str = "stop", error: str | None = None
+) -> dict[str, Any]:
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": list(content),
+        "api": "openai-completions",
+        "provider": "inference",
+        "model": "pi-test",
+        "usage": {"input": 10, "output": 4, "cacheRead": 2, "cacheWrite": 0, "totalTokens": 16},
+        "stopReason": stop,
+        "timestamp": 0,
+    }
+    if error is not None:
+        message["errorMessage"] = error
+    return {"type": "message_end", "message": message}
+
+
+def pi_tool_result(call_id: str, name: str, text: str, *, is_error: bool = False) -> dict[str, Any]:
+    return {
+        "type": "message_end",
+        "message": {
+            "role": "toolResult",
+            "toolCallId": call_id,
+            "toolName": name,
+            "content": [{"type": "text", "text": text}],
+            "isError": is_error,
+            "timestamp": 0,
+        },
+    }
+
+
+PI_STARTED = {"type": "session", "version": 3, "id": "session-1", "timestamp": "", "cwd": "/"}
+PI_TURN_END = {"type": "turn_end", "toolResults": []}
+PI_SETTLED = {"type": "agent_settled", "aborted": False}
+PI_ABORTED = {"type": "agent_settled", "aborted": True}
+
+
 def answer(cli: str, text: str) -> str:
     """The stream ``cli`` prints when it answers ``text``."""
     if cli == "claude":
         return jsonl(claude_assistant({"type": "text", "text": text}), claude_result(text))
+    if cli == "pi":
+        return jsonl(PI_STARTED, pi_assistant({"type": "text", "text": text}), PI_SETTLED)
     return jsonl(
         CODEX_STARTED, codex_item("agent_message", "message-1", text=text), CODEX_COMPLETED
     )
 
 
 def prompt(cli: str, stdin: str) -> str:
-    """The prompt ``cli`` read from its stdin: Claude's stream-json message, or codex's text."""
+    """The prompt ``cli`` read from its stdin: Claude's stream-json message, or the text
+    codex and pi read."""
     if cli == "claude":
         return json.loads(stdin)["message"]["content"][0]["text"]
     return stdin
