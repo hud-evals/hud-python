@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
+import math
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
 
 from pydantic import (
@@ -18,13 +20,30 @@ from pydantic import (
     model_validator,
 )
 
+from hud.environment.client import HudClient
+from hud.environment.session import validate_session_id
+from hud.environment.utils import HudProtocolError
+from hud.utils.deprecation import warn_retired_member
+
 from .compose import ComposeProject
+from .dial import dialer
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Mapping, Sequence
     from pathlib import Path
 
+    from hud.environment.egress import WorkspaceRoute
+    from hud.eval.run import EnvironmentSession
     from hud.eval.task import Task
+
+    from .hosted import HostedRuntime
+
+LOGGER = logging.getLogger("hud.runtime")
+# How long a connect waits for a freshly provisioned env to serve when nothing sets a limit.
+READY_TIMEOUT_SECONDS = 240.0
+_CONNECT_RETRY_SECONDS = 0.5
+_HEARTBEAT_INTERVAL_SECONDS = 120.0
+_HEARTBEAT_TIMEOUT_SECONDS = 5.0
 
 
 class RuntimeGPU(BaseModel):
@@ -138,32 +157,139 @@ class Provider(Protocol):
 
 @runtime_checkable
 class _ConfiguredProvider(Protocol):
-    runtime_config: RuntimeConfig | None
-
-
-def validate_session_id(session_id: str) -> None:
-    if not session_id or session_id in {".", ".."} or "/" in session_id or "\\" in session_id:
-        raise ValueError("runtime session id must be a single path component")
+    def config_for(self, task: Task, /) -> RuntimeConfig | None: ...
 
 
 @dataclass(frozen=True)
 class Runtime:
-    """A provisioned host's control-channel ``url`` plus connection-time ``params``.
+    """An acquired host: where its environment is, how to open sessions on it, and
+    how to move a session's files between hosts.
 
-    Constructed directly, it is also a provider that yields itself and leaves teardown
-    to whoever provisioned the host.
+    ``url`` is the environment's control channel, and ``connect`` waits up to
+    ``ready_timeout`` seconds for the environment behind it to answer; a WebSocket ``url``
+    sends ``headers`` with its handshake. ``config`` is the runtime configuration its
+    provider applied. Constructed directly, a runtime is also a provider that yields itself
+    and leaves teardown to whoever provisioned the host.
+
+    ``params`` is v0.6.23's untyped form of ``ready_timeout`` and ``headers``, accepted with
+    a warning until hud v0.7.0.
     """
 
     url: str
-    params: dict[str, Any] = field(default_factory=dict)
+    params: InitVar[Mapping[str, Any] | None] = None
     config: RuntimeConfig | None = None
+    ready_timeout: float = field(default=READY_TIMEOUT_SECONDS, kw_only=True)
+    headers: Mapping[str, str] = field(default_factory=dict, kw_only=True)
 
-    # Whether ``snapshot_session`` can export a control session for another
-    # runtime to restore. Without it, a verifier must run beside the actor.
+    # Whether ``snapshot_session`` can export a control session for another runtime to
+    # restore. Without it, a verifier must run beside the actor.
     transports_sessions: ClassVar[bool] = False
+
+    def __post_init__(self, params: Mapping[str, Any] | None) -> None:
+        if params is not None:
+            warn_retired_member(
+                "Runtime", "params", "pass `ready_timeout` and `headers` instead", stacklevel=4
+            )
+            if (ready_timeout := params.get("ready_timeout")) is not None:
+                if isinstance(ready_timeout, bool) or not isinstance(ready_timeout, int | float):
+                    raise ValueError("Runtime params['ready_timeout'] must be a number of seconds")
+                object.__setattr__(self, "ready_timeout", float(ready_timeout))
+            if (headers := params.get("headers")) is not None:
+                object.__setattr__(self, "headers", dict(headers))
+        if not 0 < self.ready_timeout < math.inf:
+            raise ValueError("Runtime ready_timeout must be a positive, finite number of seconds")
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
+
+    def config_for(self, task: Task) -> RuntimeConfig | None:
+        """The runtime configuration this placement applies to ``task``."""
+        return self.config if self.config is not None else task.runtime_config
+
+    @asynccontextmanager
+    async def connect(
+        self,
+        *,
+        session_id: str | None = None,
+        lease: float | None = None,
+        workspace_routes: Sequence[WorkspaceRoute] = (),
+    ) -> AsyncGenerator[EnvironmentSession]:
+        """Open a session on the environment over its control channel.
+
+        ``session_id`` attaches to that open session instead; ``lease`` keeps the session
+        open that many seconds after this connection ends, for a later one to attach.
+
+        Connecting retries until the environment answers ``hello``, for ``ready_timeout``
+        seconds: a proxied port (``docker -p``, a port-forward) can accept before the
+        environment behind it serves. While the session is open, a heartbeat probes the
+        connection; a failure cancels the body and raises that error.
+        """
+        dial = dialer(self.url, self.headers)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.ready_timeout
+        while True:
+            try:
+                reader, writer = await dial()
+            except OSError:
+                if loop.time() >= deadline:
+                    raise
+                await asyncio.sleep(_CONNECT_RETRY_SECONDS)
+                continue
+            client = HudClient(reader, writer, dial=dial)
+            try:
+                await client.hello(
+                    session_id,
+                    lease=lease,
+                    workspace_routes=workspace_routes,
+                )
+                break
+            except asyncio.CancelledError:
+                client.abort()
+                raise
+            except (EOFError, OSError):
+                # No live env behind the accepted connection yet: EOF on the reply, or a
+                # reset racing the hello write.
+                await client.close()
+                if loop.time() >= deadline:
+                    raise
+                await asyncio.sleep(_CONNECT_RETRY_SECONDS)
+            except BaseException:
+                # A real failure still closes the socket, or the env's handler, and the
+                # session this hello opened, stay open waiting on it.
+                await client.close()
+                raise
+
+        owner = asyncio.current_task()
+        assert owner is not None
+        heartbeat_error: Exception | None = None
+
+        async def heartbeat() -> None:
+            nonlocal heartbeat_error
+            while True:
+                await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+                try:
+                    await client.ping(reply_timeout=_HEARTBEAT_TIMEOUT_SECONDS)
+                except HudProtocolError as exc:
+                    LOGGER.warning("control heartbeat failed: %s", exc)
+                    return
+                except Exception as exc:
+                    LOGGER.warning("control heartbeat failed: %s", exc)
+                    heartbeat_error = exc
+                    owner.cancel()
+                    return
+
+        heartbeat_task = asyncio.create_task(heartbeat(), name="hud-control-heartbeat")
+        try:
+            try:
+                yield client
+            finally:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
+                await client.close()
+        except asyncio.CancelledError:
+            if heartbeat_error is not None:
+                raise heartbeat_error from None
+            raise
 
     @asynccontextmanager
     async def snapshot_session(self, session_id: str) -> AsyncGenerator[Path | None]:
@@ -244,30 +370,26 @@ class Shared:
                 if key not in self._addresses:
                     # A failed boot retains nothing: it fails only its own rollout,
                     # and the next lease retries.
-                    config = resolve_runtime_config(self.inner, task)
-                    run_timeout = (
-                        config.limits.run_timeout_s
-                        if config is not None and config.limits is not None
-                        else None
-                    )
                     context = contextlib.AsyncExitStack()
                     address = await context.enter_async_context(self.inner(task))
                     self._contexts[key] = context
                     self._addresses[key] = address
-                    if run_timeout is not None:
-                        self._deadlines[key] = asyncio.get_running_loop().time() + run_timeout
+                    limits = address.config.limits if address.config is not None else None
+                    if limits is not None and limits.run_timeout_s is not None:
+                        self._deadlines[key] = (
+                            asyncio.get_running_loop().time() + limits.run_timeout_s
+                        )
                 addr = self._addresses[key]
             yield addr
 
+    def config_for(self, task: Task) -> RuntimeConfig | None:
+        """The runtime configuration this placement applies to ``task``."""
+        return resolve_runtime_config(self.inner, task)
 
-def resolve_runtime_config(provider: Provider, task: Task) -> RuntimeConfig | None:
-    """Return the runtime configuration a provider will apply to a task."""
-    if isinstance(provider, Shared):
-        return resolve_runtime_config(provider.inner, task)
-    if isinstance(provider, Runtime):
-        return provider.config if provider.config is not None else task.runtime_config
-    if isinstance(provider, _ConfiguredProvider) and provider.runtime_config is not None:
-        base = provider.runtime_config
-        config = base.with_overrides(task.runtime_config)
-        return config if config.model_dump(exclude_none=True) else None
+
+def resolve_runtime_config(provider: Provider | HostedRuntime, task: Task) -> RuntimeConfig | None:
+    """The runtime configuration a placement applies to ``task``; a placement that
+    cannot say is taken to apply the task's own."""
+    if isinstance(provider, _ConfiguredProvider):
+        return provider.config_for(task)
     return task.runtime_config

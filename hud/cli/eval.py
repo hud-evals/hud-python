@@ -19,7 +19,7 @@ from rich import box
 from rich.table import Table
 
 from hud.cli import CLI, CliError, Result, parse_key_value
-from hud.eval.taskset import Taskset
+from hud.eval.taskset import Taskset, containers_or, is_container_row
 from hud.runtime.core import Runtime
 from hud.runtime.docker import DockerRuntime
 from hud.runtime.hosted import HostedRuntime
@@ -427,36 +427,23 @@ def eval_command(
         case AnyUrl():
             placement = Runtime(str(cfg.runtime))
         case Placement.LOCAL:
-            rows = list(taskset)
-            rows.extend(
-                task.verifier
-                for task in taskset
-                if task.verifier is not None and not task.shares_verifier_runtime
-            )
             if not Path(source).exists() and any(
-                not (
-                    task.runtime_config
-                    and (task.runtime_config.image or task.runtime_config.compose)
-                )
-                for task in rows
+                not is_container_row(task) for task in taskset.placed_rows()
             ):
                 raise ValueError(
                     f"{source} is a platform taskset, so there is no env source to spawn "
                     "locally. Run it with --remote, --runtime hud, or --runtime tcp://host:port."
                 )
-            docker = DockerRuntime()
             source_path = Path(source).resolve()
             beside = SubprocessRuntime(source_path if source_path.is_dir() else source_path.parent)
 
             def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
-                config = task.runtime_config
-                if config and (config.image or config.compose):
-                    return docker(task)
-                if task.environment is not None:
-                    return SubprocessRuntime(source_path)(task)
-                return beside(task)
+                # A row its source defines runs that source; a data row, the env beside it.
+                return (SubprocessRuntime(source_path) if task.environment is not None else beside)(
+                    task
+                )
 
-            placement = spawn
+            placement = containers_or(spawn)
         case Placement.HUD:
             placement = HUDRuntime()
         case Placement.HOSTED:

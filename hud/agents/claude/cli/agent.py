@@ -13,6 +13,7 @@ import asyncssh
 from hud.agents.cli import (
     WINDOWS_SHELLS,
     CLIAgent,
+    ModelEndpoint,
     model_endpoint,
     powershell,
     powershell_quote,
@@ -21,6 +22,8 @@ from hud.agents.cli import (
 )
 from hud.agents.computer import mcp as computer_mcp
 from hud.agents.types import ClaudeCLIConfig
+from hud.capabilities import find_capability, open_client
+from hud.types import text_of
 from hud.utils.time import now_iso
 
 from .events import ClaudeEvents
@@ -54,26 +57,26 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
 
     async def __call__(self, run: Run) -> None:
         endpoint = model_endpoint(run, self.provider, gateway=self.config.gateway)
-        ssh = cast("SSHClient", await run.client.open("ssh"))
-        manifest = run.client.manifest
-        assert manifest is not None
+        async with open_client(find_capability(run.capabilities, "ssh")) as ssh:
+            await self._drive(cast("SSHClient", ssh), run, endpoint)
+
+    async def _drive(self, ssh: SSHClient, run: Run, endpoint: ModelEndpoint | None) -> None:
         shell = ssh.capability.params.get("shell", "bash")
         windows = shell in WINDOWS_SHELLS
         connection = endpoint.connection if endpoint is not None else None
-        executable = await resolve_executable(
-            ssh, "claude", _MANAGED_CLAUDE_PATHS, run.runtime_config
-        )
-        rfb_count = sum(cap.protocol.partition("/")[0] == "rfb" for cap in manifest.bindings)
+        executable = await resolve_executable(ssh, "claude", _MANAGED_CLAUDE_PATHS)
+        rfb_count = sum(cap.protocol.partition("/")[0] == "rfb" for cap in run.capabilities)
 
         async with AsyncExitStack() as resources:
             mcp_servers: dict[str, dict[str, Any]] = {}
-            for cap in manifest.bindings:
+            for cap in run.capabilities:
                 family = cap.protocol.partition("/")[0]
                 if family == "mcp":
                     name = cap.name
+                    # The CLI runs inside the environment, where the server lives.
                     server: dict[str, Any] = {
                         "type": _MCP_SERVER_TYPES[cap.params["transport"]],
-                        "url": cap.url,
+                        "url": cap.env_url,
                     }
                     if token := cap.params.get("auth_token"):
                         server["headers"] = {"Authorization": f"Bearer {token}"}
@@ -82,7 +85,7 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                     server = await resources.enter_async_context(
                         computer_mcp.bridge_computer_mcp(
                             ssh,
-                            run.client.binding(cap.name),
+                            cap,
                             self.config.screenshot_encoding,
                             shell=shell,
                         )
@@ -183,7 +186,7 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                         "type": "user",
                         "message": {
                             "role": "user",
-                            "content": [{"type": "text", "text": run.prompt_text}],
+                            "content": [{"type": "text", "text": text_of(run.prompt)}],
                         },
                     }
                 )

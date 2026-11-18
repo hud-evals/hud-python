@@ -10,18 +10,18 @@ from __future__ import annotations
 import asyncio
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import pytest
 
 from hud import Environment, Task
-from hud.capabilities import SSHClient
-from hud.clients import connect
+from hud.capabilities import SSHClient, find_capability, open_client
 from hud.runtime import LocalRuntime, Runtime
 from tests.capabilities.conftest import relayed
-from tests.clients.conftest import Action, control_peer
 from tests.conftest import eventually
+from tests.fixtures.control_peer import Action, control_peer
 from tests.fixtures.relay import FlakyRelay, relay
 
 if TYPE_CHECKING:
@@ -42,8 +42,8 @@ async def shell(tmp_path: Path) -> AsyncGenerator[tuple[SSHClient, FlakyRelay, P
     task = Task(env=environment.name, id="scenario")
     async with (
         LocalRuntime(environment)(task) as runtime,
-        connect(runtime) as control,
-        relayed(control.binding("shell")) as (capability, flaky),
+        runtime.connect() as control,
+        relayed(find_capability(control.capabilities, "shell")) as (capability, flaky),
     ):
         client = await SSHClient.connect(capability)
         try:
@@ -107,7 +107,7 @@ async def test_a_command_timeout_covers_a_stalled_reconnect(tmp_path: Path) -> N
     assert result.stdout == "back\n"
 
 
-async def test_an_opened_client_retries_an_upstream_that_refuses_and_closes_with_the_connection(
+async def test_an_opened_client_retries_an_upstream_that_refuses_and_closes_with_its_block(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "workspace"
@@ -115,8 +115,8 @@ async def test_an_opened_client_retries_an_upstream_that_refuses_and_closes_with
     env = Environment("tunneled")
     env.workspace(root, track_files=False)
     task = Task(env=env.name, id="scenario")
-    async with LocalRuntime(env)(task) as runtime, connect(runtime) as workspace:
-        shell_binding = workspace.binding("shell")
+    async with LocalRuntime(env)(task) as runtime, runtime.connect() as workspace:
+        shell_binding = find_capability(workspace.capabilities, "shell")
         address = urlsplit(shell_binding.url)
         assert address.hostname is not None and address.port is not None
         async with relay(address.hostname, address.port) as flaky:
@@ -127,13 +127,13 @@ async def test_an_opened_client_retries_an_upstream_that_refuses_and_closes_with
                 [Action("answer", result={**hello, "bindings": [binding]})],
                 upstreams={"shell": ("127.0.0.1", flaky.port)},
             ) as peer:
-                async with connect(Runtime(peer.url)) as client:
-                    opened = await client.open("shell")
+                async with (
+                    Runtime(peer.url).connect() as client,
+                    open_client(find_capability(client.capabilities, "shell")) as opened,
+                ):
                     assert isinstance(opened, SSHClient)
                     result = await opened.run("echo through the tunnel", timeout=10)
-                    again = await client.open("ssh")
 
-                assert again is opened
                 assert opened.conn.is_closed()
                 await eventually(lambda: flaky.open == 0)
 

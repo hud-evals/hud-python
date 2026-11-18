@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 from hud.agents.cli import (
     WINDOWS_SHELLS,
     CLIAgent,
+    ModelEndpoint,
     model_endpoint,
     powershell,
     powershell_quote,
@@ -18,7 +19,8 @@ from hud.agents.cli import (
     run_jsonl,
 )
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
-from hud.types import Step, TextContent, ToolCall, ToolResult
+from hud.capabilities import find_capability, open_client
+from hud.types import Step, TextContent, ToolCall, ToolResult, text_of
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
@@ -91,7 +93,7 @@ class CodexEvents:
             case "agent_message":
                 text = item["text"]
                 self.run.trace.content = text
-                self.run.record(
+                self.run.trace.record(
                     AgentStep(
                         content=text,
                         model=self.model,
@@ -101,7 +103,7 @@ class CodexEvents:
                     )
                 )
             case "reasoning":
-                self.run.record(
+                self.run.trace.record(
                     AgentStep(
                         reasoning=item["text"],
                         model=self.model,
@@ -113,7 +115,7 @@ class CodexEvents:
             case "command_execution" | "file_change" | "mcp_tool_call" | "web_search":
                 self.record_tool(item, started_at, received_at)
             case _:
-                self.run.record(
+                self.run.trace.record(
                     Step(
                         source="agent",
                         extra={"codex_item": item},
@@ -194,7 +196,7 @@ class CodexEvents:
             case _:
                 raise ValueError(f"unsupported Codex tool item {item['type']!r}")
 
-        self.run.record(
+        self.run.trace.record(
             ToolStep(
                 call=call,
                 result=result,
@@ -213,11 +215,12 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
 
     async def __call__(self, run: Run) -> None:
         endpoint = model_endpoint(run, self.provider, gateway=self.config.gateway)
-        ssh = cast("SSHClient", await run.client.open("ssh"))
+        async with open_client(find_capability(run.capabilities, "ssh")) as ssh:
+            await self._drive(cast("SSHClient", ssh), run, endpoint)
+
+    async def _drive(self, ssh: SSHClient, run: Run, endpoint: ModelEndpoint | None) -> None:
         connection = endpoint.connection if endpoint is not None else None
-        executable = await resolve_executable(
-            ssh, "codex", _MANAGED_CODEX_PATHS, run.runtime_config
-        )
+        executable = await resolve_executable(ssh, "codex", _MANAGED_CODEX_PATHS)
         if connection is not None:
             # A launcher script (the npm package's Node shim) runs the real client as a
             # child, which the connection refuses; without this Codex retries silently.
@@ -250,9 +253,7 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
             args.extend(
                 ["-c", f"model_reasoning_effort={json.dumps(self.config.reasoning_effort)}"]
             )
-        manifest = run.client.manifest
-        assert manifest is not None
-        mcp_bindings = [cap for cap in manifest.bindings if cap.protocol.partition("/")[0] == "mcp"]
+        mcp_bindings = [cap for cap in run.capabilities if cap.protocol.partition("/")[0] == "mcp"]
         for index, cap in enumerate(mcp_bindings):
             if cap.params["transport"] != "streamable-http":
                 raise ValueError(
@@ -264,7 +265,8 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
                     f"MCP server name {cap.name!r} cannot be a codex config key; "
                     "use letters, digits, '_' and '-'"
                 )
-            args.extend(["-c", f"mcp_servers.{cap.name}.url={json.dumps(cap.url)}"])
+            # Codex runs inside the environment, where the server lives.
+            args.extend(["-c", f"mcp_servers.{cap.name}.url={json.dumps(cap.env_url)}"])
             if token := cap.params.get("auth_token"):
                 # Codex reads the bearer token from a variable, which keeps it out of argv.
                 env[f"HUD_MCP_TOKEN_{index}"] = token
@@ -340,7 +342,7 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
             ssh,
             command,
             events.consume,
-            input_text=run.prompt_text,
+            input_text=text_of(run.prompt),
             connections=(connection,) if connection is not None else (),
         )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))

@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hud.environment import load_environment
-from hud.environment.server import DEFAULT_PORT, TaskRunner
+from hud.environment.server import DEFAULT_PORT
+from hud.environment.session import Session
 from hud.eval.taskset import Taskset
 from hud.utils.naming import normalize_environment_name
 
@@ -151,11 +152,9 @@ async def export(
             tests_dir = task_dir / "tests"
             tests_dir.mkdir(parents=True, exist_ok=True)
 
-            runner = TaskRunner(env.tasks[task.id], task.args)
-            try:
-                payload = await runner.start()
-            finally:
-                await runner.cancel()
+            session = Session(env)
+            payload = await session.start_task(task.id, task.args)
+            await session.close()
             prompt: Any = payload.get("prompt")
             if not isinstance(prompt, str):
                 prompt = json.dumps(prompt, indent=2, default=str)

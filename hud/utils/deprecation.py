@@ -54,6 +54,16 @@ def moved_to(module: str, *names: str) -> dict[str, Retired]:
     }
 
 
+def warn_retired_member(owner: str, member: str, instead: str, *, stacklevel: int = 3) -> None:
+    """Warn that ``owner.member`` goes away in hud v0.7.0, attributed to the caller of the
+    property or method that calls this."""
+    warnings.warn(
+        f"`{owner}.{member}` is deprecated and will be removed in hud v0.7.0; {instead}.",
+        HudDeprecationWarning,
+        stacklevel=stacklevel,
+    )
+
+
 def resolve_retired(module: str, name: str, retired: Mapping[str, Retired]) -> Any:
     """Return a retired name's value for a module ``__getattr__``, with a warning.
 

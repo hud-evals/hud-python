@@ -9,14 +9,21 @@ can use helpers imported inside it.
 
 import subprocess
 import sys
+import textwrap
 import warnings
 from importlib import import_module
+from pathlib import Path
+from typing import Any, ClassVar, Self
 
 import pytest
 
-from hud import Environment, Task
+from hud import Environment, Run, Task
+from hud.agents.base import Agent
+from hud.capabilities import Capability, CapabilityClient, register_client
 from hud.clients import connect
-from hud.runtime import LocalRuntime
+from hud.environment.client import HudClient
+from hud.runtime import Runtime, RuntimeConfig, SubprocessRuntime
+from hud.types import Step, TextContent
 from hud.utils.exceptions import HudDeprecationWarning
 
 RUNTIME_NAMES = [
@@ -42,6 +49,9 @@ RETIRED = [
     *[("hud", name, "hud.runtime") for name in ROOT_RUNTIME_NAMES],
     ("hud", "Connection", "hud.capabilities"),
     ("hud", "connect", "hud.clients"),
+    ("hud.clients", "register_client", "hud.capabilities"),
+    ("hud.clients", "HudProtocolError", "hud.environment"),
+    *[("hud.clients", name, "hud.environment.client") for name in ["HudClient", "Manifest"]],
     ("hud", "SyncPlan", "hud.cli.tasksets"),
     ("hud", "instrument", "hud.telemetry"),
     ("hud", "TrainingClient", "hud.train"),
@@ -133,11 +143,7 @@ async def test_a_template_written_with_the_retired_argument_helpers_keeps_its_hi
         yield prompt
         yield 1.0
 
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="review")) as runtime,
-        connect(runtime) as client,
-    ):
-        (template,) = await client.list_tasks()
+    (template,) = [task.manifest_entry() for task in env.tasks.values()]
 
     schema = template["args"]
     hints = {name: spec.get("x-hud-hint") for name, spec in schema["properties"].items()}
@@ -149,3 +155,102 @@ async def test_a_template_written_with_the_retired_argument_helpers_keeps_its_hi
     }
     assert schema["properties"]["attachments"]["items"]["$ref"] == "#/$defs/DataFileRef"
     assert set(schema["$defs"]["DataFileRef"]["properties"]) == {"file_id", "path"}
+
+
+async def test_a_v0_6_23_connect_still_reaches_a_served_environment() -> None:
+    source = import_module("tests.fixtures.envs").source("echo")
+    with pytest.warns(HudDeprecationWarning, match=r"runtime\.connect\(\)"):
+        async with (
+            SubprocessRuntime(source)(Task(env="echo", id="echo")) as runtime,
+            connect(runtime) as client,
+        ):
+            assert isinstance(client, HudClient)
+            (template,) = await client.list_tasks()
+
+    assert template["id"] == "echo"
+
+
+@register_client
+class _V0623EchoClient(CapabilityClient):
+    protocol: ClassVar[str] = "v0623-echo/1"
+
+    def __init__(self, capability: Capability) -> None:
+        self.capability = capability
+        self.closed = False
+
+    @classmethod
+    async def connect(cls, cap: Capability) -> Self:
+        return cls(cap)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+V0623_ENV = """
+from hud import Environment
+from hud.capabilities import Capability
+
+env = Environment("v0623")
+env.add_capability(Capability(name="echo", protocol="v0623-echo/1", url="tcp://127.0.0.1:9"))
+
+
+@env.template(id="greet")
+async def greet():
+    answer = yield {"prompt": "say hi", "bindings": {"echo": {"slot": "a"}}}
+    yield 1.0 if answer == "hi" else 0.0
+"""
+
+
+async def test_a_v0_6_23_agent_and_runtime_still_drive_a_run(tmp_path: Path) -> None:
+    source = tmp_path / "env.py"
+    source.write_text(textwrap.dedent(V0623_ENV))
+    task = Task(env="v0623", id="greet")
+    config = RuntimeConfig(image="v0623:latest")
+    seen: dict[str, Any] = {}
+
+    class V0623Agent(Agent):
+        async def __call__(self, run: Run) -> None:
+            seen["text"] = run.prompt_text
+            seen["messages"] = run.prompt_messages
+            seen["task_id"] = run.task_id
+            seen["bindings"] = run.bindings
+            seen["runtime_config"] = run.runtime_config
+            seen["manifest"] = run.client.manifest
+            seen["binding"] = run.client.binding("echo")
+            seen["opened"] = [await run.client.open("echo"), await run.client.open("v0623-echo")]
+            run.record(Step(source="system", extra={"by": "v0623"}))
+            run.trace.content = "hi"
+
+    async with SubprocessRuntime(source)(task) as served:
+        with pytest.warns(HudDeprecationWarning) as record:
+            v0623_runtime = Runtime(served.url, {"ready_timeout": 30}, config)
+            job = await task.run(V0623Agent(), runtime=v0623_runtime)
+
+    warned = {
+        str(warning.message).split("`")[1]
+        for warning in record
+        if warning.filename == __file__ and "hud v0.7.0" in str(warning.message)
+    }
+    assert warned == {
+        "Runtime.params",
+        "Run.prompt_text",
+        "Run.prompt_messages",
+        "Run.task_id",
+        "Run.bindings",
+        "Run.runtime_config",
+        "Run.client",
+        "Run.record",
+    }
+    (trace,) = job.traces
+    assert (trace.reward, v0623_runtime.ready_timeout) == (1.0, 30.0)
+    assert seen["text"] == "say hi"
+    assert seen["messages"][0].content == TextContent(type="text", text="say hi")
+    assert (seen["task_id"], seen["bindings"]) == ("greet", {"echo": {"slot": "a"}})
+    assert seen["runtime_config"] == config
+    (echo,) = seen["manifest"].bindings
+    assert (echo.name, echo.url) == ("echo", "tcp://127.0.0.1:9")
+    assert seen["binding"].params["slot"] == "a"
+    first, again = seen["opened"]
+    assert first is again
+    assert (first.capability.name, first.closed) == ("echo", True)
+    assert any(step.extra == {"by": "v0623"} for step in trace.steps)

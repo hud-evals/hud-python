@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import warnings
 from abc import abstractmethod
@@ -16,6 +17,7 @@ from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities.mcp import MCPClient
+from hud.capabilities.registry import open_client
 from hud.capabilities.ssh import SSHConnectionError
 from hud.types import PromptMessage, Step, StopCondition, TextContent, Tool, ToolCall, ToolResult
 from hud.utils.exceptions import HudDeprecationWarning
@@ -97,19 +99,18 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
     async def __call__(self, run: Run) -> None:
         connections: dict[str, CapabilityClient] = {}
         opened_protocols: set[str] = set()
-        manifest = run.client.manifest
-        if manifest is not None:
-            wanted = {client.protocol for client in type(self).clients}
-            for cap in manifest.bindings:
+        wanted = {client.protocol for client in type(self).clients}
+        async with contextlib.AsyncExitStack() as opened:
+            for cap in run.capabilities:
                 if cap.protocol not in wanted:
                     continue
                 if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
                     continue
-                connections[cap.name] = await run.client.open(cap.name)
+                connections[cap.name] = await opened.enter_async_context(open_client(cap))
                 opened_protocols.add(cap.protocol)
-        state = await self._initialize_state(prompt=run.prompt_messages)
-        state.tools, state.params = await self._build_tools(connections)
-        await self._loop(run, state)
+            state = await self._initialize_state(prompt=run.prompt)
+            state.tools, state.params = await self._build_tools(connections)
+            await self._loop(run, state)
 
     async def _build_tools(
         self,
@@ -193,7 +194,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                     continue
                 step.started_at = step.started_at or started_at
                 step.model = step.model or self.config.model
-                run.record(step)
+                run.trace.record(step)
                 if step.error:
                     stopped = step.stop_reason
                     break
@@ -210,7 +211,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                             else ""
                         )
                         state.messages.append(self._format_user_text(text))
-                        run.record(Step(source="user", messages=[follow_up]))
+                        run.trace.record(Step(source="user", messages=[follow_up]))
                         continue
                     break
 
@@ -220,7 +221,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                 for call in step.tool_calls:
                     call_started_at = now_iso()
                     result = await self._dispatch_call(call, state)
-                    run.record(ToolStep(call=call, result=result, started_at=call_started_at))
+                    run.trace.record(ToolStep(call=call, result=result, started_at=call_started_at))
                     msg = self._format_result(call, result, state)
                     if isinstance(msg, list):
                         state.messages.extend(msg)
@@ -238,7 +239,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                         )
                         trace.content = step.content
                         trace.status = "error"
-                        run.record(Step(source="system", error=error))
+                        run.trace.record(Step(source="system", error=error))
                         return
 
                 if turn == self.config.max_steps:
@@ -261,7 +262,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         except Exception as exc:
             logger.exception("ToolAgent loop failed")
             trace.status = "error"
-            run.record(Step(source="system", error=str(exc)))
+            run.trace.record(Step(source="system", error=str(exc)))
 
     def _stop_condition(self, step: AgentStep) -> StopCondition | None:
         """The first configured stop condition this turn trips, if any."""

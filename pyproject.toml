@@ -147,7 +147,7 @@ lint.ignore = [
 "hud/runtime/modal.py" = ["PLC0415"]
 "hud/train/client.py" = ["PLC0415"]
 "hud/utils/gateway.py" = ["PLC0415"]
-"hud/clients/client.py" = ["PLC0415"]
+"hud/capabilities/registry.py" = ["PLC0415"]
 "tests/conftest.py" = ["PLC0415"]
 "tests/runtime/test_runtimes.py" = ["PLC0415"]
 # Imports inside functions: modules that import each other (shapes and agents, environment and engine).

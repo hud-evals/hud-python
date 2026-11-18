@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from hud import Environment, Task
-from hud.clients import connect
 from hud.runtime import LocalRuntime
 from tests.environment.conftest import wire
 
@@ -148,7 +147,7 @@ async def test_initialize_hooks_finish_before_hello_and_shutdown_hooks_run_in_re
 
     async with (
         LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime),
+        runtime.connect(),
     ):
         seen_at_hello = list(log)
 
