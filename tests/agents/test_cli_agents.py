@@ -403,6 +403,17 @@ async def test_claude_code_runs_with_the_variables_its_config_adds(tmp_path: Pat
     assert capture["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "haiku"
 
 
+async def test_claude_code_asks_for_summarized_thinking(tmp_path: Path) -> None:
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+
+    await rollout(task(), ClaudeCLIAgent(), runtime=LocalRuntime(task.env))
+
+    (capture,) = stub.captures()
+    assert "--thinking-display=summarized" in capture["argv"]
+
+
 def test_claude_code_config_refuses_a_variable_name_no_shell_can_assign() -> None:
     with pytest.raises(ValidationError, match="HTTP-PROXY"):
         ClaudeCLIConfig(env={"HTTP-PROXY": "http://proxy"})
