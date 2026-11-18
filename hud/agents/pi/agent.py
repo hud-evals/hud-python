@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Pi accepts these characters in an MCP server name and treats '-' and '_' as the same.
 _PI_SERVER_NAME = re.compile(r"[A-Za-z0-9_-]+")
 
 _MANAGED_PI_PATHS = {
@@ -27,7 +26,7 @@ _MANAGED_PI_PATHS = {
 }
 
 
-# A pi extension that aborts the run before the model call of turn ``limit`` + 1.
+# Aborts the run before the model call that would start turn ``max_steps`` + 1.
 _MAX_STEPS_EXTENSION = """export default function (pi) {
   let turns = 0;
   pi.on("turn_end", (event, ctx) => {
@@ -75,25 +74,18 @@ class PiEvents:
 
     def record(self, message: dict[str, Any], received_at: str) -> None:
         match message["role"]:
-            case "system" | "user":
+            case "user":
                 return
             case "assistant":
                 self.record_assistant(message, received_at)
             case "toolResult":
                 call, started_at = self.pending_calls.pop(message["toolCallId"])
-                content: list[ContentBlock] = []
-                for block in message["content"]:
-                    match block["type"]:
-                        case "text":
-                            content.append(TextContent(type="text", text=block["text"]))
-                        case "image":
-                            content.append(
-                                ImageContent(
-                                    type="image", data=block["data"], mimeType=block["mimeType"]
-                                )
-                            )
-                        case kind:
-                            raise ValueError(f"unsupported Pi tool result block {kind!r}")
+                content: list[ContentBlock] = [
+                    TextContent(type="text", text=block["text"])
+                    if block["type"] == "text"
+                    else ImageContent(type="image", data=block["data"], mimeType=block["mimeType"])
+                    for block in message["content"]
+                ]
                 self.run.record(
                     ToolStep(
                         call=call,
@@ -162,7 +154,6 @@ class PiEvents:
         trace = self.run.trace
         error = self.error
         if self.aborted and 0 < self.max_steps < self.turns:
-            # The step-limit extension aborted the turn after the last allowed one.
             trace.stop_reason = "max_steps"
             error = None
         elif self.aborted and error is None:
@@ -172,9 +163,6 @@ class PiEvents:
             error = error or stderr.strip() or f"pi CLI exited with return code {returncode}"
         elif error is None and not self.settled:
             error = "pi CLI exited without an agent_settled event"
-        elif error is None and self.pending_calls:
-            missing = ", ".join(sorted(self.pending_calls))
-            error = f"pi CLI exited without results for tool calls: {missing}"
         elif error is None and self.stop_reason == "length":
             trace.stop_reason = "length"
 
@@ -187,8 +175,8 @@ class PiEvents:
 class PiAgent(CLIAgent[PiConfig]):
     """Runs ``pi --mode json`` over SSH inside the environment workspace.
 
-    Pi reads a throwaway agent directory holding the model endpoint and the environment's
-    MCP servers, so the workspace user's Pi login and settings stay out of the run.
+    Pi reads a throwaway agent directory, so the workspace user's Pi login and settings
+    stay out of the run.
     """
 
     config_cls = PiConfig
@@ -223,7 +211,6 @@ class PiAgent(CLIAgent[PiConfig]):
         files = {"models.json": json.dumps({"providers": {"inference": provider}})}
 
         mcp_servers: dict[str, dict[str, Any]] = {}
-        taken: dict[str, str] = {}
         for cap in manifest.bindings:
             if cap.protocol.partition("/")[0] != "mcp":
                 continue
@@ -237,12 +224,9 @@ class PiAgent(CLIAgent[PiConfig]):
                     f"MCP server name {cap.name!r} is not a pi server name; "
                     "use letters, digits, '_' and '-'"
                 )
-            if (other := taken.setdefault(cap.name.replace("-", "_"), cap.name)) != cap.name:
-                raise ValueError(f"pi treats MCP servers {other!r} and {cap.name!r} as one name")
-            # Declared like built-in tools, as Claude Code and Codex declare them.
             server: dict[str, Any] = {"url": cap.url, "exposure": "direct"}
             if token := cap.params.get("auth_token"):
-                # Pi expands the variable, which keeps the token out of the config file.
+                # Pi expands the variable, so the token stays out of the config file.
                 variable = f"HUD_MCP_TOKEN_{len(mcp_servers)}"
                 env[variable] = token
                 server["headers"] = {"Authorization": f"Bearer ${{{variable}}}"}
@@ -255,7 +239,7 @@ class PiAgent(CLIAgent[PiConfig]):
             "--mode",
             "json",
             "--no-session",
-            # The workspace is the environment's, so its .pi and .agents resources apply.
+            # Trusts the workspace's own .pi resources, which belong to the environment.
             "--approve",
             "--offline",
             "--provider",
@@ -267,11 +251,10 @@ class PiAgent(CLIAgent[PiConfig]):
         env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
         cli = " ".join(shlex.quote(arg) for arg in args)
         if self.config.system_prompt is not None:
-            # A file, since pi reads a value naming an existing file as that file.
+            # Passed as a file: Pi reads a value that names an existing file as that file.
             files["system.md"] = self.config.system_prompt
             cli += ' --append-system-prompt "$pi_home/system.md"'
-        # Pi discovers the extensions in its agent directory; the step limit stays outside it,
-        # so no configured extension can replace it.
+        # The step limit stays outside extensions/, so no configured extension can replace it.
         files.update(
             {f"extensions/{name}": source for name, source in self.config.extensions.items()}
         )
@@ -279,18 +262,16 @@ class PiAgent(CLIAgent[PiConfig]):
             files["max-steps.js"] = _MAX_STEPS_EXTENSION % self.config.max_steps
             cli += ' --extension "$pi_home/max-steps.js"'
         statements = ['pi_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-pi.XXXXXX") || exit 1']
-        # Under exec no trap survives; the sandbox holding a guarded connection is discarded
-        # after the rollout.
         if connection is None:
             statements.append("trap 'rm -rf -- \"$pi_home\"' EXIT")
         statements.append('export PI_CODING_AGENT_DIR="$pi_home"')
-        if self.config.extensions:
-            statements.append('mkdir "$pi_home/extensions"')
+        statements.append('mkdir "$pi_home/extensions"')
         statements.extend(
             f'printf %s {shlex.quote(body)} > "$pi_home/{name}"' for name, body in files.items()
         )
         statements.append('export PATH="$HOME/.local/bin:$PATH"')
-        # A guarded connection is bound to the launched process, so exec the CLI itself.
+        # A guarded connection is bound to the launched process, so exec the CLI itself; the
+        # sandbox is discarded after the rollout, so its agent directory needs no trap.
         exec_ = "exec env " if connection is not None else ""
         statements.append(f"{exec_}{env_prefix} {cli}")
         command = "; ".join(statements)

@@ -40,8 +40,8 @@ whole run, and `ClaudeCLIConfig.max_steps` is Claude Code's `--max-turns`.
 Completions, through the HUD gateway with `HUD_API_KEY`, or at `OPENAI_BASE_URL` (default
 `https://api.openai.com/v1`) with `OPENAI_API_KEY`. It always needs one of those, since it ignores
 any Pi login in the workspace. The environment's MCP servers reach it as Pi tools; Pi speaks only
-streamable HTTP to them, so an `sse` or `websocket` MCP capability fails the run. It runs in POSIX
-workspaces and has no computer use yet.
+streamable HTTP to them, so an `sse` or `websocket` MCP capability fails the run. It needs a POSIX
+workspace and does not do computer use.
 
 ```python
 agent = create_agent("pi")
@@ -81,8 +81,7 @@ The SDK also ships HUD's older [provider agents](#provider-agents), which are de
   and `ClaudeCLIAgent` computer use over an `rfb` capability, need a POSIX workspace.
 - **The CLI.** `claude`, `codex` or `pi` must be installed in the workspace, unless the runtime
   provides a managed copy. Pi ships a native binary per platform on its GitHub releases, and the npm
-  package `@earendil-works/pi-coding-agent`, whose 1.5.2 release fails to start on Node 20 and on
-  Node 22 before 22.18.
+  package `@earendil-works/pi-coding-agent`, which needs Node 22.18 or later.
 - **A model route.** In a sandboxed workspace the CLI never holds a model key. It reaches its model
   through the rollout's `inference` connection, which you can pass in `rollout(connections=...)`;
   otherwise `rollout` binds it to the gateway with `HUD_API_KEY` when the agent routes to the gateway
@@ -186,7 +185,7 @@ An agent type names an agent in `hud eval`, in `create_agent`, and in what `Host
 <Warning>
 The provider agents are deprecated and hud v0.7.0 removes them. Each one warns when it is constructed.
 Use `ClaudeCLIAgent` in place of `ClaudeAgent`, `CodexCLIAgent` in place of `OpenAIAgent`, and
-`PiAgent` in place of `OpenAIChatAgent`. `GeminiAgent` has no CLI replacement yet.
+`PiAgent` in place of `OpenAIChatAgent`.
 </Warning>
 
 A provider agent is HUD's own tool-call loop over one provider's API. Each run it reads the

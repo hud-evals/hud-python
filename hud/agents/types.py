@@ -46,7 +46,7 @@ ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 # A name a shell assignment accepts.
 EnvironmentName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
-# A single-file pi extension.
+# A Pi extension's file name.
 PiExtensionFile = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]+\.(ts|js)$")]
 
 
@@ -243,40 +243,28 @@ class PiConfig(AgentConfig):
     ``OPENAI_BASE_URL`` with ``OPENAI_API_KEY``.
 
     ``max_steps`` caps Pi's turns (one model call and the tool calls it makes); values <= 0
-    leave it unlimited.
+    leave it unlimited. ``system_prompt`` is appended to Pi's own. ``completion_kwargs`` is
+    merged into every request body, with ``extra_body`` entries at the top level.
+    ``model_info`` holds Pi's ``models.json`` fields for ``model``, such as ``contextWindow``,
+    ``input`` and ``compat``. ``extensions`` maps a file name to the source of a Pi extension
+    loaded into the run.
     """
 
     model_name: str = "Pi"
     model: str = Field(default="deepseek/deepseek-v4.1-flash", validation_alias=_model_alias)
-    # Appended to Pi's own system prompt, which describes its tools.
     system_prompt: str | None = None
     max_steps: int = -1
-    # Merged into every request body, over Pi's own fields; ``extra_body`` entries go in
-    # at the top level, as the OpenAI client sends them.
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
     # The checkpoint of ``model`` the HUD gateway routes to, rather than its active one.
     checkpoint: str | None = None
-    # Pi's models.json fields for ``model``, such as ``contextWindow``, ``maxTokens``,
-    # ``input`` (add "image" for a vision model), ``reasoning`` and ``compat`` (the
-    # served model's request quirks).
     model_info: dict[str, Any] = Field(default_factory=dict)
-    # Pi extensions, by file name to source, loaded like extensions in pi's own agent
-    # directory: they can register tools and hook pi's events (``tool_call``,
-    # ``tool_result``, ``before_provider_request``, ...). They import only what pi provides.
     extensions: dict[PiExtensionFile, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _check_request_fields(self) -> Self:
-        if owned := sorted({"id", "samplingParams"} & self.model_info.keys()):
-            raise ValueError(
-                f"model_info sets {', '.join(owned)}; use model and completion_kwargs instead"
-            )
-        if owned := sorted({"model", "messages", "stream", "tools"} & self.request_body.keys()):
-            raise ValueError(f"completion_kwargs sets {', '.join(owned)}, which pi sends itself")
+    def _check_token_ids(self) -> Self:
         if "return_token_ids" in self.request_body:
             raise ValueError(
-                "pi does not record token ids or logprobs; training rollouts need "
-                "OpenAIChatAgent until the SDK captures them for CLI agents"
+                "pi does not record token ids or logprobs; training rollouts need OpenAIChatAgent"
             )
         return self
 

@@ -657,23 +657,11 @@ async def test_each_tool_pi_ran_lands_on_the_trace_as_a_tool_step(
             "Fixed.",
             "pi CLI exited without an agent_settled event",
         ),
-        (
-            clis.jsonl(
-                clis.PI_STARTED,
-                clis.pi_assistant(PI_WRITE_CALL, stop="toolUse"),
-                clis.PI_SETTLED,
-            ),
-            "",
-            0,
-            None,
-            "pi CLI exited without results for tool calls: call-1",
-        ),
     ],
     ids=[
         "a-failed-model-call-with-a-zero-exit",
         "a-nonzero-exit",
         "a-zero-exit-without-settling",
-        "a-tool-call-left-without-a-result",
     ],
 )
 async def test_how_pi_exits_decides_how_the_run_ends(
@@ -823,23 +811,12 @@ async def test_a_pi_answer_cut_off_at_the_output_limit_stops_for_length(tmp_path
 @pytest.mark.parametrize(
     ("fields", "named"),
     [
-        ({"completion_kwargs": {"tools": []}}, "tools"),
-        ({"completion_kwargs": {"extra_body": {"messages": []}}}, "messages"),
         ({"completion_kwargs": {"extra_body": {"return_token_ids": True}}}, "token ids"),
-        ({"model_info": {"id": "other"}}, "id"),
         ({"extensions": {"../escape.ts": ""}}, "extensions"),
     ],
-    ids=[
-        "a-field-pi-sends",
-        "an-extra-body-field-pi-sends",
-        "token-ids",
-        "the-model-id",
-        "an-extension-path",
-    ],
+    ids=["token-ids", "an-extension-path"],
 )
-def test_pi_config_refuses_request_fields_pi_owns_or_cannot_honor(
-    fields: dict[str, Any], named: str
-) -> None:
+def test_pi_config_refuses_what_pi_cannot_honor(fields: dict[str, Any], named: str) -> None:
     with pytest.raises(ValidationError, match=named):
         PiConfig.model_validate(fields)
 
@@ -886,7 +863,6 @@ async def test_a_configured_pi_extension_adds_its_tool_and_hooks_its_calls(
         PiConfig(
             model="deepseek/deepseek-v4.1-flash",
             extensions={"echo.ts": ECHO_EXTENSION},
-            # Without the extension the model hunts for the tool, with shell commands too.
             max_steps=4,
             timeout_seconds=120,
         )
