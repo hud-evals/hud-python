@@ -35,6 +35,8 @@ INPUT_PATH = ".hud_input.jsonl"
 MCP_CONFIG_PATH = ".hud_mcp_config.json"
 RUN_SCRIPT_PATH = ".hud_run.bat"
 
+_MCP_SERVER_TYPES = {"streamable-http": "http", "sse": "sse", "websocket": "ws"}
+
 _MANAGED_CLAUDE_PATHS = {
     "linux-x64": "/usr/local/lib/agents/claude/linux-x64/claude",
     "linux-x64-musl": "/usr/local/lib/agents/claude/linux-x64-musl/claude",
@@ -69,8 +71,10 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                 family = cap.protocol.partition("/")[0]
                 if family == "mcp":
                     name = cap.name
-                    transport = "http" if cap.params["transport"] == "streamable-http" else "sse"
-                    server: dict[str, Any] = {"type": transport, "url": cap.url}
+                    server: dict[str, Any] = {
+                        "type": _MCP_SERVER_TYPES[cap.params["transport"]],
+                        "url": cap.url,
+                    }
                     if token := cap.params.get("auth_token"):
                         server["headers"] = {"Authorization": f"Bearer {token}"}
                 elif family == "rfb":
