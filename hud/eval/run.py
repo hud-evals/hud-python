@@ -14,12 +14,16 @@ from pydantic import ValidationError
 from hud.agents.cli import CLIAgent
 from hud.agents.types import AgentConfig
 from hud.capabilities.connection import Connection
-from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients.client import HudProtocolError, connect
 from hud.graders.base import Grade, grade_problems
 from hud.runtime.core import resolve_runtime_config
 from hud.settings import settings
-from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
+from hud.telemetry.context import (
+    get_current_trace_id,
+    get_mcp_trace_id,
+    get_trace_headers,
+    set_trace_context,
+)
 from hud.telemetry.exporter import export_step
 from hud.telemetry.span import normalize_trace_id
 from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace

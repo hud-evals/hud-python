@@ -21,6 +21,7 @@ from hud.agents.cli import (
 )
 from hud.agents.computer import mcp as computer_mcp
 from hud.agents.types import ClaudeCLIConfig
+from hud.telemetry.context import get_trace_headers
 from hud.utils.time import now_iso
 
 from .events import ClaudeEvents
@@ -71,12 +72,14 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                 family = cap.protocol.partition("/")[0]
                 if family == "mcp":
                     name = cap.name
+                    headers = get_trace_headers()
+                    if token := cap.params.get("auth_token"):
+                        headers["Authorization"] = f"Bearer {token}"
                     server: dict[str, Any] = {
                         "type": _MCP_SERVER_TYPES[cap.params["transport"]],
                         "url": cap.url,
+                        "headers": headers,
                     }
-                    if token := cap.params.get("auth_token"):
-                        server["headers"] = {"Authorization": f"Bearer {token}"}
                 elif family == "rfb":
                     name = "computer-use" if rfb_count == 1 else f"computer-use-{cap.name}"
                     server = await resources.enter_async_context(

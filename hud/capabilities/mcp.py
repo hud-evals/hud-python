@@ -9,33 +9,11 @@ import fastmcp
 import mcp.types as mcp_types
 from fastmcp.client.auth import BearerAuth
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from fastmcp.server.dependencies import get_context, get_http_headers
 
-from hud.telemetry.context import get_current_trace_id
+from hud.telemetry.context import TRACE_ID_META_KEY, get_current_trace_id
 from hud.types import Tool, ToolResult
 
 from .base import Capability, CapabilityClient
-
-_TRACE_ID_META_KEY = "hud/trace-id"
-
-
-def get_mcp_trace_id() -> str | None:
-    """The trace id on the active inbound MCP request, or ``None``.
-
-    The ``hud/trace-id`` request meta key wins over the ``trace-id`` HTTP header.
-    """
-    try:
-        context = get_context()
-    except RuntimeError:
-        return None
-    request_context = context.request_context
-    meta = (request_context.meta if request_context else None) or {}
-    trace_id = meta.get(_TRACE_ID_META_KEY)
-    if trace_id is None:
-        trace_id = get_http_headers().get("trace-id")
-    if trace_id is not None and not isinstance(trace_id, str):
-        raise TypeError(f"{_TRACE_ID_META_KEY} must be a string")
-    return trace_id
 
 
 class MCPClient(CapabilityClient):
@@ -80,7 +58,7 @@ class MCPClient(CapabilityClient):
         drifts from it still reaches the agent.
         """
         trace_id = get_current_trace_id()
-        meta = {_TRACE_ID_META_KEY: trace_id} if trace_id is not None else None
+        meta = {TRACE_ID_META_KEY: trace_id} if trace_id is not None else None
         raw = await self._client.session.send_request(
             mcp_types.CallToolRequest(
                 params=mcp_types.CallToolRequestParams(name=name, arguments=arguments, _meta=meta),
