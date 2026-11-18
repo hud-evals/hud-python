@@ -46,7 +46,6 @@ ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 # A name a shell assignment accepts.
 EnvironmentName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
-# A Pi extension's file name.
 PiExtensionFile = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]+\.(ts|js)$")]
 
 
