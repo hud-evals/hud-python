@@ -25,9 +25,9 @@ from pathlib import Path
 from daytona import Image
 from hud.agents import ClaudeAgent
 from hud.clients import connect
-from hud.runtime import DaytonaRuntime
 
 from env import fix_calc
+from runtime import DaytonaRuntime
 from snapshot import snapshot_name
 from timing import TimedProvider
 

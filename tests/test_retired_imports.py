@@ -21,7 +21,6 @@ from hud.utils.exceptions import HudDeprecationWarning
 
 RUNTIME_NAMES = [
     "ComposeProject",
-    "DaytonaRuntime",
     "DockerRuntime",
     "HUDRuntime",
     "HostedRuntime",
@@ -37,9 +36,7 @@ RUNTIME_NAMES = [
     "Shared",
     "SubprocessRuntime",
 ]
-ROOT_RUNTIME_NAMES = sorted(
-    set(RUNTIME_NAMES) - {"DaytonaRuntime", "ModalRuntime", "Provider", "Shared"}
-)
+ROOT_RUNTIME_NAMES = sorted(set(RUNTIME_NAMES) - {"ModalRuntime", "Provider", "Shared"})
 
 RETIRED = [
     *[("hud", name, "hud.runtime") for name in ROOT_RUNTIME_NAMES],

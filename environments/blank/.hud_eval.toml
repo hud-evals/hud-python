@@ -13,7 +13,7 @@
 # group_size = 1                # runs per task
 # auto_respond = false
 # gateway = false               # set true to force LLM calls through the HUD gateway
-# runtime = "local"             # local, hud, hosted, docker, modal, daytona, or tcp://host:port
+# runtime = "local"             # local, hud, hosted, docker, modal, or tcp://host:port
 # verbose = false
 # very_verbose = false
 

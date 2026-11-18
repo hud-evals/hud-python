@@ -1,0 +1,93 @@
+---
+title: "RL environment on Daytona sandboxes"
+description: "Write your own runtime for Daytona sandboxes, then run graded rollouts of a coding environment on it."
+icon: "/logo/daytona.svg"
+---
+
+Three parts: a coding environment with a graded task, a runtime that places each rollout in a fresh Daytona sandbox, and an eval that runs every task variant wide on it. HUD ships no Daytona runtime; the cookbook writes one in a single file, `runtime.py`, and the same pattern places rollouts on any infrastructure you can start a container on. The full walkthrough, with the concurrency and warm-pool measurements, lives in [Daytona's guide](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook).
+
+<Card title="Open the source" icon="github" href="https://github.com/hud-evals/hud-python/tree/main/cookbooks/daytona">
+  The complete project: the environment, the runtime, the task list, and the benchmark receipts behind the numbers.
+</Card>
+
+## The environment
+
+One file. A workspace with a shell, seeded bugs in `calc.py`, and a grader that pays 1.0 only when every test passes.
+
+```python
+from hud import Environment
+
+env = Environment(name="smoke")
+ws = env.workspace(WORKSPACE, network=True)
+
+@env.template(id="fix_calc")
+async def fix_calc(variant: int = 0):
+    seed_bug(variant)
+    yield (
+        f"`pytest` fails in `{WORKSPACE}`. Fix `calc.py` so it passes. Don't edit `test_calc.py`."
+    )
+    yield 1.0 if await calc_passes() else 0.0
+```
+
+Run it locally first. The `claude` agent needs a `HUD_API_KEY` or an `ANTHROPIC_API_KEY`:
+
+```bash
+hud eval tasks.py claude
+```
+
+## Write the runtime
+
+A runtime is a callable that takes the task being placed and returns an async context manager yielding a `Runtime`: the address of the environment's control channel. HUD connects there, runs the rollout, and exits the context, which is where the runtime tears its host down.
+
+```python
+@asynccontextmanager
+async def __call__(self, task):
+    async with AsyncDaytona() as daytona, AsyncExitStack() as teardown:
+        ...  # build the snapshot from Dockerfile.hud the first time
+        sandbox = await daytona.create(CreateSandboxFromSnapshotParams(snapshot=self.snapshot, ephemeral=True))
+        teardown.push_async_callback(daytona.delete, sandbox)
+        ...  # start `hud serve` in a session, open an SSH forward to its port
+        yield Runtime(f"tcp://127.0.0.1:{listener.get_port()}")
+```
+
+`DaytonaRuntime` in `runtime.py` is the whole thing, four steps top to bottom, each registering its own teardown:
+
+- **The environment travels as a Docker image.** The first rollout builds `Dockerfile.hud` into a Daytona snapshot; later ones reuse it. The snapshot name is a hash of the files that go into the image (`snapshot.py`), so editing the environment builds a new snapshot instead of running the old one.
+- **The control channel goes over SSH.** Daytona exposes sandbox ports only as HTTPS previews, so the runtime forwards a local port to the sandbox's `hud serve` and yields `tcp://127.0.0.1:<port>`.
+- **A crashed run leaves nothing billing.** Sandboxes auto-stop after 10 minutes without activity and, being ephemeral, are deleted when they stop. An open SSH forward does not count as activity, so the runtime refreshes the sandbox once a minute while the rollout runs; if the process dies, the refreshes stop and the sandbox goes.
+- **Sizing is Daytona's own.** Pass `resources=Resources(cpu=..., memory=...)` and the snapshot is built with it. A task that sets `runtime_config` is refused, so a requirement is never silently dropped.
+
+```python
+runtime = DaytonaRuntime(snapshot_name(), image=Image.from_dockerfile("Dockerfile.hud"))
+job = await fix_calc().run(agent, runtime=runtime)
+```
+
+Same task, same agent, one argument changed. A fresh sandbox is usable in about 3 seconds at low concurrency and about 10 at 256 wide, and the full ladder to 256 ran 1,272 creates without a failure. For spin-up numbers, warm pools, and sizing rules, see [Daytona's guide](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook).
+
+## Run every variant wide
+
+`fix_calc` takes a `variant` from 0 to 23, each a different set of seeded bugs. Run them all as one taskset, `group` attempts each, with up to `max_concurrent` sandboxes at once:
+
+```python
+agent = create_agent("claude-haiku-4-5", completion_kwargs={"max_tokens": 2048})
+taskset = Taskset("calc", [fix_calc(variant=v) for v in range(24)])
+
+job = await taskset.run(agent, runtime=runtime, group=2, max_concurrent=24)
+print(f"pass rate: {job.reward:.1%}")
+```
+
+`bench/baseline.py` runs this and breaks the pass rate down by how many functions each variant breaks.
+
+## Run it
+
+<CardGroup cols={2}>
+  <Card title="Source code" icon="github" href="https://github.com/hud-evals/hud-python/tree/main/cookbooks/daytona">
+    Runnable project: the environment, `runtime.py`, and `bench/` with the concurrency and warm-pool receipts.
+  </Card>
+  <Card title="Designing tasks for signal" icon="signal" href="/v6/reference/advice">
+    Build rewards with enough signal to distinguish better trajectories.
+  </Card>
+  <Card title="Daytona sandboxes" icon={<svg className="size-6 m-0! shrink-0 bg-primary dark:bg-primary-light" aria-hidden="true" style={{ maskImage: "url(/logo/daytona.svg)", maskRepeat: "no-repeat", maskPosition: "center", maskSize: "contain", WebkitMaskImage: "url(/logo/daytona.svg)", WebkitMaskRepeat: "no-repeat", WebkitMaskPosition: "center", WebkitMaskSize: "contain" }} />} href="https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook">
+    Spin-up measurements to 256 concurrent, warm pools, and sizing rules.
+  </Card>
+</CardGroup>

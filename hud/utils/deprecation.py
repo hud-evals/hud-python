@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 RUNTIME_NAMES = (
     "ComposeProject",
-    "DaytonaRuntime",
     "DockerBindMount",
     "DockerRuntime",
     "HUDRuntime",

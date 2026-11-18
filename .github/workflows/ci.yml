@@ -124,5 +124,5 @@ jobs:
 
       - name: Check cookbooks
         run: >-
-          uv run --locked --python 3.12 --all-extras
+          uv run --locked --python 3.12 --all-extras --with 'daytona>=0.231,<1'
           pytest tests/e2e/test_cookbooks.py -m e2e -n 4 --timeout 1200 --durations 20

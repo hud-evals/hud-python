@@ -17,10 +17,10 @@ from collections import Counter
 from daytona import Image
 from hud import Job, Taskset
 from hud.agents import create_agent
-from hud.runtime import DaytonaRuntime
 
 import bugs
 from env import fix_calc
+from runtime import DaytonaRuntime
 from snapshot import snapshot_name
 
 MODEL = "claude-haiku-4-5"

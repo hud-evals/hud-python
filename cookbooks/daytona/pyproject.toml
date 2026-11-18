@@ -2,7 +2,7 @@
 name = "smoke"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["hud[daytona]", "pytest"]
+dependencies = ["asyncssh", "daytona>=0.231,<1", "hud", "pytest"]
 
 [tool.uv]
 package = false

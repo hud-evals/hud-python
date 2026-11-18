@@ -31,8 +31,7 @@ _RETIRED = {
         *(
             name
             for name in RUNTIME_NAMES
-            if name
-            not in {"DaytonaRuntime", "DockerBindMount", "ModalRuntime", "Provider", "Shared"}
+            if name not in {"DockerBindMount", "ModalRuntime", "Provider", "Shared"}
         ),
     ),
     **moved_to("hud.capabilities", "Connection"),

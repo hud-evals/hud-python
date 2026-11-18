@@ -1,20 +1,25 @@
 # RL environment on Daytona sandboxes
 
-Run an agent evaluation where every rollout gets its own fresh
-[Daytona](https://daytona.io) sandbox. One `env.py` runs locally and on
-Daytona unchanged.
+Write your own HUD runtime, build an RL environment, and run evals on it:
+every rollout gets its own fresh [Daytona](https://daytona.io) sandbox. One
+`env.py` runs locally and on Daytona unchanged.
 
 The task: a small Python file with seeded bugs, graded by whether it passes
-its tests.
+its tests. The runtime: `runtime.py`, a provider that builds the environment's
+image into a Daytona snapshot, creates a sandbox per rollout, reaches its
+control channel over SSH, and deletes the sandbox afterwards. HUD ships no
+Daytona runtime; this file is the whole integration, and the same shape places
+rollouts on any infrastructure you can start a container on.
 
 The full measured walkthrough — spin-up ladders to 256 concurrent, warm pools,
 and sizing rules — is [the guide on Daytona's docs](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook). The
 condensed HUD-side walkthrough is
-[on the HUD docs](https://docs.hud.ai/v6/cookbooks/daytona-rl).
+[on the HUD docs](https://docs.hud.ai/v6/cookbooks/daytona).
 
 | File | Purpose |
 |------|---------|
 | `env.py` | The environment: a workspace, one task, a grader |
+| `runtime.py` | `DaytonaRuntime`: the provider that places each rollout in a sandbox |
 | `bugs.py` | 24 deterministic bug variants (4/5/6 broken functions) |
 | `tasks.py` | Task list for `hud eval` |
 | `pool.py` | Warm-pool helpers (create, wait until really full, drop), used by `bench/warmpool.py` |
@@ -41,7 +46,11 @@ PYTHONPATH=. uv run bench/reap.py --delete                 # clean up stray sand
 ```
 
 `DaytonaRuntime` builds the snapshot from `Dockerfile.hud` on first run and
-reuses it after.
+reuses it after. Size it with `resources=Resources(cpu=..., memory=...)`; a task
+that sets `runtime_config` is refused rather than run without it. Sandboxes
+auto-stop after 10 minutes without activity and are deleted when they stop; the
+runtime refreshes each one while its rollout runs, so a killed run cannot leave
+one billing.
 
 The snapshot name is a hash of `env.py`, `bugs.py`, `Dockerfile.hud` and
 `pyproject.toml` (`snapshot.py`), so editing the environment mints a new one
