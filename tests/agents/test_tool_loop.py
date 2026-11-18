@@ -105,6 +105,34 @@ async def test_a_claude_call_cut_off_by_max_tokens_is_refused_and_the_model_can_
 
 
 @pytest.mark.parametrize(
+    "stop_details",
+    [
+        {"type": "refusal", "category": "cyber", "explanation": "I can't help with that."},
+        None,
+    ],
+    ids=["with_details", "without_details"],
+)
+async def test_a_claude_refusal_is_recorded_as_the_reason_the_rollout_stopped(
+    models: Models, tmp_path: Path, stop_details: dict[str, str] | None
+) -> None:
+    models.script(
+        [
+            call("bash", command="touch started"),
+            Turn(text="", finish="refusal", extra={"stop_details": stop_details}),
+        ]
+    )
+
+    task = workspace_task(tmp_path / "ws")
+    (trace,) = (await task().run(ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")))).traces
+
+    assert (trace.status, trace.stop_reason, trace.is_truncated) == (
+        "completed",
+        "refusal",
+        False,
+    )
+
+
+@pytest.mark.parametrize(
     ("calls", "status"),
     [
         pytest.param(["shell", "shell", "shell"], "error", id="three-lost-calls-in-a-row"),

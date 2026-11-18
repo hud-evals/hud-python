@@ -83,7 +83,7 @@ streams to the platform as one schema-tagged span.
 |--------|------|-------------|
 | `steps` | `list[Step]` | The ordered trajectory. |
 | `status` | `"completed" \| "error" \| "cancelled" \| None` | How the rollout ended (`trace.is_error` reads it). |
-| `stop_reason` | `"done" \| "max_steps" \| "length" \| "timeout" \| "malformed_tool_call" \| None` | Why the rollout stopped (`trace.is_truncated` reads it: anything but `"done"` means a limit cut it off). |
+| `stop_reason` | `"done" \| "refusal" \| "max_steps" \| "length" \| "timeout" \| "malformed_tool_call" \| None` | Why the rollout stopped (`trace.is_truncated` reads it: anything but `"done"` or `"refusal"`, where the model declined to answer, means a limit cut it off). |
 | `content` | `str \| None` | The final answer (graded). |
 | `grade` | `Grade` | The environment's verdict; an error ("not graded") until graded. |
 | `reward` | `float` | Property: the graded reward (`grade.reward`). |

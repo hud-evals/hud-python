@@ -250,6 +250,8 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                 trace.stop_reason = stopped
             elif step is not None and step.error:
                 trace.stop_reason = None
+            elif step is not None and step.refusal is not None:
+                trace.stop_reason = "refusal"
             elif hit_max:
                 trace.stop_reason = "max_steps"
             elif step is not None and step.finish_reason in TRUNCATION_FINISH_REASONS:
