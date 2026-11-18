@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from importlib import import_module
 from typing import Any
 
 from .environment.env import Environment
@@ -11,7 +10,7 @@ from .eval.run import Run
 from .eval.task import Task
 from .eval.taskset import Taskset
 from .types import Grade, Trace
-from .utils.deprecation import RUNTIME_NAMES, Retired, moved_to, resolve_retired
+from .utils.deprecation import RUNTIME_NAMES, moved_to, resolve_retired
 from .version import __version__
 
 __all__ = [
@@ -40,10 +39,6 @@ _RETIRED = {
     **moved_to("hud.cli.tasksets", "SyncPlan"),
     **moved_to("hud.telemetry", "instrument"),
     **moved_to("hud.train", "TrainingClient"),
-    "Chat": Retired(
-        lambda: import_module("hud.eval.chat").Chat,
-        "copy it from the a2a-chat cookbook (`cookbooks/a2a-chat/chat.py`)",
-    ),
 }
 
 
