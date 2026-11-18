@@ -9,7 +9,7 @@ server-side with deterministic shell checks and an optional LLM judge.
 ```
 env.py           Environment: publishes the rfb capability and defines the cua_task template
 tasks.py         task definitions (prompt + graders + slug)
-supervisord.conf runs Xvfb, XFCE, Chromium, x11vnc, and the HUD server in one container
+supervisord.conf runs Xvfb, XFCE, Chromium, TigerVNC, and the HUD server in one container
 Dockerfile.hud   installs the desktop and environment dependencies
 ```
 

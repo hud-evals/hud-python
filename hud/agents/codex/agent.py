@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shlex
 from typing import TYPE_CHECKING, Any, cast
 
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
+
+_CODEX_SERVER_NAME = re.compile(r"[A-Za-z0-9_-]+")
 
 _MANAGED_CODEX_PATHS = {
     "linux-x64": "/usr/local/lib/agents/codex/bin/codex",
@@ -247,6 +250,27 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
             args.extend(
                 ["-c", f"model_reasoning_effort={json.dumps(self.config.reasoning_effort)}"]
             )
+        manifest = run.client.manifest
+        assert manifest is not None
+        mcp_bindings = [cap for cap in manifest.bindings if cap.protocol.partition("/")[0] == "mcp"]
+        for index, cap in enumerate(mcp_bindings):
+            if cap.params["transport"] != "streamable-http":
+                raise ValueError(
+                    f"MCP server {cap.name!r} uses transport {cap.params['transport']!r}; "
+                    "codex exec reaches only streamable-HTTP MCP servers"
+                )
+            if not _CODEX_SERVER_NAME.fullmatch(cap.name):
+                raise ValueError(
+                    f"MCP server name {cap.name!r} cannot be a codex config key; "
+                    "use letters, digits, '_' and '-'"
+                )
+            args.extend(["-c", f"mcp_servers.{cap.name}.url={json.dumps(cap.url)}"])
+            if token := cap.params.get("auth_token"):
+                # Codex reads the bearer token from a variable, which keeps it out of argv.
+                env[f"HUD_MCP_TOKEN_{index}"] = token
+                args.extend(
+                    ["-c", f'mcp_servers.{cap.name}.bearer_token_env_var="HUD_MCP_TOKEN_{index}"']
+                )
 
         if endpoint is not None:
             env["INFERENCE_API_KEY"] = endpoint.key
@@ -278,7 +302,7 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
                 *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
                 invocation,
             ]
-            if env:
+            if endpoint is not None:
                 statements = [
                     "$codexHome=Join-Path ([System.IO.Path]::GetTempPath()) "
                     "('hud-codex-' + [System.Guid]::NewGuid())",
@@ -301,7 +325,7 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
                     statements[0],
                     f"exec env {env_prefix} {cli}",
                 ]
-            elif env:
+            elif endpoint is not None:
                 statements = [
                     'codex_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-codex.XXXXXX") || exit 1',
                     "trap 'rm -rf -- \"$codex_home\"' EXIT",

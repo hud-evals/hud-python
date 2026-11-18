@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Self
 
 from google.genai import types as genai_types
 
+from hud.agents.computer.screen import keysym
 from hud.agents.tools.base import AgentToolSpec, tool_err
-from hud.agents.tools.rfb import RFBTool, keysym
+from hud.agents.tools.rfb import RFBTool
 from hud.agents.types import GeminiConfig
 
 if TYPE_CHECKING:
@@ -118,15 +120,15 @@ class GeminiComputerTool(RFBTool):
             case "take_screenshot":
                 pass
             case "click":
-                await self.click(*self._point(args))
+                await self.click(self._point(args))
             case "double_click":
-                await self.click(*self._point(args), count=2, interval_ms=100)
+                await self.click(self._point(args), count=2, interval=0.1)
             case "triple_click":
-                await self.click(*self._point(args), count=3, interval_ms=100)
+                await self.click(self._point(args), count=3, interval=0.1)
             case "middle_click":
-                await self.click(*self._point(args), button="middle")
+                await self.click(self._point(args), button="middle")
             case "right_click":
-                await self.click(*self._point(args), button="right")
+                await self.click(self._point(args), button="right")
             case "move":
                 await self.move(*self._point(args))
             case "mouse_down":
@@ -137,12 +139,12 @@ class GeminiComputerTool(RFBTool):
                 await self.mouse_up()
             case "type":
                 if "x" in args and "y" in args:
-                    await self.click(*self._point(args))
+                    await self.click(self._point(args))
                 await self.type_text(str(args["text"]))
                 if args.get("press_enter"):
                     await self.press_keys(["Return"])
             case "drag_and_drop":
-                width, height = self.display_width, self.display_height
+                width, height = self.client.width, self.client.height
                 path = [
                     (_inset(args["start_x"], width), _inset(args["start_y"], height)),
                     (_inset(args["end_x"], width), _inset(args["end_y"], height)),
@@ -157,9 +159,9 @@ class GeminiComputerTool(RFBTool):
                     "right": (clicks, 0),
                     "left": (-clicks, 0),
                 }[args["direction"]]
-                await self.scroll(*self._point(args), scroll_x=sx, scroll_y=sy)
+                await self.scroll(self._point(args), scroll_x=sx, scroll_y=sy)
             case "wait":
-                await self.wait(int(float(args.get("seconds", 1)) * 1000))
+                await asyncio.sleep(float(args.get("seconds", 1)))
             case "press_key":
                 await self.press_keys(_keys(str(args["key"]).split("+")))
             case "key_down":
@@ -173,7 +175,7 @@ class GeminiComputerTool(RFBTool):
         return await self.screenshot()
 
     def _point(self, args: dict[str, Any]) -> tuple[int, int]:
-        return _pixel(args["x"], self.display_width), _pixel(args["y"], self.display_height)
+        return _pixel(args["x"], self.client.width), _pixel(args["y"], self.client.height)
 
 
 def _pixel(value: float, size: int) -> int:

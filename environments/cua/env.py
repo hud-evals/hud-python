@@ -15,7 +15,7 @@ env = Environment(name="cua")  # literal name - `hud deploy` static-parses it
 _task_started = False
 
 _HOST = "127.0.0.1"
-# supervisord runs x11vnc on 5900; tests point this at their own VNC listener.
+# supervisord runs the VNC server on 5900; tests point this at their own VNC listener.
 _VNC_PORT = int(os.environ.get("VNC_PORT", "5900"))
 
 

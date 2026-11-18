@@ -103,23 +103,46 @@ def drive_computer(server, actions):
 
 
 
-# Call ``tool`` on MCP server ``name`` over streamable HTTP, as pi would from the agent
-# directory it was given; return its result's text.
-def call_mcp_tool(name, tool, arguments):
-    import re, urllib.request
+# The entry for MCP server ``name`` in this CLI's config file, if it has one: pi reads
+# mcp.json from its agent directory, Claude Code its --mcp-config file.
+def configured_server(name):
+    home = os.environ.get("PI_CODING_AGENT_DIR")
+    path = os.path.join(home, "mcp.json") if home else ".hud_mcp_config.json"
+    return json.load(open(path))["mcpServers"][name] if os.path.exists(path) else None
 
-    home = os.environ["PI_CODING_AGENT_DIR"]
-    server = json.load(open(os.path.join(home, "mcp.json")))["mcpServers"][name]
-    headers = {{
-        key: re.sub(r"\\$\\{{(\\w+)\\}}", lambda m: os.environ[m.group(1)], value)
-        for key, value in server.get("headers", {{}}).items()
-    }}
+
+# The url and headers this CLI was configured with for MCP server ``name``; codex takes
+# its servers as -c overrides. Pi expands ${{VAR}} in headers.
+def mcp_server(name):
+    import re
+
+    server = configured_server(name)
+    if server is not None:
+        return server["url"], {{
+            key: re.sub(r"\\$\\{{(\\w+)\\}}", lambda m: os.environ[m.group(1)], value)
+            for key, value in server.get("headers", {{}}).items()
+        }}
+    prefix = "mcp_servers." + name + "."
+    config = {{}}
+    for flag, value in zip(sys.argv[1:], sys.argv[2:]):
+        if flag == "-c" and value.startswith(prefix):
+            key, _, raw = value[len(prefix):].partition("=")
+            config[key] = json.loads(raw)
+    headers = {{}}
+    if "bearer_token_env_var" in config:
+        headers["Authorization"] = "Bearer " + os.environ[config["bearer_token_env_var"]]
+    return config["url"], headers
+
+
+# Call ``tool`` over streamable HTTP, as the CLI would; return its result's text.
+def call_mcp_tool(name, tool, arguments):
+    import urllib.request
+
+    url, headers = mcp_server(name)
     session = {{}}
 
     def post(message):
-        request = urllib.request.Request(
-            server["url"], data=json.dumps(message).encode(), method="POST"
-        )
+        request = urllib.request.Request(url, data=json.dumps(message).encode(), method="POST")
         for key, value in {{**headers, **session,
                            "Content-Type": "application/json",
                            "Accept": "application/json, text/event-stream"}}.items():
@@ -146,8 +169,7 @@ def call_mcp_tool(name, tool, arguments):
 
 
 if behavior.get("computer"):
-    servers = json.load(open(".hud_mcp_config.json"))["mcpServers"]
-    record["computer"] = drive_computer(servers["computer-use"], behavior["computer"])
+    record["computer"] = drive_computer(configured_server("computer-use"), behavior["computer"])
 
 if behavior.get("mcp"):
     record["mcp"] = [call_mcp_tool(**call) for call in behavior["mcp"]]

@@ -260,10 +260,15 @@ class RFBClient(CapabilityClient):
         with self.holding_button(button):
             pass
 
-    def scroll(self, clicks: int) -> None:
-        """Turn the wheel (buttons 3 up, 4 down) ``clicks`` notches; positive scrolls down."""
+    def scroll(self, clicks: int, *, horizontal: bool = False) -> None:
+        """Turn the wheel ``clicks`` notches; positive scrolls down, or right when ``horizontal``.
+
+        The vertical wheel is mask bits 3 (up) and 4 (down), the horizontal one bits 5 (left)
+        and 6 (right): X buttons 4 to 7.
+        """
+        back, forward = (5, 6) if horizontal else (3, 4)
         for _ in range(abs(clicks)):
-            self.click(4 if clicks > 0 else 3)
+            self.click(forward if clicks > 0 else back)
 
     def _key(self, code: int, *, down: bool) -> None:
         self._session.writer.write(struct.pack(">BBxxI", 4, down, code))

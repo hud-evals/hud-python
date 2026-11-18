@@ -6,9 +6,11 @@ import json
 import logging
 import re
 import shlex
+from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.agents.cli import WINDOWS_SHELLS, CLIAgent, model_endpoint, resolve_executable, run_jsonl
+from hud.agents.computer import mcp as computer_mcp
 from hud.agents.types import AgentStep, PiConfig, ToolStep, Usage
 from hud.types import ContentBlock, ImageContent, Step, TextContent, ToolCall, ToolResult
 from hud.utils.time import now_iso
@@ -190,29 +192,12 @@ class PiAgent(CLIAgent[PiConfig]):
             provider["headers"] = endpoint.headers
         files = {"models.json": json.dumps({"providers": {"inference": provider}})}
 
-        mcp_servers: dict[str, dict[str, Any]] = {}
-        for cap in manifest.bindings:
-            if cap.protocol.partition("/")[0] != "mcp":
-                continue
-            if cap.params.get("transport") != "streamable-http":
-                raise ValueError(
-                    f"MCP server {cap.name!r} uses transport {cap.params.get('transport')!r}; "
-                    "pi reaches only streamable-HTTP MCP servers"
-                )
-            if not _PI_SERVER_NAME.fullmatch(cap.name):
-                raise ValueError(
-                    f"MCP server name {cap.name!r} is not a pi server name; "
-                    "use letters, digits, '_' and '-'"
-                )
-            server: dict[str, Any] = {"url": cap.url, "exposure": "direct"}
-            if token := cap.params.get("auth_token"):
-                # Pi expands the variable, so the token stays out of the config file.
-                variable = f"HUD_MCP_TOKEN_{len(mcp_servers)}"
-                env[variable] = token
-                server["headers"] = {"Authorization": f"Bearer ${{{variable}}}"}
-            mcp_servers[cap.name] = server
-        if mcp_servers:
-            files["mcp.json"] = json.dumps({"mcpServers": mcp_servers})
+        screens = sum(cap.protocol.partition("/")[0] == "rfb" for cap in manifest.bindings)
+        if screens and "image" not in model.get("input", ["text"]):
+            raise ValueError(
+                f"the environment has a screen, but pi takes model {self.config.model!r} as "
+                'text-only; set model_info["input"] to ["text", "image"] if it reads images'
+            )
 
         args = [
             executable,
@@ -236,30 +221,69 @@ class PiAgent(CLIAgent[PiConfig]):
         files.update(
             {f"extensions/{name}": source for name, source in self.config.extensions.items()}
         )
-        statements = ['pi_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-pi.XXXXXX") || exit 1']
-        if connection is None:
-            statements.append("trap 'rm -rf -- \"$pi_home\"' EXIT")
-        statements.append('export PI_CODING_AGENT_DIR="$pi_home"')
-        statements.append('mkdir "$pi_home/extensions"')
-        statements.extend(
-            f'printf %s {shlex.quote(body)} > "$pi_home/{name}"' for name, body in files.items()
-        )
-        statements.append('export PATH="$HOME/.local/bin:$PATH"')
-        # A guarded connection is bound to the launched process, so exec the CLI itself; the
-        # sandbox is discarded after the rollout, so its agent directory needs no trap.
-        exec_ = "exec env " if connection is not None else ""
-        env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
-        statements.append(f"{exec_}{env_prefix} {cli}")
-        command = "; ".join(statements)
 
-        logger.info("SSH exec pi CLI (%d chars)", len(command))
-        events = PiEvents(run, started_at=now_iso())
-        returncode, stderr = await run_jsonl(
-            ssh,
-            command,
-            events.consume,
-            input_text=run.prompt_text,
-            connections=(connection,) if connection is not None else (),
-        )
+        async with AsyncExitStack() as bridges:
+            mcp_servers: dict[str, dict[str, Any]] = {}
+            for cap in manifest.bindings:
+                family = cap.protocol.partition("/")[0]
+                if family == "mcp":
+                    name = cap.name
+                    if cap.params.get("transport") != "streamable-http":
+                        raise ValueError(
+                            f"MCP server {name!r} uses transport {cap.params.get('transport')!r}; "
+                            "pi reaches only streamable-HTTP MCP servers"
+                        )
+                    server: dict[str, Any] = {"url": cap.url}
+                    if token := cap.params.get("auth_token"):
+                        # Pi expands the variable, so the token stays out of the config file.
+                        variable = f"HUD_MCP_TOKEN_{len(mcp_servers)}"
+                        env[variable] = token
+                        server["headers"] = {"Authorization": f"Bearer ${{{variable}}}"}
+                elif family == "rfb":
+                    name = "computer-use" if screens == 1 else f"computer-use-{cap.name}"
+                    server = await bridges.enter_async_context(
+                        computer_mcp.bridge_computer_mcp(
+                            ssh,
+                            run.client.binding(cap.name),
+                            self.config.screenshot_encoding,
+                            shell=shell,
+                        )
+                    )
+                else:
+                    continue
+                if not _PI_SERVER_NAME.fullmatch(name):
+                    raise ValueError(
+                        f"MCP server name {name!r} is not a pi server name; "
+                        "use letters, digits, '_' and '-'"
+                    )
+                mcp_servers[name] = {**server, "exposure": "direct"}
+            if mcp_servers:
+                files["mcp.json"] = json.dumps({"mcpServers": mcp_servers})
+
+            statements = ['pi_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-pi.XXXXXX") || exit 1']
+            if connection is None:
+                statements.append("trap 'rm -rf -- \"$pi_home\"' EXIT")
+            statements.append('export PI_CODING_AGENT_DIR="$pi_home"')
+            statements.append('mkdir "$pi_home/extensions"')
+            statements.extend(
+                f'printf %s {shlex.quote(body)} > "$pi_home/{name}"' for name, body in files.items()
+            )
+            statements.append('export PATH="$HOME/.local/bin:$PATH"')
+            # A guarded connection is bound to the launched process, so exec the CLI itself; the
+            # sandbox is discarded after the rollout, so its agent directory needs no trap.
+            exec_ = "exec env " if connection is not None else ""
+            env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
+            statements.append(f"{exec_}{env_prefix} {cli}")
+            command = "; ".join(statements)
+
+            logger.info("SSH exec pi CLI (%d chars)", len(command))
+            events = PiEvents(run, started_at=now_iso())
+            returncode, stderr = await run_jsonl(
+                ssh,
+                command,
+                events.consume,
+                input_text=run.prompt_text,
+                connections=(connection,) if connection is not None else (),
+            )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))
         events.finish(returncode=returncode, stderr=stderr)

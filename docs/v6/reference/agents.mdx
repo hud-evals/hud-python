@@ -41,7 +41,8 @@ Completions, through the HUD gateway with `HUD_API_KEY`, or at `OPENAI_BASE_URL`
 `https://api.openai.com/v1`) with `OPENAI_API_KEY`. It always needs one of those, since it ignores
 any Pi login in the workspace. The environment's MCP servers reach it as Pi tools; Pi speaks only
 streamable HTTP to them, so an `sse` or `websocket` MCP capability fails the run. It needs a POSIX
-workspace and does not do computer use.
+workspace. Computer use over an `rfb` capability needs a model that reads images:
+`model_info={"input": ["text", "image"]}`.
 
 ```python
 agent = create_agent("pi")
@@ -78,7 +79,7 @@ The SDK also ships HUD's older [provider agents](#provider-agents), which are de
 
 - **A workspace.** The agent runs its CLI over the environment's `ssh` capability, against the
   workspace filesystem. POSIX and Windows workspaces both work for Claude Code and Codex; `PiAgent`,
-  and `ClaudeCLIAgent` computer use over an `rfb` capability, need a POSIX workspace.
+  and computer use over an `rfb` capability, need a POSIX workspace.
 - **The CLI.** `claude`, `codex` or `pi` must be installed in the workspace, unless the runtime
   provides a managed copy. Pi ships a native binary per platform on its GitHub releases, and the npm
   package `@earendil-works/pi-coding-agent`, which needs Node 22.18 or later.

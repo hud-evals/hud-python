@@ -214,6 +214,48 @@ async def test_a_computer_toolset_member_lands_on_the_screen_and_answers_as_the_
     ]
 
 
+async def test_a_key_chord_spaced_around_plus_presses_together_and_a_blank_one_is_an_error(
+    models: Models, tmp_path: Path
+) -> None:
+    def key(call_id: str, text: str) -> dict[str, object]:
+        return {
+            "type": "tool_use",
+            "id": call_id,
+            "name": "key",
+            "toolset_name": "computer",
+            "input": {"text": text},
+        }
+
+    models.script(
+        [
+            Turn(
+                native=(key("toolu_chord", "ctrl + c"), key("toolu_blank", "  ")), finish="tool_use"
+            ),
+            Turn(text="done"),
+        ]
+    )
+
+    async with fake_screen() as screen:
+        task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
+        (trace,) = (await task().run(ClaudeAgent(ClaudeConfig(model="claude-opus-5")))).traces
+
+    errors = {
+        block["tool_use_id"]: block.get("is_error", False)
+        for message in models.requests()[-1].body["messages"]
+        for block in message["content"]
+        if block.get("type") == "tool_result"
+    }
+    control, c = 0xFFE3, ord("c")
+    assert trace.status == "completed"
+    assert errors == {"toolu_chord": False, "toolu_blank": True}
+    assert [(e.key, e.down) for e in screen.key_events()] == [
+        (control, True),
+        (c, True),
+        (c, False),
+        (control, False),
+    ]
+
+
 async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
     models: Models, tmp_path: Path
 ) -> None:

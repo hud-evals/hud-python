@@ -19,10 +19,10 @@ from hud.agents.cli import (
     resolve_executable,
     run_jsonl,
 )
+from hud.agents.computer import mcp as computer_mcp
 from hud.agents.types import ClaudeCLIConfig
 from hud.utils.time import now_iso
 
-from . import computer_mcp
 from .events import ClaudeEvents
 
 if TYPE_CHECKING:
@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 INPUT_PATH = ".hud_input.jsonl"
 MCP_CONFIG_PATH = ".hud_mcp_config.json"
 RUN_SCRIPT_PATH = ".hud_run.bat"
+
+_MCP_SERVER_TYPES = {"streamable-http": "http", "sse": "sse", "websocket": "ws"}
 
 _MANAGED_CLAUDE_PATHS = {
     "linux-x64": "/usr/local/lib/agents/claude/linux-x64/claude",
@@ -69,8 +71,10 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                 family = cap.protocol.partition("/")[0]
                 if family == "mcp":
                     name = cap.name
-                    transport = "http" if cap.params["transport"] == "streamable-http" else "sse"
-                    server: dict[str, Any] = {"type": transport, "url": cap.url}
+                    server: dict[str, Any] = {
+                        "type": _MCP_SERVER_TYPES[cap.params["transport"]],
+                        "url": cap.url,
+                    }
                     if token := cap.params.get("auth_token"):
                         server["headers"] = {"Authorization": f"Bearer {token}"}
                 elif family == "rfb":
@@ -85,8 +89,6 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                     )
                 else:
                     continue
-                if name in mcp_servers:
-                    raise RuntimeError(f"duplicate MCP server name {name!r}")
                 mcp_servers[name] = server
 
             env: dict[str, str] = {
