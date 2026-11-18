@@ -6,6 +6,7 @@ import logging
 import os
 import time
 import tomllib
+import warnings
 from enum import StrEnum
 from pathlib import Path
 from string import Template
@@ -27,6 +28,7 @@ from hud.runtime.local import SubprocessRuntime
 from hud.runtime.modal import ModalRuntime
 from hud.settings import settings
 from hud.types import AgentType
+from hud.utils.exceptions import HudDeprecationWarning
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -140,15 +142,19 @@ def eval_command(
     full: bool = typer.Option(
         False,
         "--full",
-        help="Run every task with --auto-respond and --max-steps 100 (an explicit --max-steps "
-        "wins).",
+        help="Run every task, and give the deprecated provider agents --auto-respond and "
+        "--max-steps 100 (an explicit --max-steps wins).",
     ),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
     config: list[str] | None = typer.Option(None, "--config", "-c", help="Agent config: key=value"),
     max_concurrent: int | None = typer.Option(
         None, "--max-concurrent", help="Max concurrent tasks"
     ),
-    max_steps: int | None = typer.Option(None, "--max-steps", help="Max steps per task"),
+    max_steps: int | None = typer.Option(
+        None,
+        "--max-steps",
+        help="Max steps per task for the deprecated provider agents; CLI agents ignore it",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     very_verbose: bool = typer.Option(False, "--very-verbose", "-vv", help="Debug logs"),
     auto_respond: bool = typer.Option(
@@ -205,6 +211,14 @@ def eval_command(
     """
     hud_console.info("Initializing evaluation...")
     cfg = EvalConfig.load()
+    if max_steps is not None or "max_steps" in cfg.model_fields_set:
+        warnings.warn(
+            "`max_steps` in `hud eval` is deprecated and will be removed in hud v0.7.0 with the "
+            "provider agents it caps; CLI agents ignore it and run until done or "
+            "`timeout_seconds` (`--config timeout_seconds=...`).",
+            HudDeprecationWarning,
+            stacklevel=2,
+        )
 
     if runtime is not None and remote:
         raise ValueError("--runtime and --remote are mutually exclusive placement options")
@@ -293,7 +307,9 @@ def eval_command(
             "runtime": planned,
             "remote": planned is Placement.HOSTED,
             "all": cfg.all,
-            "max_steps": cfg.max_steps,
+            "max_steps": cfg.agent_config.get(agent_type.value, {}).get("max_steps")
+            if agent_type.is_cli
+            else cfg.max_steps,
             "max_concurrent": cfg.max_concurrent,
             "group_size": cfg.group_size,
             "task_ids": cfg.task_ids,
@@ -452,9 +468,10 @@ def eval_command(
     agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
     if cfg.model:
         agent_kwargs["model"] = cfg.model
-    agent_kwargs["max_steps"] = cfg.max_steps
-    if cfg.auto_respond and not agent_type.is_cli:
-        agent_kwargs["auto_respond"] = True
+    if not agent_type.is_cli:
+        agent_kwargs["max_steps"] = cfg.max_steps
+        if cfg.auto_respond:
+            agent_kwargs["auto_respond"] = True
     if cfg.gateway:
         agent_kwargs["gateway"] = True
 
@@ -468,7 +485,6 @@ def eval_command(
         shown = ", ".join(cfg.task_ids[:5])
         table.add_row("task_ids", shown + ("..." if len(cfg.task_ids) > 5 else ""))
     table.add_row("all", str(cfg.all))
-    table.add_row("max_steps", str(cfg.max_steps))
     table.add_row("max_concurrent", str(cfg.max_concurrent))
     if cfg.group_size > 1:
         table.add_row("group_size", str(cfg.group_size))
@@ -478,7 +494,7 @@ def eval_command(
     table.add_row("", "")
     table.add_row(f"[dim]{agent_type.value} config[/dim]", "")
     for name, value in agent_kwargs.items():
-        if name in ("max_steps", "auto_respond"):
+        if name == "auto_respond":
             continue
         table.add_row(f"  {name}", "****" if name == "api_key" else str(value))
     hud_console.print(table)
