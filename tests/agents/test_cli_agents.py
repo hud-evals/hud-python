@@ -24,7 +24,7 @@ from hud.runtime import LocalRuntime, Shared
 from hud.types import AgentType
 from tests.conftest import SANDBOX
 from tests.fixtures import clis
-from tests.fixtures.asgi import serve_asgi
+from tests.fixtures.asgi import mcp_server, serve_asgi
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.screen import fake_screen
 
@@ -255,6 +255,32 @@ async def test_without_a_sandbox_the_cli_holds_its_model_key(
     (capture,) = stub.captures()
     assert trace.status == "completed"
     assert "hud-key" in capture["env"].values()
+
+
+@UNSANDBOXED
+@EVERY_CLI
+async def test_the_cli_calls_the_tools_of_the_environments_mcp_server(
+    agent_type: str, cli: str, tmp_path: Path
+) -> None:
+    received: list[str] = []
+    notes = FastMCP("notes")
+
+    @notes.tool
+    def echo(text: str) -> str:
+        received.append(text)
+        return f"echo: {text}"
+
+    call = {"name": "notes", "tool": "echo", "arguments": {"text": "hi"}}
+    stub = clis.Stub(tmp_path / "ws" / ".stub", cli, stdout=clis.answer(cli, "done"), mcp=[call])
+    stub.install()
+
+    async with mcp_server(notes, name="notes") as tools:
+        task = workspace_task(tmp_path / "ws", env=stub.shell_env(), capabilities=(tools,))
+        (trace,) = (await task().run(AgentType(agent_type).cls())).traces
+
+    (capture,) = stub.captures()
+    assert trace.status == "completed"
+    assert (received, capture["mcp"]) == (["hi"], [["echo: hi"]])
 
 
 @UNSANDBOXED
