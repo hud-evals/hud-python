@@ -117,6 +117,7 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                 "--input-format=stream-json",
                 "--output-format=stream-json",
                 "--print",
+                "--thinking-display=summarized",
                 f"--permission-mode={self.config.permission_mode}",
             ]
             if self.config.max_steps > 0:
