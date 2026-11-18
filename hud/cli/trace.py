@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import typer
@@ -20,17 +19,27 @@ from hud.cli import (
     CLIGroup,
 )
 from hud.settings import settings
-from hud.telemetry.span import normalize_trace_id
-from hud.types import TextContent
+from hud.telemetry.span import (
+    PAYLOAD_ATTRIBUTE,
+    SCHEMA_ATTRIBUTE,
+    TRACE_SCHEMA,
+    normalize_trace_id,
+)
+from hud.types import STEP_SCHEMA, Step, TextContent
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 hud_console = HUDConsole()
 
 
 class _Events(BaseModel):
     events: list[dict[str, Any]]
+    status: str
+    reward: float | None = None
 
 
 class _TraceGroup(CLIGroup):
@@ -58,71 +67,30 @@ def get_command(
 ) -> Any:
     """Render the turns and tool calls for one rollout.
 
-    Reads the trace from the local span directory (HUD_TELEMETRY_LOCAL_DIR, or
-    ~/.hud/spans when HUD_TELEMETRY_ENABLED is false) when it is there, otherwise
-    from the HUD platform.
+    Reads the local trace file (HUD_TRACE_DIR, ~/.hud/traces by default), else
+    the HUD platform.
 
     [not dim]Examples:
         hud trace get <trace-id>
         hud trace get <trace-id> --json[/not dim]
     """
     otel_id = normalize_trace_id(trace_id)
-    local = Path(settings.span_dir) / f"{otel_id}.jsonl" if settings.span_dir else None
+    local = settings.local_trace_dir / f"{otel_id}.jsonl" if settings.local_trace_dir else None
 
-    events: list[dict[str, Any]] = []
+    events: list[dict[str, Any]]
     if local is not None and local.exists():
         source = f"local ({local})"
-        spans: list[dict[str, Any]] = []
-        incomplete = 0
-        for line in local.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                spans.append(json.loads(line))
-            except json.JSONDecodeError:
-                incomplete += 1  # the exporter appends; an interrupted write leaves a partial line
-        if incomplete:
-            hud_console.warning(f"Skipped {incomplete} incomplete span record(s) in {local}")
-        for span in sorted(spans, key=lambda s: s.get("start_time", "")):
-            attrs = span.get("attributes", {})
-            payload = attrs.get("hud.payload", {})
-            if attrs.get("hud.schema") != "hud.step.v1" or not isinstance(payload, dict):
-                continue
-            if payload.get("source") == "agent":
-                step = AgentStep.model_validate(payload)
-                events.append(
-                    {
-                        "kind": "agent_message",
-                        "text": step.content,
-                        "reasoning": step.reasoning,
-                        "tool_calls": [call.model_dump(mode="json") for call in step.tool_calls],
-                        "error": step.error,
-                    }
-                )
-            elif payload.get("source") == "tool":
-                tool = ToolStep.model_validate(payload)
-                result = tool.result
-                text = "\n".join(
-                    block.text
-                    for block in (result.content if result is not None else [])
-                    if isinstance(block, TextContent)
-                )
-                events.append(
-                    {
-                        "kind": "tool_call",
-                        "tool_name": tool.call.name if tool.call is not None else None,
-                        "arguments": tool.call.arguments if tool.call is not None else {},
-                        "result_text": text,
-                        "error": tool.error
-                        or (text if result is not None and result.isError else None),
-                    }
-                )
+        events = _local_events(local)
     else:
         source = "platform"
         try:
-            events = PlatformClient.from_settings().get(f"/trace/{trace_id}/events", _Events).events
+            trace = PlatformClient.from_settings().get(f"/trace/{trace_id}/events", _Events)
         except HudRequestError as exc:
             raise CliError.from_http(exc, resource="Trace", input={"trace_id": trace_id}) from exc
+        events = [
+            *trace.events,
+            {"kind": "outcome", "status": trace.status, "reward": trace.reward},
+        ]
 
     if not events:
         hud_console.stdout.print("[yellow]No events found for this trace.[/yellow]")
@@ -159,7 +127,116 @@ def get_command(
                 hud_console.stdout.print(Text(f"  {name} →", style="dim"))
                 for line in (event.get("result_text") or "").splitlines():
                     hud_console.stdout.print(Text(f"    {line}"))
+        elif kind == "outcome":
+            hud_console.stdout.print(Rule("[cyan]Outcome[/cyan]", style="cyan"))
+            hud_console.stdout.print(
+                Text(f"{event.get('status')}, reward {event.get('reward')}", style="bold")
+            )
+            if event.get("error"):
+                hud_console.stdout.print(Text(f"  error: {event['error']}", style="red"))
 
     web = settings.hud_web_url.rstrip("/")
     hud_console.stdout.print(f"\n[dim]View: {web}/trace/{UUID(otel_id)}[/dim]")
     return events
+
+
+def _local_events(path: Path) -> list[dict[str, Any]]:
+    """A local trace file as the platform's ``/trace/{id}/events`` events, then its outcome."""
+    spans: list[dict[str, Any]] = []
+    incomplete = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            spans.append(json.loads(line))
+        except json.JSONDecodeError:
+            incomplete += 1  # the exporter appends; an interrupted write leaves a partial line
+    if incomplete:
+        hud_console.warning(f"Skipped {incomplete} incomplete span record(s) in {path}")
+
+    events: list[dict[str, Any]] = []
+    outcome: dict[str, Any] | None = None
+    for span in sorted(spans, key=lambda s: s.get("start_time", "")):
+        attrs = span.get("attributes", {})
+        payload = attrs.get(PAYLOAD_ATTRIBUTE)
+        if not isinstance(payload, dict):
+            continue
+        schema = attrs.get(SCHEMA_ATTRIBUTE)
+        if schema == TRACE_SCHEMA and span.get("name") == "trace.exit":
+            outcome = {
+                "kind": "outcome",
+                "status": payload.get("status"),
+                "reward": payload.get("reward"),
+                "error": payload.get("error"),
+            }
+        elif schema == STEP_SCHEMA and (event := _step_event(payload, span.get("name"))):
+            events.append(
+                {
+                    "id": span.get("span_id"),
+                    "started_at": payload.get("started_at") or span.get("start_time"),
+                    "ended_at": payload.get("ended_at") or span.get("end_time"),
+                    **event,
+                }
+            )
+    return [*events, outcome] if outcome is not None else events
+
+
+def _step_event(payload: dict[str, Any], span_name: str | None) -> dict[str, Any] | None:
+    """One step as the platform projects it; ``None`` for one it shows only as a raw event."""
+    match payload.get("source"):
+        case "user":
+            messages = Step.model_validate(payload).messages
+            texts = [m.content.text for m in messages if isinstance(m.content, TextContent)]
+            return {"kind": "user_message", "text": "\n\n".join(texts)}
+        case "agent":
+            agent = AgentStep.model_validate(payload)
+            return {
+                "kind": "agent_message",
+                "text": agent.content,
+                "reasoning": agent.reasoning,
+                "finish_reason": agent.finish_reason,
+                "refusal": agent.refusal,
+                "tool_calls": [
+                    {"tool_call_id": c.id, "name": c.name, "arguments": c.arguments or {}}
+                    for c in agent.tool_calls
+                ],
+            }
+        case "tool":
+            tool = ToolStep.model_validate(payload)
+            result = tool.result
+            text = "\n".join(
+                block.text
+                for block in (result.content if result is not None else [])
+                if isinstance(block, TextContent)
+            )
+            failed = result is not None and result.isError
+            error = tool.error or ((text or "tool error (no message)") if failed else None)
+            return {
+                "kind": "tool_call",
+                "method": "tools/call",
+                "tool_call_id": tool.call.id if tool.call is not None else None,
+                "tool_name": tool.call.name if tool.call is not None else None,
+                "arguments": (tool.call.arguments if tool.call is not None else None) or {},
+                "result_text": None if failed else text or None,
+                "error": error,
+            }
+        case "task":
+            step = Step.model_validate(payload)
+            task = step.task_call
+            if task is None:
+                # A task step recorded without its call: the platform shows it by span name.
+                return {
+                    "kind": "scenario_setup",
+                    "name": span_name,
+                    "arguments": {},
+                    "result": None,
+                    "error": step.error,
+                }
+            return {
+                "kind": "scenario_evaluate" if task.phase == "evaluate" else "scenario_setup",
+                "name": task.name,
+                "arguments": task.arguments if isinstance(task.arguments, dict) else {},
+                "result": task.result,
+                "error": step.error,
+            }
+    return None

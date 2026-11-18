@@ -397,18 +397,13 @@ hud jobs cancel --all --yes   # every active job on your account
 
 ### `hud trace`
 
-Inspect a single rollout. Reads from the local telemetry JSONL file first
-(`HUD_TELEMETRY_LOCAL_DIR` or `~/.hud/spans` when uploads are disabled) and falls
-back to the platform API.
+Inspect a single rollout. Reads the local trace file (`HUD_TRACE_DIR`, `~/.hud/traces` by
+default), else the platform API. See [Telemetry](/v6/reference/telemetry).
 
 ```bash
-hud trace get <trace-id>          # rendered view: agent turns, tool calls, tool results
+hud trace get <trace-id>          # rendered view: agent turns, tool calls, tool results, outcome
 hud trace get <trace-id> --json   # raw event list
 ```
-
-Set `HUD_TELEMETRY_ENABLED=0` to keep spans on disk at `~/.hud/spans`, or set
-`HUD_TELEMETRY_LOCAL_DIR` to choose a directory. `hud trace` reads those files
-without an API call.
 
 ## Other commands
 

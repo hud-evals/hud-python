@@ -23,10 +23,7 @@ def get_current_trace_id() -> str | None:
 def get_trace_headers() -> dict[str, str]:
     """A copy of the active trace headers, or ``{}`` outside a trace."""
     headers = _current_trace_headers.get()
-    if headers is not None:
-        return dict(headers)
-    trace_id = get_current_trace_id()
-    return {"Trace-Id": trace_id} if trace_id is not None else {}
+    return dict(headers) if headers is not None else {}
 
 
 @contextmanager

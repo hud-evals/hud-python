@@ -20,6 +20,7 @@ from hud.graders.base import Grade, grade_problems
 from hud.runtime.core import resolve_runtime_config
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
+from hud.telemetry.exporter import export_step
 from hud.telemetry.span import normalize_trace_id
 from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
 from hud.utils.gateway import routes_to_gateway
@@ -171,12 +172,14 @@ class Run:
         task_id: str,
         args: dict[str, Any],
         *,
+        trace_id: str,
         best_effort_grade: bool = False,
         runtime_config: RuntimeConfig | None = None,
         connections: Sequence[Connection] = (),
     ) -> None:
         self._client = client
         self._task_id = task_id
+        self._trace_id = trace_id
         self._args = args
         self._best_effort_grade = best_effort_grade
         self.runtime_config = runtime_config
@@ -209,7 +212,9 @@ class Run:
         return self.trace.prompt_text or ""
 
     def record(self, step: Step) -> None:
+        """Append ``step`` to the trace and export it under the trace's id."""
         self.trace.record(step)
+        export_step(self._trace_id, step)
 
     async def __aenter__(self) -> Self:
         started_at = now_iso()
@@ -450,6 +455,7 @@ async def rollout(
                         actor_client,
                         task.id,
                         task.args,
+                        trace_id=trace_id,
                         best_effort_grade=task.verifier is not None,
                         runtime_config=addr.config or actor_runtime_config,
                         connections=bound,
@@ -460,7 +466,7 @@ async def rollout(
                         _phase = "agent loop"
                         try:
                             try:
-                                async with file_tracking_observer(actor_client):
+                                async with file_tracking_observer(actor_client, trace_id):
                                     if agent_timeout is None:
                                         await agent(run)
                                     else:

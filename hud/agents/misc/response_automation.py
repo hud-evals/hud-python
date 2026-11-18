@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Literal, cast
 from openai.types.responses import ResponseOutputText
 
 from hud import types
-from hud.telemetry.instrument import instrument
 from hud.utils.gateway import build_gateway_client
 
 if TYPE_CHECKING:
@@ -60,7 +59,6 @@ async def auto_respond(
     )
 
 
-@instrument(name="response_automation")
 async def _determine_response(
     agent_message: str,
     *,

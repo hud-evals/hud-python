@@ -377,8 +377,8 @@ hud trace get <trace-id>        # render one rollout — agent turns, tool calls
 hud trace get <trace-id> --json # raw event list (pipe to jq for filtering)
 ```
 
-Set `HUD_TELEMETRY_LOCAL_DIR` to write spans locally; `hud trace` reads from disk
-first and falls back to the platform API. Cite [CLI](/v6/reference/cli).
+`hud trace` reads the local trace file every run writes (`~/.hud/traces`, or `HUD_TRACE_DIR`),
+else the platform API. Cite [CLI](/v6/reference/cli).
 
 When unsure about an API, read the page rather than guess:
 [Environment](/v6/reference/environment) · [Tasks & Tasksets](/v6/reference/tasks) ·

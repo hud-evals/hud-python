@@ -10,7 +10,7 @@ import weakref
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from hud.telemetry.context import get_current_trace_id
-from hud.telemetry.exporter import queue_span
+from hud.telemetry.exporter import export_span
 from hud.telemetry.span import (
     PAYLOAD_ATTRIBUTE,
     TASK_RUN_ID_ATTRIBUTE,
@@ -19,6 +19,7 @@ from hud.telemetry.span import (
     new_span_id,
     normalize_trace_id,
 )
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.serialization import JsonObject, json_safe_value
 from hud.utils.time import now_iso
 
@@ -96,8 +97,11 @@ def instrument(
     """Record each call of ``func`` as a debug span; calls outside a trace record nothing.
 
     The span is named ``module.qualname`` unless ``name`` is given, and carries the
-    arguments and result as ``hud.request`` and ``hud.result`` events.
+    arguments and result as ``hud.request`` and ``hud.result`` events. Deprecated.
     """
+    warn_deprecated(
+        "`hud.telemetry.instrument`", "record steps through the run (`run.record(step)`)"
+    )
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         if func in _INSTRUMENTED:
@@ -194,7 +198,7 @@ def instrument(
                 return
             end_time = now_iso()
             span = _build_span(task_run_id, args, kwargs, start_time, end_time, result, error)
-            queue_span(span.model_dump(mode="json"))
+            export_span(span)
             logger.debug("Span: %s (%.2fms)", span_name, (time.perf_counter() - start_perf) * 1000)
 
         @functools.wraps(func)
