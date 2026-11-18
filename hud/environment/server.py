@@ -7,7 +7,6 @@ import asyncio
 import contextlib
 import inspect
 import logging
-import math
 import secrets
 import sys
 from dataclasses import dataclass
@@ -20,7 +19,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from hud.capabilities.connection import Connection
 from hud.environment import load_environment
 from hud.graders import EvaluationResult
-from hud.types import Grade
+from hud.graders.base import Grade, grade_problems
 from hud.utils.process import run_until_terminated
 
 from .egress import WorkspaceRoute
@@ -123,16 +122,6 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
     )
 
 
-def _score_value(result: Any) -> float:
-    score = getattr(result, "reward", result)
-    if isinstance(score, (int, float)):
-        return float(score)
-    raise TypeError(
-        f"task graded with {type(result).__name__}: yield a number, an object "
-        "with a numeric .reward, or a dict containing a numeric 'score'"
-    )
-
-
 class TaskRunner:
     """Holds one task's suspended generator between ``tasks.start`` and ``tasks.grade``."""
 
@@ -164,27 +153,20 @@ class TaskRunner:
             evaluation = 0.0
         finally:
             await self.cancel()
-        if isinstance(evaluation, dict):
-            if not isinstance(evaluation.get("score"), (int, float)):
-                raise TypeError(
-                    f"task {self.task.id!r} graded with a dict missing a numeric "
-                    f"'score' (keys: {sorted(evaluation)})"
-                )
-            frame = cast("dict[str, Any]", _jsonable(evaluation))
-        elif isinstance(evaluation, Grade):
-            frame = evaluation.to_frame()
+        if isinstance(evaluation, (int, float)):
+            evaluation = {"score": float(evaluation)}
         elif isinstance(evaluation, EvaluationResult):
-            # Forward the whole frame so its metadata survives; the wire names ``reward`` "score".
-            frame = evaluation.model_dump(mode="json")
-            frame["score"] = frame.pop("reward")
-        else:
-            frame = {"score": _score_value(evaluation)}
-        if not math.isfinite(frame["score"]):
-            raise ValueError(
-                f"task {self.task.id!r} graded with a non-finite score ({frame['score']!r}): "
-                "yield a finite number"
+            evaluation = {**evaluation.model_dump(exclude={"reward"}), "score": evaluation.reward}
+        if isinstance(evaluation, dict) and not isinstance(evaluation.get("score"), (int, float)):
+            raise TypeError(
+                f"task {self.task.id!r} graded with a dict missing a numeric "
+                f"'score' (keys: {sorted(evaluation)})"
             )
-        return frame
+        try:
+            grade = Grade.model_validate(_jsonable(evaluation), by_name=False)
+        except ValidationError as exc:
+            raise ValueError(f"task {self.task.id!r} graded with {grade_problems(exc)}") from exc
+        return grade.model_dump(mode="json")
 
     async def cancel(self) -> None:
         if self._gen is not None:

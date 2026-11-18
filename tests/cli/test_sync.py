@@ -129,6 +129,17 @@ def test_a_sync_uploads_only_what_the_remote_taskset_lacks(
     assert all(u["taskset_id"] == TASKSET_ID for u in uploads(platform))
 
 
+def test_a_task_whose_argument_changes_type_uploads_again(platform: FakeServices, hud: Hud) -> None:
+    remote = exported(1, 2)
+    remote[0]["args"] = {"n": True}
+    holding(platform, TASKSET_ID, "demo", remote)
+
+    result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
+
+    assert (result.exit_code, result.json["status"]) == (0, "synced"), result
+    assert [[t["name"] for t in u["tasks"]] for u in uploads(platform)] == [[ONE]]
+
+
 def test_a_task_moved_to_another_env_uploads_again(platform: FakeServices, hud: Hud) -> None:
     holding(platform, TASKSET_ID, "demo", exported(1, 2, env="other"))
 

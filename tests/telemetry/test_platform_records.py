@@ -108,6 +108,7 @@ async def test_a_graded_rollout_reports_its_reward_evaluation_and_metadata(
         yield "go"
         yield {
             "score": 0.5,
+            "schema_version": "qa.v1",
             "info": {"stdout": stdout},
             "subscores": [{"name": "format", "weight": 1.0, "value": 0.5, "info": {"seen": True}}],
         }
@@ -126,7 +127,7 @@ async def test_a_graded_rollout_reports_its_reward_evaluation_and_metadata(
         3,
     )
     evaluation = exited["evaluation_result"]
-    assert evaluation["score"] == 0.5
+    assert (evaluation["score"], evaluation["schema_version"]) == (0.5, "qa.v1")
     assert "info" not in evaluation
     (subscore,) = evaluation["subscores"]
     assert (subscore["name"], subscore["value"], "info" in subscore) == ("format", 0.5, False)
@@ -173,6 +174,7 @@ async def test_a_rollout_that_never_launched_reports_where_it_failed(
 
     (exited,) = reporting.bodies("api", "POST", TRACE_EXIT)
     assert (exited["status"], exited["reward"]) == ("error", 0.0)
+    assert "evaluation_result" not in exited
     assert exited["error"].startswith("[provisioning] ")
     assert "no host" in exited["error"]
 

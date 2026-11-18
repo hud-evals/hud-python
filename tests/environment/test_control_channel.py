@@ -72,7 +72,7 @@ async def test_a_declared_return_type_parses_the_answer_and_keeps_it_raw(
         parsed = answer.content
         yield {
             "score": 1.0 if isinstance(parsed, Point) else 0.0,
-            "content": parsed.model_dump() if isinstance(parsed, Point) else parsed,
+            "parsed": parsed.model_dump() if isinstance(parsed, Point) else parsed,
             "raw": answer.raw,
         }
 
@@ -83,7 +83,7 @@ async def test_a_declared_return_type_parses_the_answer_and_keeps_it_raw(
         await peer.call("tasks.start", {"id": "point"})
         graded = (await peer.call("tasks.grade", {"answer": answer}))["result"]
 
-    assert (graded["content"], graded["raw"]) == (content, answer)
+    assert (graded["parsed"], graded["raw"]) == (content, answer)
 
 
 @pytest.mark.parametrize(
@@ -115,7 +115,7 @@ async def test_ending_a_sessions_task_closes_its_template(
         answered = await peer.call(method, params)
         closed = list(events)
 
-    assert (answered["result"], closed) == (reply, ["closed first"])
+    assert (reply.items() <= answered["result"].items(), closed) == (True, ["closed first"])
 
 
 def stalled(events: list[str]) -> Environment:
@@ -167,7 +167,7 @@ async def test_a_request_at_the_frame_limit_round_trips_its_payload() -> None:
     @env.template()
     async def echo(data: str):
         yield data
-        yield {"score": 1.0, "detail": data}
+        yield 1.0
 
     frame = start_of_size(FRAME_LIMIT)
     async with LocalRuntime(env)(Task(env="limits", id="x")) as runtime, wire(runtime.url) as peer:
@@ -177,7 +177,7 @@ async def test_a_request_at_the_frame_limit_round_trips_its_payload() -> None:
 
     data = frame["params"]["args"]["data"]
     assert started is not None
-    assert (started["result"]["prompt"], graded["result"]["detail"]) == (data, data)
+    assert (started["result"]["prompt"], graded["result"]["score"]) == (data, 1.0)
 
 
 def tagged() -> Environment:

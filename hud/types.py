@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import math
 import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeAlias, cast
@@ -15,13 +14,12 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    PrivateAttr,
     SerializeAsAny,
     model_validator,
 )
 from typing_extensions import TypeVar
 
-from hud.graders import base as grading
+from hud.graders.base import Grade
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
 from hud.telemetry.span import (
@@ -338,90 +336,6 @@ StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malfo
 # The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
 # conditions the loop may either stop on or answer with an error result.
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
-
-
-class Grade(BaseModel):
-    """A task's verdict: what a task yields to grade itself, and what its trace records.
-
-    ``subscores`` is the optional breakdown that ``combine`` builds. On the controller,
-    ``raw`` is the grade frame the environment sent; a task leaves it empty.
-    """
-
-    reward: float = 0.0
-    done: bool = True
-    content: str | None = None
-    info: dict[str, Any] = Field(default_factory=dict)
-    is_error: bool = False
-    subscores: list[grading.SubScore] | None = None
-    raw: dict[str, Any] = Field(default_factory=dict)
-
-    model_config = ConfigDict(extra="forbid")
-
-    _evaluation: dict[str, Any] = PrivateAttr(default_factory=dict)
-
-    def model_post_init(self, context: Any, /) -> None:
-        # Malformed subscores fail here, where the grade is built, not when read.
-        evaluation = {key: value for key, value in self.raw.items() if key != "info"}
-        if isinstance(subscores := evaluation.get("subscores"), list):
-            evaluation["subscores"] = [
-                grading.SubScore.model_validate(subscore).to_summary() for subscore in subscores
-            ]
-        self._evaluation = evaluation
-
-    @property
-    def evaluation(self) -> dict[str, Any]:
-        """A persistence-safe view of ``raw``: no ``info``, subscores reduced to their summaries.
-
-        ``info`` is span-only, like each subscore's; read it from ``Grade.info``.
-        """
-        return dict(self._evaluation)
-
-    @classmethod
-    def from_frame(cls, frame: dict[str, Any]) -> Grade:
-        """Read a ``tasks.grade`` result frame; raises ``ValueError`` without a finite ``score``.
-
-        Environments on every SDK version send this shape, ``EvaluationResult`` ones included.
-        """
-        score = frame.get("score")
-        if (
-            isinstance(score, bool)
-            or not isinstance(score, (int, float))
-            or not math.isfinite(score)
-        ):
-            raise ValueError(f"a grade frame needs a finite numeric 'score', got {score!r}")
-        info = frame.get("info")
-        content = frame.get("content")
-        subscores = frame.get("subscores")
-        return cls(
-            reward=float(score),
-            done=bool(frame.get("done", True)),
-            content=content if isinstance(content, str) else None,
-            info=info if isinstance(info, dict) else {},
-            is_error=bool(frame.get("isError", False)),
-            subscores=(
-                [grading.SubScore.model_validate(item) for item in subscores]
-                if isinstance(subscores, list)
-                else None
-            ),
-            raw=dict(frame),
-        )
-
-    def to_frame(self) -> dict[str, Any]:
-        """The ``tasks.grade`` result frame an environment sends for this grade."""
-        data = self.model_dump(mode="json", exclude={"raw"})
-        return {
-            "score": data["reward"],
-            "done": data["done"],
-            "content": data["content"],
-            "info": data["info"],
-            "isError": data["is_error"],
-            "subscores": data["subscores"],
-        }
-
-    @classmethod
-    def ungraded(cls) -> Grade:
-        """The grade of a trace that has not been graded."""
-        return cls(is_error=True, content="not graded")
 
 
 class Trace(BaseModel):

@@ -52,7 +52,7 @@ class SyncPlan:
 
 
 def diff(local: Taskset, remote: Taskset) -> SyncPlan:
-    """Classify local tasks against a remote taskset by slug + content signature."""
+    """Classify local tasks against a remote taskset: matched by slug, compared by content."""
     remote_by_slug = dict(remote.tasks)
     to_create: list[Task] = []
     to_update: list[Task] = []
@@ -63,7 +63,11 @@ def diff(local: Taskset, remote: Taskset) -> SyncPlan:
         if existing is None:
             to_create.append(task)
             continue
-        if _task_signature(task) == _task_signature(existing):
+        # Compared as JSON text: dict equality treats an argument of 1 and true as the same.
+        local_row, remote_row = (
+            json.dumps(row.model_dump(mode="json"), sort_keys=True) for row in (task, existing)
+        )
+        if local_row == remote_row:
             unchanged.append(task)
         else:
             to_update.append(task)
@@ -105,17 +109,6 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
         "task_id": row.pop("id"),
         **row,
     }
-
-
-def _task_signature(task: Task) -> str:
-    # The slug keys the row; everything else, its env included, is what it runs.
-    sig_data = task.model_dump(mode="json", exclude_none=True, exclude={"slug"})
-    return json.dumps(
-        sig_data,
-        sort_keys=True,
-        default=str,
-        separators=(",", ":"),
-    )
 
 
 class TasksetRecord(BaseModel):

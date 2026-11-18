@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from hud.graders.base import Grade
 from hud.settings import settings
 from hud.utils.platform import PlatformClient
 
@@ -99,7 +100,7 @@ async def trace_exit(trace: Trace) -> None:
             "reward": trace.reward,
             # A step error the agent recovered from isn't a trace error.
             "error": trace.error if trace.is_error else None,
-            "evaluation_result": trace.evaluation or None,
+            "evaluation_result": (None if trace.grade == Grade.ungraded() else trace.evaluation),
             "stop_reason": trace.stop_reason,
             "metadata": trace.extra or None,
         },

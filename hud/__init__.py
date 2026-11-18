@@ -9,7 +9,8 @@ from .eval.job import Job
 from .eval.run import Run
 from .eval.task import Task
 from .eval.taskset import Taskset
-from .types import Grade, Trace
+from .graders.base import Grade
+from .types import Trace
 from .utils.deprecation import RUNTIME_NAMES, moved_to, resolve_retired
 from .version import __version__
 

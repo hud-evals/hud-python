@@ -9,16 +9,19 @@ import traceback
 import uuid
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
+from pydantic import ValidationError
+
 from hud.agents.cli import CLIAgent
 from hud.agents.types import AgentConfig
 from hud.capabilities.connection import Connection
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients.client import HudProtocolError, connect
+from hud.graders.base import Grade, grade_problems
 from hud.runtime.core import resolve_runtime_config
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
-from hud.types import Grade, PromptMessage, Step, TaskCall, TextContent, Trace
+from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -140,10 +143,23 @@ def _episode_bindings(started: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def parse_grade(frame: dict[str, Any]) -> Grade:
+    if "score" not in frame:
+        raise HudProtocolError(
+            -32603, f"tasks.grade: a grade frame needs a 'score', got keys {sorted(frame)}"
+        )
+    content, info, subscores = frame.get("content"), frame.get("info"), frame.get("subscores")
+    frame = {
+        **frame,
+        "done": bool(frame.get("done", True)),
+        "content": content if isinstance(content, str) else None,
+        "info": info if isinstance(info, dict) else {},
+        "isError": bool(frame.get("isError", False)),
+        "subscores": subscores if isinstance(subscores, list) else None,
+    }
     try:
-        return Grade.from_frame(frame)
-    except ValueError as exc:
-        raise HudProtocolError(-32603, f"tasks.grade: {exc}") from exc
+        return Grade.model_validate(frame, by_name=False)
+    except ValidationError as exc:
+        raise HudProtocolError(-32603, f"tasks.grade: {grade_problems(exc)}") from exc
 
 
 class Run:
@@ -245,16 +261,7 @@ class Run:
                 raise
             detail = "".join(traceback.format_exception_only(grade_exc)).strip()
             logger.warning("best-effort grade failed: %s", detail)
-            self.trace.grade = Grade(
-                content=detail,
-                is_error=True,
-                raw={
-                    "score": 0.0,
-                    "answer": self.trace.content,
-                    "content": detail,
-                    "isError": True,
-                },
-            )
+            self.trace.grade = Grade(content=detail, is_error=True, answer=self.trace.content)
             self.trace.status = "error"
             self.record(Step(source="system", error=f"[grading] {detail}"))
             return False
@@ -481,7 +488,7 @@ async def rollout(
                         _phase = "grading"
 
                     if verifier is not None:
-                        actor_result = live.trace.grade.raw
+                        actor_result = live.trace.grade.model_dump(mode="json")
                         assert actor_client.manifest is not None
                         actor_session_id = actor_client.manifest.session_id
                         # The verifier is authoritative: no actor grade survives its failure.

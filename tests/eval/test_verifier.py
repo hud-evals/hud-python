@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud import Environment, Task
+from hud import Environment, Grade, Task
 from hud.runtime import LocalRuntime, Runtime
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Callable
 
 
 def verified(actor: Environment, judge: Environment) -> Task:
@@ -98,6 +98,44 @@ async def test_a_verifier_on_the_actors_env_grades_on_the_same_host() -> None:
 
     assert job.traces[0].reward == 1.0
     assert events == ["up", "actor graded", "verifier graded", "down"]
+
+
+@pytest.mark.parametrize(
+    "actor_grade",
+    [
+        pytest.param(lambda answer: {"score": 0.25, "answer": answer}, id="a-frame"),
+        pytest.param(
+            lambda answer: {
+                "score": 0.25,
+                "answer": answer,
+                **dict.fromkeys(("reward", "is_error", "extra"), "kept"),
+            },
+            id="a-frame-with-keys-named-like-fields",
+        ),
+        pytest.param(lambda answer: Grade(reward=0.25, answer=answer), id="a-grade"),
+    ],
+)
+async def test_a_verifier_reads_the_keys_its_actor_grades_with(
+    actor_grade: Callable[[str], object],
+) -> None:
+    env = Environment("verified")
+
+    @env.template()
+    async def solve():
+        answer = yield "answer secret"
+        yield actor_grade(answer)
+
+    @env.template()
+    async def verify():
+        result = yield ""
+        kept = all(result.get(key, "kept") == "kept" for key in ("reward", "is_error", "extra"))
+        yield 1.0 if result["answer"] == "secret" and kept and not result["isError"] else 0.0
+
+    task = solve()
+    task.verifier = verify()
+    job = await task.run(ScriptedAgent("secret"))
+
+    assert job.traces[0].reward == 1.0
 
 
 @pytest.mark.parametrize(

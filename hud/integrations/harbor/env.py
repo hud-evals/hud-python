@@ -19,8 +19,8 @@ from hud.capabilities.base import Capability
 from hud.environment.egress import ANY_HOST
 from hud.environment.env import Environment, current_session_id
 from hud.environment.workspace import Mount, Workspace
+from hud.graders.base import Grade
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
-from hud.types import Grade
 from hud.utils.process import ProcessResult, create_process_group_exec
 
 if TYPE_CHECKING:
@@ -486,7 +486,7 @@ if CONFIG.verifier_root is not None:
 
     @env.template(id="verify", description="Verify a Harbor task")
     async def verify(task: TaskSpec) -> AsyncGenerator[Any, Any]:
-        actor = Grade.from_frame((yield ""))
+        actor = Grade.model_validate((yield ""), by_name=False)
         if actor.is_error:
             raise RuntimeError(actor.content)
         session_id = current_session_id.get()
