@@ -176,6 +176,19 @@ def test_a_platform_taskset_name_that_names_no_single_taskset_does_not_load(
     assert services.requests("api", "GET", "/v2/tasksets/{id}/export") == []
 
 
+def test_a_platform_taskset_id_the_platform_does_not_hold_does_not_load(
+    services: FakeServices, hud_env: HudEnv
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    taskset_id = "eeeeeeee-0000-4000-8000-000000000009"
+    services.route(
+        "api", "GET", f"/v2/tasksets/{taskset_id}/export", status=404, json={"detail": "gone"}
+    )
+
+    with pytest.raises(ValueError, match=f"taskset not found: {taskset_id}"):
+        Taskset.from_api(taskset_id)
+
+
 async def test_each_row_runs_group_times_in_task_major_order_under_one_job() -> None:
     env = Environment("sums")
 

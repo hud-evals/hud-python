@@ -19,7 +19,7 @@ from hud.capabilities.base import Capability
 from hud.environment.egress import ANY_HOST
 from hud.environment.env import Environment, current_session_id
 from hud.environment.workspace import Mount, Workspace
-from hud.graders import EvaluationResult
+from hud.graders.base import Grade
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
 from hud.utils.process import ProcessResult, create_process_group_exec
 
@@ -468,9 +468,9 @@ async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
             try:
                 await collect(task, SESSIONS / session_id)
             except Exception as error:
-                yield EvaluationResult(isError=True, content=str(error))
+                yield Grade(is_error=True, content=str(error))
             else:
-                yield EvaluationResult(info={"answer": "" if answer is None else str(answer)})
+                yield Grade(info={"answer": "" if answer is None else str(answer)})
         else:
             await run_collect_hooks(task, compose_services())
             yield await grade(task.id, task.verifier_timeout, answer)
@@ -486,8 +486,8 @@ if CONFIG.verifier_root is not None:
 
     @env.template(id="verify", description="Verify a Harbor task")
     async def verify(task: TaskSpec) -> AsyncGenerator[Any, Any]:
-        actor = EvaluationResult.model_validate((yield ""))
-        if actor.isError:
+        actor = Grade.model_validate((yield ""), by_name=False)
+        if actor.is_error:
             raise RuntimeError(actor.content)
         session_id = current_session_id.get()
         if session_id is None:
@@ -537,7 +537,7 @@ def verifier_command(script: Path, path: str | None = None) -> list[str]:
     return ["/bin/sh", target]
 
 
-async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResult:
+async def grade(task_id: str, timeout_sec: float, answer: Any) -> Grade:
     clear(TESTS)
     shutil.copytree(CONTROLLER_ROOT / "tests" / task_id, TESTS, symlinks=True, dirs_exist_ok=True)
     test_script = TESTS / "test.sh"
@@ -660,7 +660,7 @@ async def grade_separate(
     task: TaskSpec,
     session: Path,
     answer: str,
-) -> EvaluationResult:
+) -> Grade:
     assert CONFIG.verifier_root is not None
     async with verifier_lock:
         verifier_root = Path(CONFIG.verifier_root)
@@ -740,7 +740,7 @@ async def grade_separate(
     return evaluation(execution, task.verifier_timeout)
 
 
-def evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult:
+def evaluation(execution: ProcessResult, timeout_sec: float) -> Grade:
     info: dict[str, Any] = {
         "exit_code": execution.returncode,
         "stdout": execution.stdout.decode("utf-8", "replace"),
@@ -748,8 +748,8 @@ def evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult
     }
     if execution.timed_out:
         info["verifier_timeout_sec"] = timeout_sec
-        return EvaluationResult(
-            isError=True,
+        return Grade(
+            is_error=True,
             content=f"Harbor verifier timed out after {timeout_sec:.0f}s",
             info=info,
         )
@@ -757,12 +757,12 @@ def evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult
     score, reward_info = reward()
     info.update(reward_info)
     if score is None:
-        return EvaluationResult(
-            isError=True,
+        return Grade(
+            is_error=True,
             content="Harbor verifier did not write a numeric reward",
             info=info,
         )
-    return EvaluationResult(reward=score, info=info)
+    return Grade(reward=score, info=info)
 
 
 def reward() -> tuple[float | None, dict[str, Any]]:

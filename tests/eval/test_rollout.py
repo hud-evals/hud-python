@@ -162,6 +162,14 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
             "'score'",
             id="a-frame-without-a-score",
         ),
+        pytest.param(
+            {"score": 1.0, "content": {"detail": 1}},
+            0.0,
+            "not graded",
+            "error",
+            "'content'",
+            id="a-frame-with-a-non-string-content",
+        ),
     ],
 )
 async def test_what_the_task_grades_with_is_the_runs_reward_or_its_error(

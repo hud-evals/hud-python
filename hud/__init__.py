@@ -5,17 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 from .environment.env import Environment
-from .eval.chat import Chat
 from .eval.job import Job
 from .eval.run import Run
 from .eval.task import Task
 from .eval.taskset import Taskset
-from .types import Grade, Trace
+from .graders.base import Grade
+from .types import Trace
 from .utils.deprecation import RUNTIME_NAMES, moved_to, resolve_retired
 from .version import __version__
 
 __all__ = [
-    "Chat",
     "Environment",
     "Grade",
     "Job",
@@ -38,7 +37,7 @@ _RETIRED = {
     ),
     **moved_to("hud.capabilities", "Connection"),
     **moved_to("hud.clients", "connect"),
-    **moved_to("hud.eval.sync", "SyncPlan"),
+    **moved_to("hud.cli.tasksets", "SyncPlan"),
     **moved_to("hud.telemetry", "instrument"),
     **moved_to("hud.train", "TrainingClient"),
 }

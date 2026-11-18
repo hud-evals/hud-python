@@ -14,13 +14,12 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    PrivateAttr,
     SerializeAsAny,
     model_validator,
 )
 from typing_extensions import TypeVar
 
-from hud.graders import base as grading
+from hud.graders.base import Grade
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
 from hud.telemetry.span import (
@@ -337,43 +336,6 @@ StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malfo
 # The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
 # conditions the loop may either stop on or answer with an error result.
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
-
-
-class Grade(BaseModel):
-    """The environment's verdict: ``raw`` is its grade frame, ``content`` its message."""
-
-    reward: float = 0.0
-    done: bool = True
-    content: str | None = None
-    info: dict[str, Any] = Field(default_factory=dict)
-    is_error: bool = False
-    raw: dict[str, Any] = Field(default_factory=dict)
-
-    model_config = ConfigDict(extra="forbid")
-
-    _evaluation: dict[str, Any] = PrivateAttr(default_factory=dict)
-
-    def model_post_init(self, context: Any, /) -> None:
-        # Malformed subscores fail here, where the grade is built, not when read.
-        evaluation = {key: value for key, value in self.raw.items() if key != "info"}
-        if isinstance(subscores := evaluation.get("subscores"), list):
-            evaluation["subscores"] = [
-                grading.SubScore.model_validate(subscore).to_summary() for subscore in subscores
-            ]
-        self._evaluation = evaluation
-
-    @property
-    def evaluation(self) -> dict[str, Any]:
-        """A persistence-safe view of ``raw``: no ``info``, subscores reduced to their summaries.
-
-        ``info`` is span-only, like each subscore's; read it from ``Grade.info``.
-        """
-        return dict(self._evaluation)
-
-    @classmethod
-    def ungraded(cls) -> Grade:
-        """The grade of a trace that has not been graded."""
-        return cls(is_error=True, content="not graded")
 
 
 class Trace(BaseModel):

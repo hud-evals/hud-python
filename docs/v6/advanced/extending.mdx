@@ -314,17 +314,11 @@ can inspect the specialist's work separately from the orchestrator's. Because th
 function, everything composes normally: add retries, fan out to several specialists, or swap the model
 - all in plain Python.
 
-## Chat and multi-turn
+## Multi-turn prompts
 
-Most tasks yield a single text prompt. A **chat-style task** yields a *list of messages* instead, so
-the agent works against a multi-turn conversation. The `Chat` runner drives that conversation turn by
-turn and keeps the history for you.
-
-Reach for chat when the *interaction itself* is the thing - assistants, tool-use dialogues, anything
-where the agent needs prior turns. For evals and training, the default single-turn [task](/v6/reference/tasks)
-is what you want. Either way the grading model is the same: you still yield a reward.
-
-### A chat-style task
+Most tasks yield a single text prompt. A task can instead yield a *list of messages*, so the agent
+works against a conversation that already has prior turns. Grading is unchanged: you still yield a
+reward.
 
 A task's prompt can be plain text **or** a list of `PromptMessage`s. To accept a running conversation,
 take a `messages` parameter and yield it as the prompt:
@@ -342,68 +336,8 @@ async def assistant(messages: list[PromptMessage]):
 ```
 
 `run.prompt` becomes the message list, and agents consume it as normalized turns through
-`run.prompt_messages`.
-
-### Driving it with `Chat`
-
-`Chat` wraps a concrete **Task** plus an **Agent**. Each `send()` appends the user message, runs the
-agent over a fresh run with the full history, appends the reply, and returns the `Trace`:
-
-```python chat.py
-import asyncio
-from hud import Chat
-from hud.agents import create_agent
-from hud.runtime import LocalRuntime
-from tasks import assistant
-
-async def main():
-    chat = Chat(
-        assistant(messages=[]),
-        create_agent("claude-sonnet-4-5"),
-        runtime=LocalRuntime("tasks.py"),
-    )
-    r1 = await chat.send("Book me a flight")
-    r2 = await chat.send("SFO to JFK")
-    print(r2.content)            # the assistant's latest reply
-
-asyncio.run(main())
-```
-
-`Chat` is imported from `hud`. The task's `messages` argument is
-replaced with the running conversation on every `send`. `runtime=` places each turn's rollout; the
-agent loop runs in your process, so pass a local placement such as `LocalRuntime` or `Runtime(url)`.
-
-### Managing history
-
-The conversation history **is** the public `chat.messages` list - persist it, restore it, or reset it
-directly:
-
-| Operation | Description |
-|-----------|-------------|
-| `await chat.send(message)` | Send a user turn; returns the reply `Trace`. |
-| `chat.messages` | The history (`{"role", "content"}` dicts) - `json.dumps` to persist, assign to restore, clear to reset. |
-
-### Serving a chat
-
-`Chat` is protocol-agnostic: any frontend - a web handler, a notebook, a wire protocol - just calls
-`await chat.send(...)`. For example, behind FastAPI:
-
-```python
-app = FastAPI()
-chat = Chat(
-    assistant(messages=[]),
-    create_agent("claude-sonnet-4-5"),
-    runtime=LocalRuntime("tasks.py"),
-)
-
-@app.post("/api/chat")
-async def chat_endpoint(message: str):
-    result = await chat.send(message)
-    return {"response": result.content}
-```
-
-For a complete A2A endpoint (sessions per context, agent card, citations transport), see the runnable
-[A2A chat cookbook](/v6/cookbooks/a2a-chat) - the protocol adapter is deliberately not part of the SDK.
+`run.prompt_messages`. CLI agents such as `ClaudeCLIAgent` read one text prompt, so for them yield the
+conversation as a transcript of labelled turns.
 
 ## See also
 

@@ -85,7 +85,8 @@ sequenceDiagram
 
 The actor task is graded to complete its generator lifecycle. Its full result frame is sent to the
 verifier, whose evaluation replaces it as the run's grade of record. An actor result must include
-the numeric `score` required of every task result plus whatever fields its verifier consumes. If
+the numeric `score` required of every task result plus whatever fields its verifier consumes; an
+actor that yields a `Grade` passes them as keywords (`Grade(reward=0.0, answer=answer)`). If
 actor grading fails, the engine supplies an error result containing the submitted `answer` so an
 authoritative verifier can still run. A verifier provisioning or grading failure leaves the run
 errored and ungraded.

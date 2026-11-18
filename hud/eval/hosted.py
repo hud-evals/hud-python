@@ -170,7 +170,6 @@ def _fold(state: _TraceState, trace_id: str) -> Trace:
             reward=reward if reward is not None else 0.0,
             is_error=reward is None,
             content=grade_error,
-            raw={"score": reward} if reward is not None else {},
         )
     )
     trace.runtime = f"hud://trace/{trace_id}"

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import re
 
-from hud import Environment
-from hud.graders import EvaluationResult
+from hud import Environment, Grade
 
 env = Environment(name="fireworks-arithmetic")
 
 
-def grade_final_integer(answer: str | None, expected: int) -> EvaluationResult:
+def grade_final_integer(answer: str | None, expected: int) -> Grade:
     """Grade an integer on the last nonempty line, allowing thousands separators."""
     text = (answer or "").strip()
     final = text.splitlines()[-1].strip() if text else ""
@@ -19,7 +18,7 @@ def grade_final_integer(answer: str | None, expected: int) -> EvaluationResult:
         if re.fullmatch(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)", final)
         else None
     )
-    return EvaluationResult(
+    return Grade(
         reward=1.0 if got == expected else 0.0,
         content=text,
         info={"expected": expected, "got": got},

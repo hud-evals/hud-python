@@ -7,11 +7,11 @@ import warnings
 from collections import Counter
 from collections.abc import Awaitable
 
-from .base import EvaluationResult, SubScore
+from .base import Grade, SubScore
 
 
-async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
-    """Combine subscores into a result, awaiting any grader coroutines among them concurrently.
+async def combine(*items: SubScore | Awaitable[SubScore]) -> Grade:
+    """Combine subscores into a ``Grade``, awaiting any grader coroutines among them concurrently.
 
     Positive weights are normalized to sum to ``1.0``; negative weights are penalties.
     Duplicate names get numeric suffixes.
@@ -50,7 +50,7 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
             subscores, _unique_names([s.name for s in subscores]), strict=True
         )
     ]
-    return EvaluationResult(
+    return Grade(
         reward=float(sum(item.value * item.weight for item in normalized)),
         done=True,
         subscores=normalized,

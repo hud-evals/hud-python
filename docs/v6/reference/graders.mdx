@@ -4,10 +4,11 @@ description: "Native HUD graders and the native grade combiner for scoring agent
 icon: "scale-balanced"
 ---
 
-Graders turn an agent's answer into a reward. HUD ships reusable ones so you don't hand-build common scoring logic. Yield the result (a `float` or an `EvaluationResult`) as the task's second yield.
+Graders turn an agent's answer into a reward. HUD ships reusable ones so you don't hand-build common scoring logic. Yield the result (a `float` or a `Grade`) as the task's second yield.
 
 ```python
-from hud.graders import BashGrader, EvaluationResult, Grader, LLMJudgeGrader, SubScore, combine
+from hud import Grade
+from hud.graders import BashGrader, Grader, LLMJudgeGrader, SubScore, combine
 ```
 
 ## What grading scores
@@ -23,7 +24,7 @@ Grading decides *what* the reward measures. Two framings cover most tasks:
 ## Approaches
 
 Three approaches cover grading, in increasing power. Each produces the `float` or
-[`EvaluationResult`](#subscore-and-evaluationresult) yielded as the task's second yield.
+[`Grade`](/v6/reference/types#grade) yielded as the task's second yield.
 
 | Approach | When to reach for it | Example |
 |----------|----------------------|---------|
@@ -91,7 +92,7 @@ without a `MET` or `UNMET` verdict is a grading error.
 
 ## `combine` - compose multiple graders
 
-`await combine(*items)` takes `SubScore`s and grader coroutines, runs the coroutines in parallel, and combines the results into a weighted `EvaluationResult`. Positive weights are normalized to sum to `1.0`; negative weights are penalties. Repeated names get numeric suffixes (`BashGrader-1`, `BashGrader-2`).
+`await combine(*items)` takes `SubScore`s and grader coroutines, runs the coroutines in parallel, and combines the results into a weighted `Grade`. Positive weights are normalized to sum to `1.0`; negative weights are penalties. Repeated names get numeric suffixes (`BashGrader-1`, `BashGrader-2`).
 
 ```python
 @env.template()
@@ -126,7 +127,7 @@ verdicts. `grade` applies the caller's weight and optional name override, then r
 parameters under `_parameters`. `compute_score` may also return a bare float or a `(float, info)`
 pair, which `grade` wraps in a `SubScore`.
 
-## `SubScore` and `EvaluationResult`
+## `SubScore`
 
 A `SubScore` is one node in the grade breakdown tree. A leaf is a single measurement; a parent
 preserves the measurements used to derive its value in `children`:
@@ -139,18 +140,9 @@ preserves the measurements used to derive its value in `children`:
 | `children` | `None` | Input subscores this node was combined from. |
 | `info` | `None` | Grader-specific details recorded on the evaluation span. |
 
-An `EvaluationResult` is the combined grade payload you can yield from a task:
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `reward` | `0.0` | Final score. |
-| `done` | `True` | Episode complete. |
-| `subscores` | `None` | Optional breakdown (shown in the trace). |
-| `info` | `{}` | Extra metadata. |
-| `content` | `None` | Human-readable explanation. |
-| `isError` | `False` | Whether grading itself failed. |
-
-`EvaluationResult.from_float(value)` wraps a bare reward.
+`combine` returns a [`Grade`](/v6/reference/types#grade) carrying the subscores; a task can also
+build one itself, as `Grade(reward=..., subscores=[...])`. `EvaluationResult`, the older grade
+payload with a camelCase `isError`, is deprecated: it still grades, with a warning, until hud v0.7.0.
 
 Graders run as the second yield of a [task](/v6/reference/tasks). An
 authoritative grader that needs a distinct environment can run as a

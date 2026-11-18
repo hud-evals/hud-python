@@ -11,7 +11,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "httpx2>=2.0.0,<3",
     "packaging>=21.0",
-    "pydantic>=2.10,<3",
+    "pydantic>=2.11,<3",
     "pydantic-settings>=2.2,<3",
     "typing-extensions>=4.16,<5",
     "python-dotenv>=1.0,<2",

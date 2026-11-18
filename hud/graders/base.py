@@ -1,4 +1,4 @@
-"""The grading contract: ``SubScore``, ``EvaluationResult``, and the ``Grader`` base class."""
+"""The grading contract: ``SubScore``, ``Grade``, ``EvaluationResult`` and ``Grader``."""
 
 from __future__ import annotations
 
@@ -12,10 +12,12 @@ from pydantic import (
     Field,
     SerializationInfo,
     SerializerFunctionWrapHandler,
+    ValidationError,
     model_serializer,
     model_validator,
 )
 
+from hud.utils.exceptions import HudDeprecationWarning
 from hud.utils.serialization import json_safe_dict
 
 _SUMMARY_SERIALIZATION_CONTEXT = "hud_summary"
@@ -67,8 +69,47 @@ class SubScore(BaseModel):
         )
 
 
+class Grade(BaseModel):
+    """A task's verdict; it serializes as the ``tasks.grade`` frame, extra keys included."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        validate_by_name=True,
+        validate_by_alias=True,
+        serialize_by_alias=True,
+    )
+
+    reward: float = Field(default=0.0, alias="score", strict=True, allow_inf_nan=False)
+    done: bool = True
+    content: str | None = None
+    info: dict[str, Any] = Field(default_factory=dict)
+    is_error: bool = Field(default=False, alias="isError")
+    subscores: list[SubScore] | None = None
+
+    @property
+    def evaluation(self) -> dict[str, Any]:
+        """The frame the platform records, without ``info`` at any level."""
+        frame = self.model_dump(mode="json", exclude={"info"})
+        if self.subscores is not None:
+            frame["subscores"] = [subscore.to_summary() for subscore in self.subscores]
+        return frame
+
+    @classmethod
+    def ungraded(cls) -> Grade:
+        """The grade of a trace that has not been graded."""
+        return cls(is_error=True, content="not graded")
+
+
+def grade_problems(error: ValidationError) -> str:
+    """One line per invalid ``Grade`` field: its frame key, the problem and the input."""
+    return "; ".join(
+        f"{'.'.join(map(str, item['loc']))!r}: {item['msg']}, got {item['input']!r}"
+        for item in error.errors()
+    )
+
+
 class EvaluationResult(BaseModel):
-    """The grade a task yields: a reward and an optional ``subscores`` breakdown."""
+    """Deprecated: a task's grade, now ``hud.Grade``. Construction warns until hud v0.7.0."""
 
     reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
     done: bool = Field(default=True, description="Whether the task/episode is complete")
@@ -81,6 +122,15 @@ class EvaluationResult(BaseModel):
     )
 
     model_config = ConfigDict(extra="allow")
+
+    def __init__(self, **data: Any) -> None:
+        warnings.warn(
+            "`EvaluationResult` is deprecated and will be removed in hud v0.7.0; "
+            "yield a `hud.Grade` (`is_error=` in place of `isError=`).",
+            HudDeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(**data)
 
     @model_validator(mode="after")
     def _check_subscores(self) -> EvaluationResult:

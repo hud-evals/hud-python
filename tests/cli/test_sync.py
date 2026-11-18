@@ -129,6 +129,17 @@ def test_a_sync_uploads_only_what_the_remote_taskset_lacks(
     assert all(u["taskset_id"] == TASKSET_ID for u in uploads(platform))
 
 
+def test_a_task_whose_argument_changes_type_uploads_again(platform: FakeServices, hud: Hud) -> None:
+    remote = exported(1, 2)
+    remote[0]["args"] = {"n": True}
+    holding(platform, TASKSET_ID, "demo", remote)
+
+    result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
+
+    assert (result.exit_code, result.json["status"]) == (0, "synced"), result
+    assert [[t["name"] for t in u["tasks"]] for u in uploads(platform)] == [[ONE]]
+
+
 def test_a_task_moved_to_another_env_uploads_again(platform: FakeServices, hud: Hud) -> None:
     holding(platform, TASKSET_ID, "demo", exported(1, 2, env="other"))
 
@@ -188,11 +199,14 @@ def test_a_taskset_name_matching_two_tasksets_is_a_usage_error_that_uploads_noth
     assert TASKSET_ID in result.json["message"]
 
 
-def test_a_linked_taskset_that_was_deleted_is_not_found(platform: FakeServices, hud: Hud) -> None:
+@pytest.mark.parametrize("given", [[], [TASKSET_ID]], ids=["linked", "named-by-id"])
+def test_a_taskset_id_that_was_deleted_is_not_found(
+    given: list[str], platform: FakeServices, hud: Hud
+) -> None:
     link(hud, taskset_id=TASKSET_ID)
     platform.route("api", "GET", f"/v2/tasksets/{TASKSET_ID}", status=404, json={"detail": "No"})
 
-    result = hud("sync", "tasks", "--force", "--yes", "--json")
+    result = hud("sync", "tasks", *given, "--force", "--yes", "--json")
 
     assert (result.exit_code, result.json["error"], uploads(platform)) == (1, "not_found", [])
 
