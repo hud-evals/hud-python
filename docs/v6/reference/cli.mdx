@@ -170,7 +170,7 @@ timeout, is still graded when it can be; its `trace_error` says what failed.
 | `--max-steps` | Deprecated; removed in hud v0.7.0 with the provider agents. Caps a provider agent's steps per task (default 10; `--full` makes it 100). CLI agents ignore it and run until done or `timeout_seconds` (`--config timeout_seconds=1800`). |
 | `--auto-respond` | Prompt the agent to continue when it answers without a tool call. |
 | `--task-ids` | Comma-separated slugs or 0-based indices. |
-| `--config`, `-c` | Agent config `key=value` (repeatable). |
+| `--config`, `-c` | Agent config `key=value` (repeatable). The value is read as JSON when it parses (`5`, `true`, `{"temperature": 0.2}`) and as text otherwise; quote a string that is valid JSON (`system_prompt='"null"'`). `claude.max_tokens=1` targets one agent. |
 | `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
 | `--very-verbose`, `-vv` | Debug-level logs. |
 | `--runtime` | `local`: a Python process or Docker container per rollout. `hud`: local agent, deployed environment. `hosted`: agent and environment on HUD. `docker`, `modal`: run using the task's container configuration. `tcp://host:port`: connect to a running environment. Defaults to `local` for files and `hosted` for platform tasksets. |
@@ -181,7 +181,9 @@ timeout, is still graded when it can be; its `trace_error` says what failed.
 
 #### `.hud_eval.toml`
 
-Defaults for the directory you run `hud eval` from. Precedence is CLI arguments, then this file, then built-in defaults. `hud init` drops a fully commented template into new projects; `hud eval` never writes one itself, and a missing file just means defaults.
+Deprecated, and removed in hud v0.7.0: `hud eval` warns when it loads one. Pass run settings as flags and agent settings with `--config`.
+
+Defaults for the directory you run `hud eval` from. Precedence is CLI arguments, then this file, then built-in defaults; a missing file just means defaults.
 
 ```toml
 [eval]

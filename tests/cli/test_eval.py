@@ -173,6 +173,12 @@ KIMI_TOML = (
             {"key": "custom-key"},
             id="custom-endpoint",
         ),
+        pytest.param(
+            [*SCRIPTED, "-c", 'completion_kwargs={"temperature": 0.5}'],
+            "",
+            {"temperature": 0.5},
+            id="json-config-value",
+        ),
     ],
 )
 def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
