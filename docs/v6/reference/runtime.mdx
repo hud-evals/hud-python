@@ -22,14 +22,13 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `SubprocessRuntime("env.py")` | A child process from your source | Local runs isolated from your process |
 | `DockerRuntime("my-env")` | A fresh local container per rollout | Reproducibility and parity with production |
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com/) sandbox per rollout | Cloud scale, no infra to manage |
-| `DaytonaRuntime("my-env")` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout | Cloud scale on Daytona |
 | `Runtime("tcp://host:8765")` | A host you already started | Attaching to a long-lived container or sandbox you own |
 | `Shared(inner, width=N)` | One host from `inner` per environment and runtime config, shared by up to N concurrent connections | Multi-agent evals - agents that share, compete, or coordinate over one live environment |
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
 | `HostedRuntime()` | The whole rollout managed by HUD | Agent and env execute remotely together |
 
 Every runtime imports from `hud.runtime` (`from hud.runtime import LocalRuntime, DockerRuntime,
-HUDRuntime, HostedRuntime, ModalRuntime, DaytonaRuntime, Runtime`). Placing a task yourself with
+HUDRuntime, HostedRuntime, ModalRuntime, Runtime`). Placing a task yourself with
 `DockerRuntime` or `ModalRuntime` yields a `DockerEndpoint` (with its `container` id) or a
 `ModalEndpoint` (with its `sandbox`), both also in `hud.runtime`.
 
@@ -88,13 +87,11 @@ RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
 
 Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
-is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntime` provisions
-enough whole GiB, while providers without disk sizing proceed with their default capacity.
+is best effort: `DockerRuntime` admits against available disk, while providers without disk
+sizing proceed with their default capacity.
 `HUDRuntime` proceeds on the deployed environment's defaults and warns when it ignores CPU, memory,
-or storage requirements; it rejects GPU, OS, TPU, and `limits`. Daytona accepts a list of GPU
-alternatives; Modal accepts one GPU type. Daytona rejects Compose, `run_timeout_s`, and resource overrides
-when booting from an already-built snapshot. `LocalRuntime` rejects a
-per-task `runtime_config`.
+or storage requirements; it rejects GPU, OS, TPU, and `limits`. Modal accepts one GPU type.
+`LocalRuntime` rejects a per-task `runtime_config`.
 
 `run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
 Without one, `DockerRuntime` sets no lifetime bound, while `ModalRuntime` and HUD-hosted Modal
@@ -110,9 +107,8 @@ SDK adds no overall deadline; configured phase limits and limits imposed by the 
 still apply.
 
 When the SDK owns the environment process, its output is part of the local eval:
-`SubprocessRuntime`, Docker image and Compose runtimes, Modal image and Compose sandboxes,
-and Daytona sandboxes stream stdout and stderr directly to the terminal without
-reformatting them. `LocalRuntime` already shares the eval process's terminal. HUD-hosted
+`SubprocessRuntime`, Docker image and Compose runtimes, and Modal image and Compose sandboxes
+stream stdout and stderr directly to the terminal without reformatting them. `LocalRuntime` already shares the eval process's terminal. HUD-hosted
 runtimes retain environment output on the hosted trace instead.
 
 ## Runtime directory
@@ -219,24 +215,6 @@ See [Compose environments](/v6/experimental/compose#runtime-behavior).
 
 Requires the `modal` extra and a configured token.
 
-### `DaytonaRuntime`
-
-```python
-DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", port=8765, ssh_host="ssh.app.daytona.io", ssh_expires_minutes=1440, runtime_config=None)
-```
-
-- **`snapshot_name`** - Daytona snapshot to boot from (the durable handle).
-- **`image`** - Dockerfile/registry ref to build the snapshot if it's missing. Daytona records what a snapshot was built from, so when the image content changes (an edited Dockerfile or context file, a repointed registry ref) the snapshot is rebuilt in place under the same name instead of silently reusing the build from before the edit.
-- **`workdir`** / **`port`** - guest working directory and in-sandbox serving port.
-- **`ssh_host`** / **`ssh_expires_minutes`** - SSH tunnel settings (Daytona exposes services over an SSH local-forward).
-
-Resources (cpu/memory/gpu) are fixed on the snapshot at build time. With `image`, a task's `runtime_config.resources` builds a sized variant under a suffixed name (`my-env-4cpu`); without `image`, an already-built snapshot cannot be resized.
-
-`DaytonaRuntime` does not run Compose projects: a `runtime_config.compose` is rejected. Use
-`DockerRuntime` or `ModalRuntime` for [Compose environments](/v6/experimental/compose).
-
-Measured behavior at scale, up to 256 concurrent sandboxes with warm pools, is written up in the [Daytona cookbook](/v6/cookbooks/daytona-rl) and the [full guide on Daytona's docs](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook).
-
 ### `HUDRuntime`
 
 ```python
@@ -336,3 +314,8 @@ whoever provisioned the host owns teardown.
 
 Placement can also vary per task: a runtime is called once per rollout with the task row being placed,
 so one callable can route heavier rows to heavier hosts.
+
+The [Daytona cookbook](/v6/cookbooks/daytona) is a complete provider in one file: it builds a
+snapshot from the environment's Dockerfile, creates a sandbox per rollout, reaches the control channel
+over an SSH forward, and deletes the sandbox when the rollout ends. It refuses a task's
+`runtime_config` it does not honor rather than dropping it.

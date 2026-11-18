@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 COOKBOOKS = ROOT / "cookbooks"
 MODULES = sorted(path for path in COOKBOOKS.rglob("*.py") if ".venv" not in path.parts)
 # The README commands that need no outside account: (cookbook, task source).
-LOCAL_RUNS = [("daytona-rl", "tasks.py")]
+LOCAL_RUNS = [("daytona", "tasks.py")]
 
 pytestmark = pytest.mark.e2e
 

@@ -11,7 +11,6 @@ from .core import (
     RuntimeTPU,
     Shared,
 )
-from .daytona import DaytonaRuntime
 from .docker import DockerEndpoint, DockerRuntime
 from .hosted import HostedRuntime
 from .hud import HUDRuntime
@@ -20,7 +19,6 @@ from .modal import ModalEndpoint, ModalRuntime
 
 __all__ = [
     "ComposeProject",
-    "DaytonaRuntime",
     "DockerBindMount",
     "DockerEndpoint",
     "DockerRuntime",

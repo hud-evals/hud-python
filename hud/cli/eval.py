@@ -20,7 +20,6 @@ from rich.table import Table
 from hud.cli import CLI, CliError, Result, parse_key_value
 from hud.eval.taskset import Taskset
 from hud.runtime.core import Runtime
-from hud.runtime.daytona import DaytonaRuntime
 from hud.runtime.docker import DockerRuntime
 from hud.runtime.hosted import HostedRuntime
 from hud.runtime.hud import HUDRuntime
@@ -58,7 +57,6 @@ class Placement(StrEnum):
     HOSTED = "hosted"
     DOCKER = "docker"
     MODAL = "modal"
-    DAYTONA = "daytona"
 
 
 TcpUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["tcp"])]
@@ -184,7 +182,7 @@ def eval_command(
         None,
         "--runtime",
         help="Placement: local (subprocess/Docker per row), hud (runtime tunnel), hosted (whole "
-        "rollout on the platform), docker, modal, daytona, or a tcp:// url. "
+        "rollout on the platform), docker, modal, or a tcp:// url. "
         "Default: local for a tasks file; hosted for a platform taskset.",
     ),
     remote: bool = typer.Option(
@@ -460,8 +458,6 @@ def eval_command(
             placement = DockerRuntime()
         case Placement.MODAL:
             placement = ModalRuntime()
-        case Placement.DAYTONA:
-            placement = DaytonaRuntime()
         case _:
             assert_never(cfg.runtime)
 

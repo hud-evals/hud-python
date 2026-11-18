@@ -455,7 +455,6 @@ port a different way:
 | `SubprocessRuntime` | a child process on this host | reading `HUD_SERVE_PORT=` from its stdout |
 | `DockerRuntime` | a `docker run` container | publishing the port, reading the `docker port` mapping |
 | `ModalRuntime` | a Modal sandbox | a raw-TCP tunnel (`unencrypted_ports`) |
-| `DaytonaRuntime` | a Daytona sandbox | an SSH local-forward to a local port |
 | `HUDRuntime` | a HUD-hosted env | the gateway's WebSocket tunnel (`wss://`), dialed directly |
 | `Runtime(url)` | one already served elsewhere | nothing - the url passes straight through |
 
