@@ -127,8 +127,15 @@ def mcp_server(name):
     for flag, value in zip(sys.argv[1:], sys.argv[2:]):
         if flag == "-c" and value.startswith(prefix):
             key, _, raw = value[len(prefix):].partition("=")
-            config[key] = json.loads(raw)
-    headers = {{}}
+            # A JSON-quoted string, or a TOML inline table of JSON-quoted strings.
+            config[key] = (
+                {{json.loads(k): json.loads(v) for k, v in re.findall(
+                    r'("(?:[^"\\\\]|\\\\.)*")=("(?:[^"\\\\]|\\\\.)*")', raw
+                )}}
+                if raw.startswith("{{")
+                else json.loads(raw)
+            )
+    headers = dict(config.get("http_headers", {{}}))
     if "bearer_token_env_var" in config:
         headers["Authorization"] = "Bearer " + os.environ[config["bearer_token_env_var"]]
     return config["url"], headers

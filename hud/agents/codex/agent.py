@@ -18,6 +18,7 @@ from hud.agents.cli import (
     run_jsonl,
 )
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
+from hud.telemetry.context import get_trace_headers
 from hud.types import Step, TextContent, ToolCall, ToolResult
 from hud.utils.time import now_iso
 
@@ -28,6 +29,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _CODEX_SERVER_NAME = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _toml_table(values: dict[str, str]) -> str:
+    """``values`` as a TOML inline table, the form ``-c`` takes for a header map."""
+    return "{" + ",".join(f"{json.dumps(k)}={json.dumps(v)}" for k, v in values.items()) + "}"
+
 
 _MANAGED_CODEX_PATHS = {
     "linux-x64": "/usr/local/lib/agents/codex/bin/codex",
@@ -265,6 +272,11 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
                     "use letters, digits, '_' and '-'"
                 )
             args.extend(["-c", f"mcp_servers.{cap.name}.url={json.dumps(cap.url)}"])
+            # The trace headers let the server attribute its work to this run.
+            if trace_headers := get_trace_headers():
+                args.extend(
+                    ["-c", f"mcp_servers.{cap.name}.http_headers={_toml_table(trace_headers)}"]
+                )
             if token := cap.params.get("auth_token"):
                 # Codex reads the bearer token from a variable, which keeps it out of argv.
                 env[f"HUD_MCP_TOKEN_{index}"] = token
@@ -284,11 +296,12 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
             for name, value in overrides.items():
                 args.extend(["-c", f"{name}={json.dumps(value)}"])
             if endpoint.headers:
-                pairs = ",".join(
-                    f"{json.dumps(name)}={json.dumps(value)}"
-                    for name, value in endpoint.headers.items()
+                args.extend(
+                    [
+                        "-c",
+                        f"model_providers.inference.http_headers={_toml_table(endpoint.headers)}",
+                    ]
                 )
-                args.extend(["-c", f"model_providers.inference.http_headers={{{pairs}}}"])
 
         args.append("-")
         # Injected credentials get a throwaway CODEX_HOME; otherwise an ambient login applies.
