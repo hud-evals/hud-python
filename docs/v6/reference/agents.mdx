@@ -101,7 +101,7 @@ request settings keep their names:
 | `gateway`, `checkpoint` | `gateway`, `checkpoint` |
 | `completion_kwargs` (including `extra_body`) | `completion_kwargs`, merged over Pi's own request fields |
 | `system_prompt` | `system_prompt`, appended to Pi's system prompt |
-| `max_steps` | `max_steps` (unlimited by default; `hud eval` passes `--max-steps`) |
+| `max_steps` | `timeout_seconds`, which bounds the whole run; Pi has no step limit |
 | `tool_timeout_seconds` | An extension that sets `bash`'s `timeout` (above) |
 | none | `extensions`: your own Pi extensions, which add tools and hook Pi's events |
 | none | `model_info`: Pi's metadata for the model, such as `contextWindow`, `input: ["text", "image"]` for a vision model, and `compat` for a server's request quirks (for example `{"maxTokensField": "max_tokens"}`) |
@@ -124,7 +124,7 @@ After, with `OPENAI_BASE_URL=http://localhost:8000/v1` and `OPENAI_API_KEY=local
 agent = PiAgent(PiConfig(
     model="my-model",
     completion_kwargs={"temperature": 0.2, "extra_body": {"top_k": 20}},
-    max_steps=30,
+    timeout_seconds=1800,
 ))
 ```
 

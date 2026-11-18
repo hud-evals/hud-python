@@ -757,38 +757,25 @@ async def test_pi_without_a_model_endpoint_is_refused(hud_env: HudEnv, tmp_path:
     assert stub.captures() == []
 
 
-PI_CAPPED_RUN = clis.jsonl(
-    clis.PI_STARTED,
-    clis.pi_assistant({"type": "text", "text": "writing"}, PI_WRITE_CALL, stop="toolUse"),
-    clis.pi_tool_result("call-1", "write", "Successfully wrote to a.txt"),
-    clis.PI_TURN_END,
-    clis.pi_assistant(stop="aborted", error="Request was aborted"),
-    clis.PI_TURN_END,
-    clis.PI_ABORTED,
-)
-
-
-@pytest.mark.parametrize(
-    ("max_steps", "status", "stop_reason", "error"),
-    [
-        (1, "completed", "max_steps", None),
-        (-1, "error", None, "[agent loop] RuntimeError: Request was aborted"),
-    ],
-    ids=["at-its-step-limit", "without-a-step-limit"],
-)
-async def test_a_run_pi_aborts_ends_by_whether_it_reached_max_steps(
-    max_steps: int, status: str, stop_reason: str | None, error: str | None, tmp_path: Path
-) -> None:
-    stub = clis.Stub(tmp_path / "ws" / ".stub", "pi", stdout=PI_CAPPED_RUN)
+async def test_a_run_pi_aborts_ends_as_an_error(tmp_path: Path) -> None:
+    stdout = clis.jsonl(
+        clis.PI_STARTED,
+        clis.pi_assistant({"type": "text", "text": "writing"}, PI_WRITE_CALL, stop="toolUse"),
+        clis.pi_tool_result("call-1", "write", "Successfully wrote to a.txt"),
+        clis.PI_TURN_END,
+        clis.pi_assistant(stop="aborted", error="Request was aborted"),
+        clis.PI_TURN_END,
+        clis.PI_ABORTED,
+    )
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "pi", stdout=stdout)
     stub.install()
 
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
-    (trace,) = (await task().run(PiAgent(PiConfig(max_steps=max_steps)))).traces
+    (trace,) = (await task().run(PiAgent())).traces
 
-    assert (trace.status, trace.stop_reason, trace.error, trace.content) == (
-        status,
-        stop_reason,
-        error,
+    assert (trace.status, trace.error, trace.content) == (
+        "error",
+        "[agent loop] RuntimeError: Request was aborted",
         "writing",
     )
 
@@ -863,7 +850,6 @@ async def test_a_configured_pi_extension_adds_its_tool_and_hooks_its_calls(
         PiConfig(
             model="deepseek/deepseek-v4.1-flash",
             extensions={"echo.ts": ECHO_EXTENSION},
-            max_steps=4,
             timeout_seconds=120,
         )
     )

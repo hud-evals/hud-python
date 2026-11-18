@@ -242,18 +242,15 @@ class PiConfig(AgentConfig):
     """Pi calls ``model`` over Chat Completions: through the HUD gateway, or at
     ``OPENAI_BASE_URL`` with ``OPENAI_API_KEY``.
 
-    ``max_steps`` caps Pi's turns (one model call and the tool calls it makes); values <= 0
-    leave it unlimited. ``system_prompt`` is appended to Pi's own. ``completion_kwargs`` is
-    merged into every request body, with ``extra_body`` entries at the top level.
-    ``model_info`` holds Pi's ``models.json`` fields for ``model``, such as ``contextWindow``,
-    ``input`` and ``compat``. ``extensions`` maps a file name to the source of a Pi extension
-    loaded into the run.
+    ``system_prompt`` is appended to Pi's own. ``completion_kwargs`` is merged into every
+    request body, with ``extra_body`` entries at the top level. ``model_info`` holds Pi's
+    ``models.json`` fields for ``model``, such as ``contextWindow``, ``input`` and ``compat``.
+    ``extensions`` maps a file name to the source of a Pi extension loaded into the run.
     """
 
     model_name: str = "Pi"
     model: str = Field(default="deepseek/deepseek-v4.1-flash", validation_alias=_model_alias)
     system_prompt: str | None = None
-    max_steps: int = -1
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
     # The checkpoint of ``model`` the HUD gateway routes to, rather than its active one.
     checkpoint: str | None = None

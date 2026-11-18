@@ -6,7 +6,6 @@ import json
 import logging
 import re
 import shlex
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.agents.cli import WINDOWS_SHELLS, CLIAgent, model_endpoint, resolve_executable, run_jsonl
@@ -26,17 +25,13 @@ _MANAGED_PI_PATHS = {
     "linux-x64": "/usr/local/lib/agents/pi/pi",
 }
 
-_MAX_STEPS_EXTENSION = Path(__file__).parent / "max-steps.js"
-
 
 class PiEvents:
     """Translate ``pi --mode json`` events into canonical HUD steps."""
 
-    def __init__(self, run: Run, *, started_at: str, max_steps: int) -> None:
+    def __init__(self, run: Run, *, started_at: str) -> None:
         self.run = run
         self.message_started_at = started_at
-        self.max_steps = max_steps
-        self.turns = 0
         self.aborted = False
         self.pending_calls: dict[str, tuple[ToolCall, str]] = {}
         self.settled = False
@@ -52,8 +47,6 @@ class PiEvents:
         match event["type"]:
             case "session":
                 self.run.trace.extra["pi_session_id"] = event["id"]
-            case "turn_end":
-                self.turns += 1
             case "message_start":
                 self.message_started_at = received_at
             case "message_end":
@@ -143,10 +136,7 @@ class PiEvents:
     def finish(self, *, returncode: int, stderr: str) -> None:
         trace = self.run.trace
         error = self.error
-        if self.aborted and 0 < self.max_steps < self.turns:
-            trace.stop_reason = "max_steps"
-            error = None
-        elif self.aborted and error is None:
+        if self.aborted and error is None:
             error = "pi aborted the run"
         if returncode != 0:
             trace.extra["returncode"] = returncode
@@ -243,14 +233,9 @@ class PiAgent(CLIAgent[PiConfig]):
             # Passed as a file: Pi reads a value that names an existing file as that file.
             files["system.md"] = self.config.system_prompt
             cli += ' --append-system-prompt "$pi_home/system.md"'
-        # The step limit stays outside extensions/, so no configured extension can replace it.
         files.update(
             {f"extensions/{name}": source for name, source in self.config.extensions.items()}
         )
-        if self.config.max_steps > 0:
-            files["max-steps.js"] = _MAX_STEPS_EXTENSION.read_text()
-            env["HUD_PI_MAX_STEPS"] = str(self.config.max_steps)
-            cli += ' --extension "$pi_home/max-steps.js"'
         statements = ['pi_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-pi.XXXXXX") || exit 1']
         if connection is None:
             statements.append("trap 'rm -rf -- \"$pi_home\"' EXIT")
@@ -268,7 +253,7 @@ class PiAgent(CLIAgent[PiConfig]):
         command = "; ".join(statements)
 
         logger.info("SSH exec pi CLI (%d chars)", len(command))
-        events = PiEvents(run, started_at=now_iso(), max_steps=self.config.max_steps)
+        events = PiEvents(run, started_at=now_iso())
         returncode, stderr = await run_jsonl(
             ssh,
             command,
