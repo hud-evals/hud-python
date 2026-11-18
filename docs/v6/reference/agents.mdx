@@ -65,6 +65,51 @@ The SDK also ships HUD's older [provider agents](#provider-agents), which are de
   than rerouted. Only an unsandboxed workspace (its `ssh` capability declares `isolation="none"`, as
   one without `bwrap` does) gives the CLI its key directly.
 
+### Moving from `openai_compatible` to `pi`
+
+`PiAgent` replaces `OpenAIChatAgent`. The endpoint moves from the config to the environment, and the
+request settings keep their names:
+
+| `OpenAIChatConfig` | `PiConfig` |
+|--------------------|------------|
+| `model` | `model` |
+| `base_url`, `api_key` | `OPENAI_BASE_URL`, `OPENAI_API_KEY` in the environment |
+| `gateway`, `checkpoint` | `gateway`, `checkpoint` |
+| `completion_kwargs` (including `extra_body`) | `completion_kwargs`, merged over Pi's own request fields |
+| `system_prompt` | `system_prompt`, appended to Pi's system prompt |
+| `max_steps` | `max_steps` (unlimited by default; `hud eval` passes `--max-steps`) |
+| none | `model_info`: Pi's metadata for the model, such as `contextWindow`, `input: ["text", "image"]` for a vision model, and `compat` for a server's request quirks (for example `{"maxTokensField": "max_tokens"}`) |
+
+Before:
+
+```python
+agent = OpenAIChatAgent(OpenAIChatConfig(
+    model="my-model",
+    base_url="http://localhost:8000/v1",
+    api_key="local",
+    completion_kwargs={"temperature": 0.2, "extra_body": {"top_k": 20}},
+    max_steps=30,
+))
+```
+
+After, with `OPENAI_BASE_URL=http://localhost:8000/v1` and `OPENAI_API_KEY=local` set:
+
+```python
+agent = PiAgent(PiConfig(
+    model="my-model",
+    completion_kwargs={"temperature": 0.2, "extra_body": {"top_k": 20}},
+    max_steps=30,
+))
+```
+
+In `.hud_eval.toml`, rename the `[openai_compatible]` section to `[pi]` and move `base_url` and
+`api_key` into those variables. Pi runs its own tools (`read`, `bash`, `edit`, `write`) in the
+workspace, so it needs an `ssh` workspace; an environment with only MCP tools still needs
+`openai_compatible`. Pi reaches only streamable-HTTP MCP servers, where `OpenAIChatAgent` also
+reached SSE and websocket ones. Pi records no token ids or logprobs, so training rollouts stay on
+`OpenAIChatAgent` (`completion_kwargs` with `return_token_ids` is refused). `tool_timeout_seconds`,
+`stop_on` and `auto_respond` have no Pi equivalent.
+
 ## Create agent
 
 ```python

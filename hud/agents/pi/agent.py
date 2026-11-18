@@ -27,14 +27,31 @@ _MANAGED_PI_PATHS = {
 }
 
 
+# A pi extension that aborts the run before the model call of turn ``limit`` + 1.
+_MAX_STEPS_EXTENSION = """export default function (pi) {
+  let turns = 0;
+  pi.on("turn_end", (event, ctx) => {
+    turns += 1;
+    if (turns >= %d && event.message.content.some((block) => block.type === "toolCall")) {
+      ctx.abort();
+    }
+  });
+}
+"""
+
+
 class PiEvents:
     """Translate ``pi --mode json`` events into canonical HUD steps."""
 
-    def __init__(self, run: Run, *, started_at: str) -> None:
+    def __init__(self, run: Run, *, started_at: str, max_steps: int) -> None:
         self.run = run
         self.message_started_at = started_at
+        self.max_steps = max_steps
+        self.turns = 0
+        self.aborted = False
         self.pending_calls: dict[str, tuple[ToolCall, str]] = {}
         self.settled = False
+        self.stop_reason: str | None = None
         self.error: str | None = None
 
     def consume(self, line: str) -> None:
@@ -46,14 +63,15 @@ class PiEvents:
         match event["type"]:
             case "session":
                 self.run.trace.extra["pi_session_id"] = event["id"]
+            case "turn_end":
+                self.turns += 1
             case "message_start":
                 self.message_started_at = received_at
             case "message_end":
                 self.record(event["message"], received_at)
             case "agent_settled":
                 self.settled = True
-                if event["aborted"]:
-                    self.error = "pi aborted the run"
+                self.aborted = event["aborted"]
 
     def record(self, message: dict[str, Any], received_at: str) -> None:
         match message["role"]:
@@ -111,7 +129,7 @@ class PiEvents:
                         ToolCall(id=block["id"], name=block["name"], arguments=block["arguments"])
                     )
         usage = message["usage"]
-        stop_reason = message["stopReason"]
+        stop_reason = self.stop_reason = message["stopReason"]
         content = "".join(texts) or None
         self.run.record(
             AgentStep(
@@ -143,6 +161,12 @@ class PiEvents:
     def finish(self, *, returncode: int, stderr: str) -> None:
         trace = self.run.trace
         error = self.error
+        if self.aborted and 0 < self.max_steps < self.turns:
+            # The step-limit extension aborted the turn after the last allowed one.
+            trace.stop_reason = "max_steps"
+            error = None
+        elif self.aborted and error is None:
+            error = "pi aborted the run"
         if returncode != 0:
             trace.extra["returncode"] = returncode
             error = error or stderr.strip() or f"pi CLI exited with return code {returncode}"
@@ -151,6 +175,8 @@ class PiEvents:
         elif error is None and self.pending_calls:
             missing = ", ".join(sorted(self.pending_calls))
             error = f"pi CLI exited without results for tool calls: {missing}"
+        elif error is None and self.stop_reason == "length":
+            trace.stop_reason = "length"
 
         if error is not None and stderr:
             trace.extra["stderr"] = stderr
@@ -183,15 +209,18 @@ class PiAgent(CLIAgent[PiConfig]):
         assert manifest is not None
 
         env = {"INFERENCE_API_KEY": endpoint.key}
+        model: dict[str, Any] = {**self.config.model_info, "id": self.config.model}
+        if body := self.config.request_body:
+            model["samplingParams"] = body
         provider: dict[str, Any] = {
             "baseUrl": endpoint.url,
             "api": "openai-completions",
             "apiKey": "$INFERENCE_API_KEY",
-            "models": [{"id": self.config.model}],
+            "models": [model],
         }
         if endpoint.headers:
             provider["headers"] = endpoint.headers
-        files = {"models.json": {"providers": {"inference": provider}}}
+        files = {"models.json": json.dumps({"providers": {"inference": provider}})}
 
         mcp_servers: dict[str, dict[str, Any]] = {}
         taken: dict[str, str] = {}
@@ -219,7 +248,7 @@ class PiAgent(CLIAgent[PiConfig]):
                 server["headers"] = {"Authorization": f"Bearer ${{{variable}}}"}
             mcp_servers[cap.name] = server
         if mcp_servers:
-            files["mcp.json"] = {"mcpServers": mcp_servers}
+            files["mcp.json"] = json.dumps({"mcpServers": mcp_servers})
 
         args = [
             executable,
@@ -237,6 +266,13 @@ class PiAgent(CLIAgent[PiConfig]):
         connection = endpoint.connection
         env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
         cli = " ".join(shlex.quote(arg) for arg in args)
+        if self.config.system_prompt is not None:
+            # A file, since pi reads a value naming an existing file as that file.
+            files["system.md"] = self.config.system_prompt
+            cli += ' --append-system-prompt "$pi_home/system.md"'
+        if self.config.max_steps > 0:
+            files["max-steps.js"] = _MAX_STEPS_EXTENSION % self.config.max_steps
+            cli += ' --extension "$pi_home/max-steps.js"'
         statements = ['pi_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-pi.XXXXXX") || exit 1']
         # Under exec no trap survives; the sandbox holding a guarded connection is discarded
         # after the rollout.
@@ -244,8 +280,7 @@ class PiAgent(CLIAgent[PiConfig]):
             statements.append("trap 'rm -rf -- \"$pi_home\"' EXIT")
         statements.append('export PI_CODING_AGENT_DIR="$pi_home"')
         statements.extend(
-            f'printf %s {shlex.quote(json.dumps(body))} > "$pi_home/{name}"'
-            for name, body in files.items()
+            f'printf %s {shlex.quote(body)} > "$pi_home/{name}"' for name, body in files.items()
         )
         statements.append('export PATH="$HOME/.local/bin:$PATH"')
         # A guarded connection is bound to the launched process, so exec the CLI itself.
@@ -254,7 +289,7 @@ class PiAgent(CLIAgent[PiConfig]):
         command = "; ".join(statements)
 
         logger.info("SSH exec pi CLI (%d chars)", len(command))
-        events = PiEvents(run, started_at=now_iso())
+        events = PiEvents(run, started_at=now_iso(), max_steps=self.config.max_steps)
         returncode, stderr = await run_jsonl(
             ssh,
             command,

@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from hud import Environment
 from hud.agents import Agent, ClaudeCLIAgent, CodexCLIAgent, PiAgent
-from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
+from hud.agents.types import AgentStep, ClaudeCLIConfig, PiConfig, ToolStep
 from hud.capabilities import Capability
 from hud.environment.egress import ANY_HOST
 from hud.environment.workspace import usable_bwrap
@@ -767,3 +767,71 @@ async def test_pi_without_a_model_endpoint_is_refused(hud_env: HudEnv, tmp_path:
     assert trace.error is not None
     assert "pi needs a model endpoint" in trace.error
     assert stub.captures() == []
+
+
+PI_CAPPED_RUN = clis.jsonl(
+    clis.PI_STARTED,
+    clis.pi_assistant({"type": "text", "text": "writing"}, PI_WRITE_CALL, stop="toolUse"),
+    clis.pi_tool_result("call-1", "write", "Successfully wrote to a.txt"),
+    clis.PI_TURN_END,
+    clis.pi_assistant(stop="aborted", error="Request was aborted"),
+    clis.PI_TURN_END,
+    clis.PI_ABORTED,
+)
+
+
+@pytest.mark.parametrize(
+    ("max_steps", "status", "stop_reason", "error"),
+    [
+        (1, "completed", "max_steps", None),
+        (-1, "error", None, "[agent loop] RuntimeError: Request was aborted"),
+    ],
+    ids=["at-its-step-limit", "without-a-step-limit"],
+)
+async def test_a_run_pi_aborts_ends_by_whether_it_reached_max_steps(
+    max_steps: int, status: str, stop_reason: str | None, error: str | None, tmp_path: Path
+) -> None:
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "pi", stdout=PI_CAPPED_RUN)
+    stub.install()
+
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    (trace,) = (await task().run(PiAgent(PiConfig(max_steps=max_steps)))).traces
+
+    assert (trace.status, trace.stop_reason, trace.error, trace.content) == (
+        status,
+        stop_reason,
+        error,
+        "writing",
+    )
+
+
+async def test_a_pi_answer_cut_off_at_the_output_limit_stops_for_length(tmp_path: Path) -> None:
+    stdout = clis.jsonl(
+        clis.PI_STARTED,
+        clis.pi_assistant({"type": "text", "text": "par"}, stop="length"),
+        clis.PI_SETTLED,
+    )
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "pi", stdout=stdout)
+    stub.install()
+
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    (trace,) = (await task().run(PiAgent())).traces
+
+    assert (trace.status, trace.stop_reason, trace.content) == ("completed", "length", "par")
+
+
+@pytest.mark.parametrize(
+    ("fields", "named"),
+    [
+        ({"completion_kwargs": {"tools": []}}, "tools"),
+        ({"completion_kwargs": {"extra_body": {"messages": []}}}, "messages"),
+        ({"completion_kwargs": {"extra_body": {"return_token_ids": True}}}, "token ids"),
+        ({"model_info": {"id": "other"}}, "id"),
+    ],
+    ids=["a-field-pi-sends", "an-extra-body-field-pi-sends", "token-ids", "the-model-id"],
+)
+def test_pi_config_refuses_request_fields_pi_owns_or_cannot_honor(
+    fields: dict[str, Any], named: str
+) -> None:
+    with pytest.raises(ValidationError, match=named):
+        PiConfig.model_validate(fields)

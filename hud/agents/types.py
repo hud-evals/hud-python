@@ -238,10 +238,50 @@ class CodexCLIConfig(AgentConfig):
 
 class PiConfig(AgentConfig):
     """Pi calls ``model`` over Chat Completions: through the HUD gateway, or at
-    ``OPENAI_BASE_URL`` with ``OPENAI_API_KEY``."""
+    ``OPENAI_BASE_URL`` with ``OPENAI_API_KEY``.
+
+    ``max_steps`` caps Pi's turns (one model call and the tool calls it makes); values <= 0
+    leave it unlimited.
+    """
 
     model_name: str = "Pi"
     model: str = Field(default="deepseek/deepseek-v4.1-flash", validation_alias=_model_alias)
+    # Appended to Pi's own system prompt, which describes its tools.
+    system_prompt: str | None = None
+    max_steps: int = -1
+    # Merged into every request body, over Pi's own fields; ``extra_body`` entries go in
+    # at the top level, as the OpenAI client sends them.
+    completion_kwargs: dict[str, Any] = Field(default_factory=dict)
+    # The checkpoint of ``model`` the HUD gateway routes to, rather than its active one.
+    checkpoint: str | None = None
+    # Pi's models.json fields for ``model``, such as ``contextWindow``, ``maxTokens``,
+    # ``input`` (add "image" for a vision model), ``reasoning`` and ``compat`` (the
+    # served model's request quirks).
+    model_info: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_request_fields(self) -> Self:
+        if owned := sorted({"id", "samplingParams"} & self.model_info.keys()):
+            raise ValueError(
+                f"model_info sets {', '.join(owned)}; use model and completion_kwargs instead"
+            )
+        if owned := sorted({"model", "messages", "stream", "tools"} & self.request_body.keys()):
+            raise ValueError(f"completion_kwargs sets {', '.join(owned)}, which pi sends itself")
+        if "return_token_ids" in self.request_body:
+            raise ValueError(
+                "pi does not record token ids or logprobs; training rollouts need "
+                "OpenAIChatAgent until the SDK captures them for CLI agents"
+            )
+        return self
+
+    @property
+    def request_body(self) -> dict[str, Any]:
+        """The fields Pi merges into every request body."""
+        body = {key: value for key, value in self.completion_kwargs.items() if key != "extra_body"}
+        body.update(self.completion_kwargs.get("extra_body") or {})
+        if self.checkpoint is not None:
+            body["checkpoint"] = self.checkpoint
+        return body
 
 
 class Citation(BaseModel):

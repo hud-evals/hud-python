@@ -363,7 +363,9 @@ def pi_tool_result(call_id: str, name: str, text: str, *, is_error: bool = False
 
 
 PI_STARTED = {"type": "session", "version": 3, "id": "session-1", "timestamp": "", "cwd": "/"}
+PI_TURN_END = {"type": "turn_end", "toolResults": []}
 PI_SETTLED = {"type": "agent_settled", "aborted": False}
+PI_ABORTED = {"type": "agent_settled", "aborted": True}
 
 
 def answer(cli: str, text: str) -> str:
