@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, cast
 
@@ -151,30 +152,18 @@ class OpenAIComputerTool(RFBTool):
             if button not in ("left", "middle", "right"):
                 raise ValueError(f"Unsupported mouse button: {button!r}")
             hold = _hold_keys(args.get("keys"))
-            await self.click(
-                args.get("x"),
-                args.get("y"),
-                button=button,
-                hold_keys=hold,
-            )
+            await self.click(_point(args), button=button, hold_keys=hold)
 
         elif action_type == "double_click":
             hold = _hold_keys(args.get("keys"))
-            await self.click(
-                args.get("x"),
-                args.get("y"),
-                count=2,
-                interval_ms=100,
-                hold_keys=hold,
-            )
+            await self.click(_point(args), count=2, interval=0.1, hold_keys=hold)
 
         elif action_type == "scroll":
             hold = _hold_keys(args.get("keys"))
             sx = int(args.get("scroll_x") or 0)
             sy = int(args.get("scroll_y") or 0)
             await self.scroll(
-                args.get("x"),
-                args.get("y"),
+                _point(args),
                 scroll_x=sx,
                 scroll_y=sy,
                 hold_keys=hold,
@@ -191,7 +180,7 @@ class OpenAIComputerTool(RFBTool):
             ms = 1000 if duration is None else int(duration)
             if ms < 0:
                 raise ValueError("wait duration must be non-negative")
-            await self.wait(ms)
+            await asyncio.sleep(ms / 1000)
 
         elif action_type == "move":
             x, y = args.get("x"), args.get("y")
@@ -227,9 +216,13 @@ def _map_key(key: str) -> str:
     return OPENAI_KEY_ALIASES.get(key.lower(), key)
 
 
-def _hold_keys(keys: Any) -> list[str] | None:
+def _point(args: dict[str, Any]) -> tuple[int, int]:
+    return int(args["x"]), int(args["y"])
+
+
+def _hold_keys(keys: Any) -> list[str]:
     if keys is None:
-        return None
+        return []
     if not isinstance(keys, list) or not all(isinstance(key, str) and key for key in keys):
         raise ValueError("keys must be a list of non-empty strings")
     return [_map_key(key) for key in cast("list[str]", keys)]

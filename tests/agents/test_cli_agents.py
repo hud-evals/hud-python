@@ -226,10 +226,9 @@ async def test_the_cli_drives_the_screen_through_the_computer_bridge(
 
     (capture,) = stub.captures()
     assert trace.status == "completed"
-    assert capture["computer"] == [
-        {"isError": False, "content": ["image"]},
-        {"isError": True, "content": ["unsupported computer action: 'frobnicate'"]},
-    ]
+    shot, rejected = capture["computer"]
+    assert shot == {"isError": False, "content": ["image"]}
+    assert rejected["isError"] and "frobnicate" in rejected["content"][0]
     assert [(e.x, e.y, e.buttons) for e in screen.pointer_events()] == [
         (3, 4, 0),
         (3, 4, 1),

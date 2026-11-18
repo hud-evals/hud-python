@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from anthropic.types.beta import BetaMessage
-
-from hud.agents.claude.agent import ClaudeAgent
-from hud.agents.types import ToolStep
+from hud.agents.types import AgentStep, ToolStep, Usage
 from hud.types import (
     BlobResourceContents,
     ContentBlock,
@@ -26,6 +23,49 @@ if TYPE_CHECKING:
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
+
+
+def agent_step(message: dict[str, Any]) -> AgentStep:
+    """The step for one assistant message in Claude Code's stream (an Anthropic message)."""
+    blocks = message["content"]
+    stop_reason = message["stop_reason"]
+    calls: list[ToolCall] = []
+    for block in blocks:
+        if block["type"] == "tool_use":
+            arguments: dict[str, Any] | str = block["input"]
+            # The input of a call cut off at the output limit did not finish.
+            if stop_reason == "max_tokens" and block is blocks[-1]:
+                arguments = json.dumps(arguments)
+            calls.append(ToolCall(id=block["id"], name=block["name"], arguments=arguments))
+    refusal = None
+    if stop_reason == "refusal" and (details := message.get("stop_details")):
+        if details.get("explanation"):
+            refusal = details["explanation"]
+        elif details.get("category") is not None:
+            refusal = f"This request was refused ({details['category']})."
+    usage = message["usage"]
+    cache_read = usage.get("cache_read_input_tokens")
+    return AgentStep(
+        content="".join(block["text"] for block in blocks if block["type"] == "text"),
+        reasoning="\n".join(
+            block["thinking"]
+            for block in blocks
+            if block["type"] == "thinking" and block.get("thinking")
+        )
+        or None,
+        tool_calls=calls,
+        done=not calls,
+        model=message["model"],
+        finish_reason=stop_reason,
+        refusal=refusal,
+        usage=Usage(
+            prompt_tokens=usage["input_tokens"]
+            + (usage.get("cache_creation_input_tokens") or 0)
+            + (cache_read or 0),
+            completion_tokens=usage["output_tokens"],
+            cached_tokens=cache_read,
+        ),
+    )
 
 
 class ClaudeEvents:
@@ -48,9 +88,7 @@ class ClaudeEvents:
             case "system" if message.get("subtype") == "init":
                 self.agent_started_at = received_at
             case "assistant":
-                step = ClaudeAgent.message_to_agent_step(
-                    BetaMessage.model_validate(message["message"])
-                )
+                step = agent_step(message["message"])
                 step.started_at = self.agent_started_at
                 step.ended_at = received_at
                 if step.content:

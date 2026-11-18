@@ -12,16 +12,16 @@ import shlex
 import sys
 from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import asyncssh
 import fastmcp
 import mcp.types as mcp_types
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
-from hud.agents.claude.tools.computer import ClaudeComputerTool
 from hud.agents.cli import WINDOWS_SHELLS
-from hud.agents.tools.base import AgentToolSpec
+from hud.agents.computer.claude import ACTIONS, ClaudeComputer
+from hud.agents.computer.screen import Screen
 from hud.capabilities.base import Capability
 from hud.capabilities.rfb import RFBClient, ScreenshotEncoding
 
@@ -43,15 +43,11 @@ def create_computer_mcp(rfb: RFBClient, screenshot_encoding: ScreenshotEncoding)
     """Build a FastMCP server with one ``computer`` tool backed by ``rfb``."""
 
     mcp = fastmcp.FastMCP("computer-use")
-    tool = ClaudeComputerTool(
-        spec=AgentToolSpec(api_type="computer", api_name="computer"),
-        client=rfb,
-        screenshot_encoding=screenshot_encoding,
-    )
+    computer_actions = ClaudeComputer(Screen(rfb, screenshot_encoding))
 
     @mcp.tool()
     async def computer(
-        action: str,
+        action: Annotated[str, Field(json_schema_extra={"enum": list(ACTIONS)})],
         coordinate: list[int] | None = None,
         text: str | None = None,
         scroll_direction: str | None = None,
@@ -62,10 +58,6 @@ def create_computer_mcp(rfb: RFBClient, screenshot_encoding: ScreenshotEncoding)
         region: list[int] | None = None,
     ) -> mcp_types.CallToolResult:
         """Control a remote screen — screenshot, click, type, key, scroll, move, drag, wait, zoom.
-
-        Actions: screenshot, left_click, right_click, middle_click, double_click,
-        triple_click, mouse_move, move, type, key, scroll, left_click_drag, drag,
-        wait, hold_key, cursor_position, zoom, left_mouse_down, left_mouse_up.
 
         Returns the resulting screenshot image so you can see the screen state.
         """
@@ -84,7 +76,7 @@ def create_computer_mcp(rfb: RFBClient, screenshot_encoding: ScreenshotEncoding)
             }.items()
             if value is not None
         }
-        result = await tool.execute(arguments)
+        result = await computer_actions.run(arguments)
         return mcp_types.CallToolResult.model_validate(
             result.model_dump(mode="json", by_alias=True, exclude_none=True, exclude={"call_id"})
         )

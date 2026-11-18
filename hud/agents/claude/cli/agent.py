@@ -89,8 +89,6 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                     )
                 else:
                     continue
-                if name in mcp_servers:
-                    raise RuntimeError(f"duplicate MCP server name {name!r}")
                 mcp_servers[name] = server
 
             env: dict[str, str] = {
