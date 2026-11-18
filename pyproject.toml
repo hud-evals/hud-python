@@ -98,7 +98,7 @@ dev = [
     "pytest-xdist",
     "pytest-timeout",
     "dirty-equals",
-    "ty==0.0.104",
+    "ty==0.0.105",
 ]
 
 [tool.uv]
