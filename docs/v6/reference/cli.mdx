@@ -122,9 +122,8 @@ hud eval tasks.py claude --full --group 3
 # Single-file layout: env + tasks list in one file
 hud eval env.py claude
 hud eval env.py claude --model claude-haiku-4-5   # cheaper model for fast iteration
-hud eval env.py claude --max-steps 30
 hud eval env.py claude --all                      # every task, not just the first
-hud eval env.py claude --full                     # every task, auto-respond, 100 steps
+hud eval env.py claude --full                     # every task; provider agents also auto-respond, 100 steps
 ```
 
 Local Python environments run in a new process for each rollout:
@@ -162,13 +161,13 @@ timeout, is still graded when it can be; its `trace_error` says what failed.
 
 | Option | Description |
 |--------|-------------|
-| `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`). |
+| `--full` | Run the whole dataset (`--all`); the deprecated provider agents also get `--auto-respond --max-steps 100`. |
 | `--all` | Run every task instead of just the first. |
 | `--model`, `-m` | Model id. |
 | `--gateway`, `-g` | Force LLM calls through the HUD gateway. Agents use a provider key when one is set and the gateway otherwise; pass this to use the gateway even when a provider key is present. |
 | `--group` (alias `--group-size`) | Runs per task - a group of repeats whose reward spread you can inspect. |
 | `--max-concurrent` | Cap parallel rollouts. |
-| `--max-steps` | Cap steps per task (default 10; `--full` makes it 100). `claude_cli` passes it as `--max-turns`; `codex_cli` has no step cap. |
+| `--max-steps` | Deprecated; removed in hud v0.7.0 with the provider agents. Caps a provider agent's steps per task (default 10; `--full` makes it 100). CLI agents ignore it and run until done or `timeout_seconds` (`--config timeout_seconds=1800`). |
 | `--auto-respond` | Prompt the agent to continue when it answers without a tool call. |
 | `--task-ids` | Comma-separated slugs or 0-based indices. |
 | `--config`, `-c` | Agent config `key=value` (repeatable). |
@@ -191,7 +190,6 @@ agent = "claude"              # claude, claude_cli, codex_cli, pi, openai, gemin
 model = "claude-sonnet-4-6"
 all = false                   # run every task instead of just the first
 task_ids = ["fix_bug", "0"]   # slugs or 0-based indices
-max_steps = 10
 max_concurrent = 30
 group_size = 1                # runs per task
 auto_respond = false

@@ -34,7 +34,7 @@ agent = create_agent("claude_cli")
 
 Each config lives in `hud.agents.types`, and every setting (`model`, `timeout_seconds`,
 `reasoning_effort`, ...) lives on it; `__call__(run)` takes only the run. `timeout_seconds` bounds the
-whole run, and `ClaudeCLIConfig.max_steps` is Claude Code's `--max-turns`.
+whole run.
 
 `PiAgent` is the harness for open and other OpenAI-compatible models: Pi calls its model over Chat
 Completions, through the HUD gateway with `HUD_API_KEY`, or at `OPENAI_BASE_URL` (default
@@ -161,7 +161,7 @@ To call a provider with your own key, construct the agent directly:
 from hud.agents import ClaudeCLIAgent
 from hud.agents.types import ClaudeCLIConfig
 
-agent = ClaudeCLIAgent(ClaudeCLIConfig(model="claude-sonnet-5", max_steps=30))
+agent = ClaudeCLIAgent(ClaudeCLIConfig(model="claude-sonnet-5", timeout_seconds=1800))
 ```
 
 Constructed directly, an agent uses the provider key when one is set and the gateway otherwise;

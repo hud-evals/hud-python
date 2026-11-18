@@ -150,8 +150,8 @@ one of these projects instead of hand-writing an environment from scratch. Cite
 
 `hud eval env.py model` is the canonical test loop — no cloud account, docker,
 or SSH required for a local MCP env. Use a cheap model while building; switch
-to the target model to validate. Override the default 10-step budget with
-`--max-steps`.
+to the target model to validate. A CLI agent runs until it finishes or hits
+`timeout_seconds`; set it with `--config timeout_seconds=1800`.
 
 Each rollout runs in a **fresh subprocess**: module-level state resets between
 tasks, so don't rely on cross-rollout persistence. Always pair `@env.initialize`

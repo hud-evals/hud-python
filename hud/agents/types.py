@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Annotated, Any, Literal, NotRequired, Self, cast
 from uuid import uuid4
 
@@ -36,6 +37,7 @@ from hud.types import (
     ToolResult,
     Trace,
 )
+from hud.utils.exceptions import HudDeprecationWarning
 from hud.utils.serialization import json_safe_value
 
 # Agent configs written before the field was named ``model`` call it ``checkpoint_name``;
@@ -195,7 +197,10 @@ class OpenAIChatConfig(ToolAgentConfig):
 
 
 class ClaudeCLIConfig(AgentConfig):
-    """``max_steps`` is the CLI's ``--max-turns``; values <= 0 leave it unlimited."""
+    """``max_steps`` (deprecated; ``timeout_seconds`` bounds the run) is the CLI's ``--max-turns``.
+
+    Values <= 0 leave it unlimited.
+    """
 
     system_prompt: str | None = None
     model_name: str = "Claude CLI"
@@ -222,6 +227,17 @@ class ClaudeCLIConfig(AgentConfig):
         ],
     )
     disallowed_tools: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _warn_max_steps(self) -> Self:
+        if "max_steps" in self.model_fields_set:
+            warnings.warn(
+                "`ClaudeCLIConfig.max_steps` is deprecated and will be removed in hud v0.7.0; "
+                "bound the run with `timeout_seconds`.",
+                HudDeprecationWarning,
+                stacklevel=2,
+            )
+        return self
 
 
 class CodexCLIConfig(AgentConfig):
