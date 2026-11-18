@@ -129,8 +129,8 @@ agent = PiAgent(PiConfig(
 ))
 ```
 
-In `.hud_eval.toml`, rename the `[openai_compatible]` section to `[pi]` and move `base_url` and
-`api_key` into those variables. Pi runs its own tools (`read`, `bash`, `edit`, `write`) in the
+On the command line, `hud eval ... openai_compatible` becomes `hud eval ... pi`, with `base_url` and
+`api_key` moved into those variables. Pi runs its own tools (`read`, `bash`, `edit`, `write`) in the
 workspace, so it needs an `ssh` workspace; an environment with only MCP tools still needs
 `openai_compatible`. Pi reaches only streamable-HTTP MCP servers, where `OpenAIChatAgent` also
 reached SSE and websocket ones. Pi records no token ids or logprobs, so training rollouts stay on

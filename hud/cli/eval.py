@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -102,6 +103,12 @@ class EvalConfig(BaseModel):
     def load(cls, path: Path = _CONFIG_PATH) -> EvalConfig:
         if not path.exists():
             return cls()
+        warnings.warn(
+            f"`{path}` is deprecated and will be removed in hud v0.7.0; pass run settings as "
+            "`hud eval` flags and agent settings as `--config key=<json>`.",
+            HudDeprecationWarning,
+            stacklevel=2,
+        )
         fields = {key: value for key, value in settings.model_dump().items() if value is not None}
         mapping: dict[str, Any] = {**os.environ, **fields}
         mapping.update({key.upper(): value for key, value in fields.items()})
@@ -144,7 +151,13 @@ def eval_command(
         "--max-steps 100 (an explicit --max-steps wins).",
     ),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
-    config: list[str] | None = typer.Option(None, "--config", "-c", help="Agent config: key=value"),
+    config: list[str] | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Agent config: key=value, the value read as JSON when it parses (5, true, {...}), "
+        "else as text",
+    ),
     max_concurrent: int | None = typer.Option(
         None, "--max-concurrent", help="Max concurrent tasks"
     ),
@@ -271,16 +284,10 @@ def eval_command(
                         f"--config {key}=... needs an agent; pass one or write <agent>.{key}=..."
                     )
                 section, param = selected.value, key
-            parsed_value: bool | int | float | str = value
-            if value.lower() in ("true", "false"):
-                parsed_value = value.lower() == "true"
-            else:
-                for number in (int, float):
-                    try:
-                        parsed_value = number(value)
-                        break
-                    except ValueError:
-                        continue
+            try:
+                parsed_value = json.loads(value)
+            except json.JSONDecodeError:
+                parsed_value = value
             sections.setdefault(AgentType(section).value, {})[param] = parsed_value
         overrides["agent_config"] = sections
     cfg = cfg.merge(overrides)
