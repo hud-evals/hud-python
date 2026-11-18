@@ -294,12 +294,8 @@ class _Connection:
                         raise HudProtocolError(-32602, "tasks.start: 'id' must be a string")
                     if not isinstance(args, dict):
                         raise HudProtocolError(-32602, "tasks.start: 'args' must be an object")
-                    if task_id not in env.tasks:
-                        raise HudProtocolError(-32602, f"unknown task: {task_id!r}")
                     self._call = asyncio.create_task(session.start_task(task_id, args))
                 else:
-                    if not session.has_task:
-                        raise HudProtocolError(-32600, "no task in progress")
                     self._call = asyncio.create_task(session.grade(params))
                 self.channel.running[session.session_id] = self._call
                 # Shielded: the connection can stop waiting while the call runs on.

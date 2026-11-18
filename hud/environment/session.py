@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import inspect
+import logging
 import secrets
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -15,9 +17,16 @@ from hud.graders import EvaluationResult
 from hud.graders.base import Grade, grade_problems
 
 from .env import Answer, current_session_id
+from .utils import HudProtocolError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Generator, Sequence
+    from collections.abc import (
+        AsyncGenerator,
+        Callable,
+        Coroutine,
+        Generator,
+        Sequence,
+    )
 
     from hud.capabilities.base import Capability
     from hud.capabilities.connection import Connection
@@ -25,6 +34,9 @@ if TYPE_CHECKING:
     from .egress import WorkspaceRoute
     from .env import Environment, TaskTemplate
     from .file_tracker import FileTrackingOp
+
+LOGGER = logging.getLogger("hud.environment")
+_Method = TypeVar("_Method", bound="Callable[..., Coroutine[Any, Any, Any]]")
 
 
 def validate_session_id(session_id: str) -> None:
@@ -99,13 +111,34 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
     )
 
 
+def _reported(method: str) -> Callable[[_Method], _Method]:
+    """Raise a session method's failures the way the control channel reports them, as
+    ``HudProtocolError``, with the traceback logged here and kept as ``__cause__``."""
+
+    def decorate(func: _Method) -> _Method:
+        @functools.wraps(func)
+        async def call(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await func(*args, **kwargs)
+            except HudProtocolError:
+                raise
+            except Exception as exc:
+                LOGGER.exception("error handling %s", method)
+                raise HudProtocolError(-32000, str(exc)) from exc
+
+        return cast("_Method", call)
+
+    return decorate
+
+
 class Session:
     """One session of an environment and the task it holds suspended between start and grade.
 
     Task code, teardown hooks included, runs with ``current_session_id`` set to the
     session's id: environment code keys per-session state, such as robot slot claims, on
     it. The session holds its task only while the task is suspended, so ``cancel`` never
-    touches a task that is running.
+    touches a task that is running. Every failure raises ``HudProtocolError``, in this
+    process as over the control channel.
     """
 
     def __init__(self, env: Environment) -> None:
@@ -118,11 +151,7 @@ class Session:
         """The environment's capabilities, at the addresses it published."""
         return list(self.env.capabilities)
 
-    @property
-    def has_task(self) -> bool:
-        """Whether a started task is suspended here, waiting to be graded."""
-        return self._held is not None
-
+    @_reported("hello")
     async def bind(
         self,
         connections: Sequence[Connection],
@@ -135,13 +164,16 @@ class Session:
         if workspace_routes is not None:
             await self.env.bind_workspace_routes(workspace_routes, session=self.session_id)
 
+    @_reported("tasks.start")
     async def start_task(self, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
         """Start ``task_id``, replacing any task held here, and return its prompt frame.
 
         A start that fails tears its task down.
         """
+        task = self.env.tasks.get(task_id)
+        if task is None:
+            raise HudProtocolError(-32602, f"unknown task: {task_id!r}")
         await self.cancel()
-        task = self.env.tasks[task_id]
         try:
             task.sig.bind(**args)
         except TypeError as exc:
@@ -159,11 +191,12 @@ class Session:
         self._held = (task, gen)
         return cast("dict[str, Any]", frame)
 
+    @_reported("tasks.grade")
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send ``payload``'s answer to the task held here and return its grade frame."""
         held, self._held = self._held, None
         if held is None:
-            raise RuntimeError("no task in progress")
+            raise HudProtocolError(-32600, "no task in progress")
         task, gen = held
         with self._current():
             try:
@@ -187,6 +220,7 @@ class Session:
             raise ValueError(f"task {task.id!r} graded with {grade_problems(exc)}") from exc
         return grade.model_dump(mode="json")
 
+    @_reported("tasks.cancel")
     async def cancel(self) -> None:
         """Tear down the task held here, if any."""
         held, self._held = self._held, None
@@ -194,11 +228,13 @@ class Session:
             with self._current():
                 await self._teardown(held[1])
 
+    @_reported("bye")
     async def close(self) -> None:
         """End the session: tear down any task it holds and release what ``bind`` installed."""
         await self.cancel()
         self.env.release_session(self.session_id)
 
+    @_reported("files")
     async def files(self, op: FileTrackingOp) -> dict[str, Any] | None:
         tracker = self.env.file_tracker
         return None if tracker is None else await asyncio.to_thread(tracker.call, op)

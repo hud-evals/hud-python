@@ -11,8 +11,10 @@ from urllib.parse import urlsplit
 import pytest
 from pydantic import BaseModel
 
-from hud import Environment
+from hud import Environment, Task
 from hud.capabilities import Capability, find_capability
+from hud.environment import HudProtocolError
+from hud.runtime import LocalRuntime
 from tests.environment.conftest import FRAME_LIMIT, encode, session, wire
 from tests.serving import serving
 
@@ -55,6 +57,38 @@ async def test_start_arguments_arrive_as_their_annotated_types(
         started = await peer.call("tasks.start", {"id": "shout", "args": args})
 
     assert started["result"] == {"prompt": prompt}
+
+
+@pytest.mark.parametrize("placement", ["in-process", "served"])
+async def test_a_session_refuses_the_same_way_in_process_and_served(placement: str) -> None:
+    env = Environment("refuses")
+
+    @env.template()
+    async def broken():
+        raise ValueError("no fixture data")
+        yield
+
+    host = (
+        LocalRuntime(env)(Task(env="refuses", id="broken"))
+        if placement == "in-process"
+        else serving(env)
+    )
+    refusals = []
+    async with host as runtime, runtime.connect() as environment:
+        for call in (
+            environment.start_task("missing", {}),
+            environment.start_task("broken", {}),
+            environment.grade({"answer": ""}),
+        ):
+            with pytest.raises(HudProtocolError) as refused:
+                await call
+            refusals.append((refused.value.code, refused.value.message))
+
+    assert refusals == [
+        (-32602, "unknown task: 'missing'"),
+        (-32000, "no fixture data"),
+        (BAD_STATE, "no task in progress"),
+    ]
 
 
 @pytest.mark.parametrize(
