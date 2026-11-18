@@ -27,7 +27,7 @@ async def test_a_span_directory_that_cannot_be_created_does_not_fail_the_run(
     reporting: FakeServices, hud_env: HudEnv, tmp_path: Path
 ) -> None:
     (tmp_path / "a-file").write_text("")
-    hud_env.set(HUD_TELEMETRY_LOCAL_DIR=str(tmp_path / "a-file" / "spans"))
+    hud_env.set(HUD_TRACE_DIR=str(tmp_path / "a-file" / "spans"))
 
     job = await Task(env="checked", id="check").run(
         ScriptedAgent("yes"), runtime=LocalRuntime(checked())

@@ -16,7 +16,7 @@ from hud.agents.types import OpenAIChatConfig
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime
 from hud.telemetry import flush
-from tests.conftest import ROOT, spans
+from tests.conftest import ROOT, spans, steps
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.models import Turn, call
 from tests.fixtures.services import Reply
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hud import Trace
-    from tests.conftest import HudEnv
+    from tests.conftest import Hud, HudEnv
     from tests.fixtures.models import Models
     from tests.fixtures.services import FakeServices
 
@@ -50,8 +50,9 @@ TASK = Task(env="spans", id="answer")
     ("uploads", "local_dir", "written_to", "uploaded"),
     [
         pytest.param("0", None, "home", False, id="uploads-off"),
+        pytest.param("1", None, "home", True, id="uploads-on"),
         pytest.param("1", "spans", "spans", True, id="uploads-on-with-dir"),
-        pytest.param("1", None, None, True, id="uploads-on"),
+        pytest.param("1", "", None, True, id="local-files-off"),
     ],
 )
 async def test_spans_are_written_where_the_configuration_says(
@@ -65,9 +66,9 @@ async def test_spans_are_written_where_the_configuration_says(
 ) -> None:
     hud_env.set(
         HUD_TELEMETRY_ENABLED=uploads,
-        HUD_TELEMETRY_LOCAL_DIR=str(tmp_path / local_dir) if local_dir else None,
+        HUD_TRACE_DIR=str(tmp_path / local_dir) if local_dir else local_dir,
     )
-    directories = {"home": hud_env.home / ".hud" / "spans", "spans": tmp_path / "spans"}
+    directories = {"home": hud_env.home / ".hud" / "traces", "spans": tmp_path / "spans"}
 
     job = await Taskset("t", [TASK]).run(ScriptedAgent("ok"), runtime=LocalRuntime(spans_env()))
 
@@ -76,6 +77,30 @@ async def test_spans_are_written_where_the_configuration_says(
     assert written == {name: name == written_to for name in directories}
     assert flush(timeout=10)
     assert bool(reporting.requests("telemetry", "POST", UPLOAD)) is uploaded
+
+
+async def test_the_old_trace_directory_setting_still_places_local_files(
+    hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_TELEMETRY_LOCAL_DIR=str(tmp_path / "old"))
+
+    trace = await rollout(TASK, ScriptedAgent("ok"), runtime=LocalRuntime(spans_env()))
+
+    assert spans(trace.trace_id, tmp_path / "old") != []
+
+
+async def test_a_signed_out_rollout_leaves_a_local_trace_that_hud_trace_reads(
+    hud: Hud, hud_env: HudEnv
+) -> None:
+    trace = await rollout(TASK, ScriptedAgent("ok"), runtime=LocalRuntime(spans_env()))
+
+    result = hud("trace", "get", str(trace.trace_id), "--json")
+
+    assert result.exit_code == 0, result
+    (outcome,) = result.json
+    assert (outcome["kind"], outcome["status"], outcome["reward"]) == ("outcome", "completed", 1.0)
+    graded = [step["task_call"]["phase"] for step in steps(trace.trace_id) if "task_call" in step]
+    assert graded == ["setup", "evaluate"]
 
 
 def upload_env() -> Environment:

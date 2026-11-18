@@ -9,14 +9,20 @@ import queue
 import threading
 import time
 from collections import defaultdict
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx2
 
 from hud.settings import settings
-from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE
+from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE, Span, record_span
 from hud.utils.requests import make_request_sync
+from hud.utils.time import now_iso
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from hud.types import Step
+    from hud.utils.serialization import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -45,46 +51,66 @@ _lock = threading.Lock()
 _idle = threading.Condition(_lock)
 
 _local_lock = threading.Lock()
+# Local directories already reported unwritable, so each is warned about once.
+_unwritable: set[Path] = set()
+# Spans per trace that failed to upload since the last flush.
+_dropped: defaultdict[str, int] = defaultdict(int)
 
 
-def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
-    """Best-effort append of one span to ``<local_dir>/<trace_id>.jsonl``."""
-    if not local_dir:
-        return
-    # Only I/O is best-effort: a config-shape error (e.g. a mock or wrong type
-    # reaching settings) must fail loudly, not write to a repr-named path.
-    if not isinstance(local_dir, str):
-        raise TypeError(f"telemetry_local_dir must be a str path, got {type(local_dir).__name__}")
-    try:
-        path = Path(local_dir)
-        path.mkdir(parents=True, exist_ok=True)
-        trace_id = span.get("trace_id") or "unknown"
-        line = json.dumps(span, ensure_ascii=False)
-        with _local_lock, (path / f"{trace_id}.jsonl").open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception:
-        logger.debug("local span export failed", exc_info=True)
+def write_local(span: Span) -> None:
+    """Append ``span`` to its trace's local file, when local trace files are on.
 
-
-def queue_span(span: dict[str, Any]) -> None:
-    """Write a span to the local span dir (if set) and queue it for the HUD backend.
-
-    Spans without a ``hud.task_run_id`` attribute are dropped. The backend upload needs
-    telemetry enabled and an API key.
+    A directory that can't be written is warned about once and doesn't fail the run.
     """
-    if not span.get("attributes", {}).get(TASK_RUN_ID_ATTRIBUTE):
+    directory = settings.local_trace_dir
+    if directory is None:
         return
-    _export_local(span, settings.span_dir)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        line = span.model_dump_json()
+        with _local_lock, (directory / f"{span.trace_id}.jsonl").open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError as exc:
+        with _local_lock:
+            first = directory not in _unwritable
+            _unwritable.add(directory)
+        if first:
+            logger.warning("local trace files can't be written to %s: %s", directory, exc)
+
+
+def export_span(span: Span) -> None:
+    """Write ``span`` to its local trace file and queue it for the HUD platform.
+
+    The upload needs telemetry on and an API key.
+    """
+    write_local(span)
     if not settings.reporting_enabled:
         return
     _ensure_worker()
-    _queue.put(span)
+    _queue.put(span.model_dump(mode="json"))
+
+
+def export_step(trace_id: str, step: Step[Any]) -> None:
+    """Export ``step`` as one span of the trace ``trace_id``."""
+    now = now_iso()
+    export_span(
+        record_span(
+            trace_id,
+            name=f"step.{step.source}",
+            schema=step.schema_tag,
+            payload=cast("JsonObject", step.model_dump(mode="json", exclude_none=True)),
+            started_at=step.started_at or now,
+            ended_at=step.ended_at or now,
+            error=step.error,
+        )
+    )
 
 
 def flush(timeout: float = 10.0) -> bool:
     """Drain queued spans and wait for their uploads to finish.
 
-    Returns ``False`` if it did not fully drain within ``timeout``.
+    Returns ``False`` if it did not fully drain within ``timeout``. Once drained, it warns
+    with the traces whose spans failed to upload since the last flush.
     """
     with _lock:
         worker = _worker
@@ -97,7 +123,20 @@ def flush(timeout: float = 10.0) -> bool:
     if not marker.wait(max(0.0, deadline - time.monotonic())):
         return False
     with _idle:
-        return _idle.wait_for(lambda: _pending == 0, max(0.0, deadline - time.monotonic()))
+        if not _idle.wait_for(lambda: _pending == 0, max(0.0, deadline - time.monotonic())):
+            return False
+        dropped = dict(_dropped)
+        _dropped.clear()
+    if dropped:
+        local = settings.local_trace_dir
+        logger.warning(
+            "%d spans of %d traces never reached the HUD platform (%s)%s",
+            sum(dropped.values()),
+            len(dropped),
+            ", ".join(sorted(dropped)),
+            f"; the local trace files in {local} hold them" if local else "",
+        )
+    return True
 
 
 def _ensure_worker() -> None:
@@ -190,6 +229,8 @@ def _do_upload(
             client=_client,
         )
     except Exception as exc:
+        with _lock:
+            _dropped[task_run_id] += len(spans)
         logger.warning(
             "telemetry upload failed for trace %s (%d spans): %s", task_run_id, len(spans), exc
         )

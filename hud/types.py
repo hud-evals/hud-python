@@ -5,8 +5,9 @@ from __future__ import annotations
 import contextlib
 import json
 import uuid
+import warnings
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeAlias
 
 from pydantic import (
     AnyUrl,
@@ -21,16 +22,9 @@ from typing_extensions import TypeVar
 
 from hud.graders.base import Grade
 from hud.telemetry.context import get_current_trace_id
-from hud.telemetry.exporter import queue_span
-from hud.telemetry.span import (
-    PAYLOAD_ATTRIBUTE,
-    SCHEMA_ATTRIBUTE,
-    TASK_RUN_ID_ATTRIBUTE,
-    Span,
-    new_span_id,
-    normalize_trace_id,
-)
+from hud.telemetry.exporter import export_step
 from hud.utils.deprecation import moved_to, resolve_retired
+from hud.utils.exceptions import HudDeprecationWarning
 from hud.utils.serialization import JsonObject
 from hud.utils.time import now_iso
 
@@ -308,32 +302,15 @@ class Step(BaseModel, Generic[SourceT_co]):
     model_config = ConfigDict(extra="forbid")
 
     def emit(self, *, trace_id: str | None = None) -> None:
-        """Export this step as a span with its schema; a no-op without a trace context.
-
-        Pass ``trace_id`` when emitting outside the rollout's context, such as from a thread.
-        """
-
-        task_run_id = trace_id or get_current_trace_id()
-        if not task_run_id:
-            return
-
-        now = now_iso()
-        payload = cast("JsonObject", self.model_dump(mode="json", exclude_none=True))
-        span = Span(
-            name=f"step.{self.source}",
-            trace_id=normalize_trace_id(task_run_id),
-            span_id=new_span_id(),
-            start_time=self.started_at or now,
-            end_time=self.ended_at or now,
-            status_code="ERROR" if self.error else "OK",
-            status_message=self.error,
-            attributes={
-                SCHEMA_ATTRIBUTE: self.schema_tag,
-                TASK_RUN_ID_ATTRIBUTE: task_run_id,
-                PAYLOAD_ATTRIBUTE: payload,
-            },
+        """Export this step under ``trace_id``, else the current trace; deprecated."""
+        warnings.warn(
+            "`Step.emit` is deprecated and will be removed in hud v0.7.0; use "
+            "`hud.telemetry.export_step(trace_id, step)`.",
+            HudDeprecationWarning,
+            stacklevel=2,
         )
-        queue_span(span.model_dump(mode="json"))
+        if task_run_id := trace_id or get_current_trace_id():
+            export_step(task_run_id, self)
 
 
 TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
@@ -429,12 +406,11 @@ class Trace(BaseModel):
         return self
 
     def record(self, step: Step) -> None:
-        """Number, append and stream one step; callers stamp its ``started_at``."""
+        """Number and append one step; callers stamp its ``started_at``."""
         step.step_id = len(self.steps) + 1
         if step.ended_at is None:
             step.ended_at = now_iso()
         self.steps.append(step)
-        step.emit()
 
     def __len__(self) -> int:
         return len(self.steps)

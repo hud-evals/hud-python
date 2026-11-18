@@ -17,6 +17,7 @@ from hud import Environment
 from hud.agents import Agent, ClaudeCLIAgent, CodexCLIAgent, PiAgent
 from hud.agents.types import AgentStep, ClaudeCLIConfig, PiConfig, ToolStep
 from hud.capabilities import Capability
+from hud.capabilities.mcp import get_mcp_trace_id
 from hud.environment.egress import ANY_HOST
 from hud.environment.workspace import usable_bwrap
 from hud.eval.run import rollout
@@ -284,15 +285,15 @@ async def test_without_a_sandbox_the_cli_holds_its_model_key(
 
 @UNSANDBOXED
 @EVERY_CLI
-async def test_the_cli_calls_the_tools_of_the_environments_mcp_server(
+async def test_the_cli_calls_the_tools_of_the_environments_mcp_server_under_its_trace(
     agent_type: str, cli: str, tmp_path: Path
 ) -> None:
-    received: list[str] = []
+    received: list[tuple[str, str | None]] = []
     notes = FastMCP("notes")
 
     @notes.tool
     def echo(text: str) -> str:
-        received.append(text)
+        received.append((text, get_mcp_trace_id()))
         return f"echo: {text}"
 
     call = {"name": "notes", "tool": "echo", "arguments": {"text": "hi"}}
@@ -305,7 +306,7 @@ async def test_the_cli_calls_the_tools_of_the_environments_mcp_server(
 
     (capture,) = stub.captures()
     assert trace.status == "completed"
-    assert (received, capture["mcp"]) == (["hi"], [["echo: hi"]])
+    assert (received, capture["mcp"]) == ([("hi", trace.trace_id)], [["echo: hi"]])
 
 
 @UNSANDBOXED

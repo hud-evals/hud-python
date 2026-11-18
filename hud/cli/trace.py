@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -20,8 +19,8 @@ from hud.cli import (
     CLIGroup,
 )
 from hud.settings import settings
-from hud.telemetry.span import normalize_trace_id
-from hud.types import TextContent
+from hud.telemetry.span import TRACE_SCHEMA, normalize_trace_id
+from hud.types import STEP_SCHEMA, TextContent
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -58,16 +57,15 @@ def get_command(
 ) -> Any:
     """Render the turns and tool calls for one rollout.
 
-    Reads the trace from the local span directory (HUD_TELEMETRY_LOCAL_DIR, or
-    ~/.hud/spans when HUD_TELEMETRY_ENABLED is false) when it is there, otherwise
-    from the HUD platform.
+    Reads the trace's local file (in HUD_TRACE_DIR, ~/.hud/traces by default)
+    when it is there, otherwise the HUD platform.
 
     [not dim]Examples:
         hud trace get <trace-id>
         hud trace get <trace-id> --json[/not dim]
     """
     otel_id = normalize_trace_id(trace_id)
-    local = Path(settings.span_dir) / f"{otel_id}.jsonl" if settings.span_dir else None
+    local = settings.local_trace_dir / f"{otel_id}.jsonl" if settings.local_trace_dir else None
 
     events: list[dict[str, Any]] = []
     if local is not None and local.exists():
@@ -86,7 +84,12 @@ def get_command(
         for span in sorted(spans, key=lambda s: s.get("start_time", "")):
             attrs = span.get("attributes", {})
             payload = attrs.get("hud.payload", {})
-            if attrs.get("hud.schema") != "hud.step.v1" or not isinstance(payload, dict):
+            if not isinstance(payload, dict):
+                continue
+            if attrs.get("hud.schema") == TRACE_SCHEMA and span.get("name") == "trace.exit":
+                events.append({"kind": "outcome", **payload})
+                continue
+            if attrs.get("hud.schema") != STEP_SCHEMA:
                 continue
             if payload.get("source") == "agent":
                 step = AgentStep.model_validate(payload)
@@ -159,6 +162,13 @@ def get_command(
                 hud_console.stdout.print(Text(f"  {name} →", style="dim"))
                 for line in (event.get("result_text") or "").splitlines():
                     hud_console.stdout.print(Text(f"    {line}"))
+        elif kind == "outcome":
+            hud_console.stdout.print(Rule("[cyan]Outcome[/cyan]", style="cyan"))
+            hud_console.stdout.print(
+                Text(f"{event.get('status')}, reward {event.get('reward')}", style="bold")
+            )
+            if event.get("error"):
+                hud_console.stdout.print(Text(f"  error: {event['error']}", style="red"))
 
     web = settings.hud_web_url.rstrip("/")
     hud_console.stdout.print(f"\n[dim]View: {web}/trace/{UUID(otel_id)}[/dim]")

@@ -19,6 +19,9 @@ SCHEMA_ATTRIBUTE = "hud.schema"
 PAYLOAD_ATTRIBUTE = "hud.payload"
 # Attribute carrying the task-run id the exporter groups uploads by.
 TASK_RUN_ID_ATTRIBUTE = "hud.task_run_id"
+# Schema of a trace's enter and exit records. Only local trace files carry them as spans;
+# the platform takes the same records through its trace enter and exit endpoints.
+TRACE_SCHEMA = "hud.trace.v1"
 
 
 class SpanEvent(BaseModel):
@@ -53,6 +56,33 @@ class Span(BaseModel):
 def new_span_id() -> str:
     """A fresh 16-hex span id."""
     return uuid.uuid4().hex[:16]
+
+
+def record_span(
+    trace_id: str,
+    *,
+    name: str,
+    schema: str,
+    payload: JsonObject,
+    started_at: str,
+    ended_at: str,
+    error: str | None = None,
+) -> Span:
+    """The span carrying one schema-tagged record of the trace ``trace_id``."""
+    return Span(
+        name=name,
+        trace_id=normalize_trace_id(trace_id),
+        span_id=new_span_id(),
+        start_time=started_at,
+        end_time=ended_at,
+        status_code="ERROR" if error else "OK",
+        status_message=error,
+        attributes={
+            SCHEMA_ATTRIBUTE: schema,
+            TASK_RUN_ID_ATTRIBUTE: trace_id,
+            PAYLOAD_ATTRIBUTE: payload,
+        },
+    )
 
 
 def normalize_trace_id(trace_id: str) -> str:

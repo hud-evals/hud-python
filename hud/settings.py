@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import DotEnvSettingsSource, PydanticBaseSettingsSource
 
@@ -122,7 +122,7 @@ class Settings(BaseSettings):
 
     telemetry_enabled: bool = Field(
         default=True,
-        description="Enable telemetry for the HUD SDK",
+        description="Upload runs and their traces to the HUD platform (only with an API key)",
         validation_alias="HUD_TELEMETRY_ENABLED",
     )
 
@@ -132,12 +132,12 @@ class Settings(BaseSettings):
         validation_alias="HUD_CLI_ANALYTICS_ENABLED",
     )
 
-    telemetry_local_dir: str | None = Field(
+    trace_dir: str | None = Field(
         default=None,
-        description="If set, also write each telemetry span to <dir>/<trace_id>.jsonl "
-        "locally. Independent of the backend exporter — works with no API key. "
-        "When unset and telemetry is disabled, spans go to ~/.hud/spans.",
-        validation_alias="HUD_TELEMETRY_LOCAL_DIR",
+        description="Directory for local trace files, <dir>/<trace_id>.jsonl, written with or "
+        "without an API key. Unset means ~/.hud/traces; empty writes none. "
+        "HUD_TELEMETRY_LOCAL_DIR is its earlier name.",
+        validation_alias=AliasChoices("HUD_TRACE_DIR", "HUD_TELEMETRY_LOCAL_DIR"),
     )
 
     file_tracking_enabled: bool = Field(
@@ -161,12 +161,11 @@ class Settings(BaseSettings):
         return bool(self.telemetry_enabled and self.api_key)
 
     @property
-    def span_dir(self) -> str | None:
-        if self.telemetry_local_dir:
-            return self.telemetry_local_dir
-        if not self.telemetry_enabled:
-            return str(Path.home() / ".hud" / "spans")
-        return None
+    def local_trace_dir(self) -> Path | None:
+        """Where local trace files go, or ``None`` when they are off."""
+        if self.trace_dir is None:
+            return Path.home() / ".hud" / "traces"
+        return Path(self.trace_dir) if self.trace_dir else None
 
 
 settings = Settings()
