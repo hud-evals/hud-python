@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shlex
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.agents.cli import WINDOWS_SHELLS, CLIAgent, model_endpoint, resolve_executable, run_jsonl
@@ -25,18 +26,7 @@ _MANAGED_PI_PATHS = {
     "linux-x64": "/usr/local/lib/agents/pi/pi",
 }
 
-
-# Aborts the run before the model call that would start turn ``max_steps`` + 1.
-_MAX_STEPS_EXTENSION = """export default function (pi) {
-  let turns = 0;
-  pi.on("turn_end", (event, ctx) => {
-    turns += 1;
-    if (turns >= %d && event.message.content.some((block) => block.type === "toolCall")) {
-      ctx.abort();
-    }
-  });
-}
-"""
+_MAX_STEPS_EXTENSION = Path(__file__).parent / "max-steps.js"
 
 
 class PiEvents:
@@ -248,7 +238,6 @@ class PiAgent(CLIAgent[PiConfig]):
             self.config.model,
         ]
         connection = endpoint.connection
-        env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
         cli = " ".join(shlex.quote(arg) for arg in args)
         if self.config.system_prompt is not None:
             # Passed as a file: Pi reads a value that names an existing file as that file.
@@ -259,7 +248,8 @@ class PiAgent(CLIAgent[PiConfig]):
             {f"extensions/{name}": source for name, source in self.config.extensions.items()}
         )
         if self.config.max_steps > 0:
-            files["max-steps.js"] = _MAX_STEPS_EXTENSION % self.config.max_steps
+            files["max-steps.js"] = _MAX_STEPS_EXTENSION.read_text()
+            env["HUD_PI_MAX_STEPS"] = str(self.config.max_steps)
             cli += ' --extension "$pi_home/max-steps.js"'
         statements = ['pi_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-pi.XXXXXX") || exit 1']
         if connection is None:
@@ -273,6 +263,7 @@ class PiAgent(CLIAgent[PiConfig]):
         # A guarded connection is bound to the launched process, so exec the CLI itself; the
         # sandbox is discarded after the rollout, so its agent directory needs no trap.
         exec_ = "exec env " if connection is not None else ""
+        env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
         statements.append(f"{exec_}{env_prefix} {cli}")
         command = "; ".join(statements)
 
