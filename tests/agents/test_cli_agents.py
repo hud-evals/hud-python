@@ -1,6 +1,6 @@
 """What the coding-CLI agents do with their CLI: one CLI per concurrent rollout, the agent
-timeout stopping it, how its exit ends the run, and what Claude Code and Codex each reach
-and record. A stand-in on the workspace's ``PATH`` plays each CLI."""
+timeout stopping it, how its exit ends the run, and what Claude Code, Codex and Pi each
+reach and record. A stand-in on the workspace's ``PATH`` plays each CLI."""
 
 from __future__ import annotations
 
@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from fastmcp import FastMCP
 from pydantic import ValidationError
 
 from hud import Environment
-from hud.agents import Agent, ClaudeCLIAgent, CodexCLIAgent
-from hud.agents.types import ClaudeCLIConfig, ToolStep
+from hud.agents import Agent, ClaudeCLIAgent, CodexCLIAgent, PiAgent
+from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability
 from hud.environment.egress import ANY_HOST
 from hud.environment.workspace import usable_bwrap
@@ -23,6 +24,7 @@ from hud.runtime import LocalRuntime, Shared
 from hud.types import AgentType
 from tests.conftest import SANDBOX
 from tests.fixtures import clis
+from tests.fixtures.asgi import serve_asgi
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.screen import fake_screen
 
@@ -39,12 +41,13 @@ EVERY_CLI = pytest.mark.parametrize(
     [
         pytest.param("claude_cli", "claude", id="claude_cli"),
         pytest.param("codex_cli", "codex", id="codex_cli"),
+        pytest.param("pi", "pi", id="pi"),
     ],
 )
 # The variable each CLI reads its model key from.
-MODEL_KEY = {"claude": "ANTHROPIC_API_KEY", "codex": "INFERENCE_API_KEY"}
+MODEL_KEY = {"claude": "ANTHROPIC_API_KEY", "codex": "INFERENCE_API_KEY", "pi": "INFERENCE_API_KEY"}
 # The variable naming the directory each CLI reads its login and settings from.
-CONFIG_HOME = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
+CONFIG_HOME = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME", "pi": "PI_CODING_AGENT_DIR"}
 # Where a workspace runs: unsandboxed where the host gives no sandbox, and in the
 # sandbox lane, where its CLI reaches its model through a process-bound relay.
 BACKINGS = pytest.mark.parametrize(
@@ -589,4 +592,178 @@ async def test_codex_refuses_a_launcher_script_for_a_process_bound_connection(
     assert "/codex is a launcher script, but a process-bound inference connection " in (
         trace.error or ""
     )
+    assert stub.captures() == []
+
+
+PI_WRITE_CALL = {
+    "type": "toolCall",
+    "id": "call-1",
+    "name": "write",
+    "arguments": {"path": "a.txt", "content": "x"},
+}
+
+
+@pytest.mark.parametrize(
+    ("result", "is_error"),
+    [
+        (clis.pi_tool_result("call-1", "write", "Successfully wrote to a.txt"), False),
+        (clis.pi_tool_result("call-1", "write", "EACCES: a.txt", is_error=True), True),
+    ],
+    ids=["a-tool-that-succeeded", "a-tool-that-failed"],
+)
+async def test_each_tool_pi_ran_lands_on_the_trace_as_a_tool_step(
+    result: dict[str, Any], is_error: bool, tmp_path: Path
+) -> None:
+    stdout = clis.jsonl(
+        clis.PI_STARTED,
+        clis.pi_assistant({"type": "text", "text": "writing"}, PI_WRITE_CALL, stop="toolUse"),
+        result,
+        clis.pi_assistant({"type": "text", "text": "done"}),
+        clis.PI_SETTLED,
+    )
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "pi", stdout=stdout)
+    stub.install()
+
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    (trace,) = (await task().run(PiAgent())).traces
+
+    (recorded,) = [step for step in trace.steps if isinstance(step, ToolStep)]
+    assert recorded.call is not None and recorded.result is not None
+    sent = [getattr(block, "text", None) for block in recorded.result.content]
+    assert (trace.status, trace.content) == ("completed", "done")
+    assert (recorded.call.name, recorded.call.arguments) == ("write", PI_WRITE_CALL["arguments"])
+    assert (recorded.result.isError, sent) == (is_error, [result["message"]["content"][0]["text"]])
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "exit", "content", "error"),
+    [
+        (
+            clis.jsonl(
+                clis.PI_STARTED,
+                clis.pi_assistant(stop="error", error="400: unknown model 'no-such'"),
+                clis.PI_SETTLED,
+            ),
+            "",
+            0,
+            None,
+            "400: unknown model 'no-such'",
+        ),
+        ("", "Cannot find module", 1, None, "Cannot find module"),
+        (
+            clis.jsonl(clis.PI_STARTED, clis.pi_assistant({"type": "text", "text": "Fixed."})),
+            "",
+            0,
+            "Fixed.",
+            "pi CLI exited without an agent_settled event",
+        ),
+        (
+            clis.jsonl(
+                clis.PI_STARTED,
+                clis.pi_assistant(PI_WRITE_CALL, stop="toolUse"),
+                clis.PI_SETTLED,
+            ),
+            "",
+            0,
+            None,
+            "pi CLI exited without results for tool calls: call-1",
+        ),
+    ],
+    ids=[
+        "a-failed-model-call-with-a-zero-exit",
+        "a-nonzero-exit",
+        "a-zero-exit-without-settling",
+        "a-tool-call-left-without-a-result",
+    ],
+)
+async def test_how_pi_exits_decides_how_the_run_ends(
+    stdout: str, stderr: str, exit: int, content: str | None, error: str, tmp_path: Path
+) -> None:
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "pi", stdout=stdout, stderr=stderr, exit=exit)
+    stub.install()
+
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    (trace,) = (await task().run(PiAgent())).traces
+
+    assert (trace.status, trace.content, trace.error) == (
+        "error",
+        content,
+        f"[agent loop] RuntimeError: {error}",
+    )
+
+
+async def test_pi_records_each_model_call_with_its_token_usage(tmp_path: Path) -> None:
+    stdout = clis.jsonl(
+        clis.PI_STARTED,
+        clis.pi_assistant({"type": "thinking", "thinking": "easy"}, {"type": "text", "text": "4"}),
+        clis.PI_SETTLED,
+    )
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "pi", stdout=stdout)
+    stub.install()
+
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    (trace,) = (await task().run(PiAgent())).traces
+
+    (step,) = [step for step in trace.steps if isinstance(step, AgentStep)]
+    assert step.usage is not None
+    assert (step.content, step.reasoning, step.model) == ("4", "easy", "pi-test")
+    assert (step.usage.prompt_tokens, step.usage.completion_tokens, step.usage.cached_tokens) == (
+        12,
+        4,
+        2,
+    )
+
+
+async def test_pi_calls_the_environments_mcp_tools_with_their_token(tmp_path: Path) -> None:
+    server = FastMCP(name="lookup")
+
+    @server.tool
+    def lookup(key: str) -> str:
+        return f"value of {key}"
+
+    seen: list[str | None] = []
+
+    async def app(scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            seen.append(dict(scope["headers"]).get(b"authorization", b"").decode() or None)
+        await inner(scope, receive, send)
+
+    inner = server.http_app(path="/mcp")
+    stub = clis.Stub(
+        tmp_path / "ws" / ".stub",
+        "pi",
+        stdout=clis.answer("pi", "done"),
+        mcp=[{"name": "lookup", "tool": "lookup", "arguments": {"key": "k"}}],
+    )
+    stub.install()
+
+    async with serve_asgi(app) as port:
+        task = workspace_task(
+            tmp_path / "ws",
+            env=stub.shell_env(),
+            capabilities=(
+                Capability.mcp(
+                    name="lookup", url=f"http://127.0.0.1:{port}/mcp", auth_token="mcp-token"
+                ),
+            ),
+        )
+        (trace,) = (await task().run(PiAgent())).traces
+
+    (capture,) = stub.captures()
+    assert trace.status == "completed"
+    assert capture["mcp"] == [["value of k"]]
+    assert set(seen) == {"Bearer mcp-token"}
+    assert "mcp-token" not in str(capture["argv"])
+
+
+async def test_pi_without_a_model_endpoint_is_refused(hud_env: HudEnv, tmp_path: Path) -> None:
+    hud_env.set(HUD_API_KEY=None)
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "pi", stdout=clis.answer("pi", "done"))
+    stub.install()
+
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    (trace,) = (await task().run(PiAgent())).traces
+
+    assert trace.error is not None
+    assert "pi needs a model endpoint" in trace.error
     assert stub.captures() == []

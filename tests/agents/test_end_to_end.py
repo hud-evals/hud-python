@@ -29,6 +29,7 @@ MODELS = {
     AgentType.OPENAI_COMPATIBLE: "grok-4.6",
     AgentType.CLAUDE_CLI: "claude-haiku-5-5",
     AgentType.CODEX_CLI: "gpt-6-luna",
+    AgentType.PI: "deepseek/deepseek-v4.1-flash",
 }
 
 FIXTURES = sorted(

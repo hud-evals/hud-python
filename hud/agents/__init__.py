@@ -20,9 +20,16 @@ if TYPE_CHECKING:
     from hud.agents.gemini.agent import GeminiAgent
     from hud.agents.openai.agent import OpenAIAgent
     from hud.agents.openai_compatible.agent import OpenAIChatAgent
+    from hud.agents.pi.agent import PiAgent
 
     GatewayAgent: TypeAlias = (
-        ClaudeAgent | ClaudeCLIAgent | CodexCLIAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent
+        ClaudeAgent
+        | ClaudeCLIAgent
+        | CodexCLIAgent
+        | GeminiAgent
+        | OpenAIAgent
+        | OpenAIChatAgent
+        | PiAgent
     )
 
 
@@ -59,6 +66,7 @@ _LAZY_EXPORTS = {
     "GeminiAgent": "hud.agents.gemini.agent",
     "OpenAIAgent": "hud.agents.openai.agent",
     "OpenAIChatAgent": "hud.agents.openai_compatible.agent",
+    "PiAgent": "hud.agents.pi.agent",
 }
 
 __all__ = [
@@ -69,6 +77,7 @@ __all__ = [
     "GeminiAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
+    "PiAgent",
     "create_agent",
 ]
 

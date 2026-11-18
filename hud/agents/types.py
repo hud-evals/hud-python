@@ -236,6 +236,14 @@ class CodexCLIConfig(AgentConfig):
     reasoning_effort: CodexReasoningEffort | None = None
 
 
+class PiConfig(AgentConfig):
+    """Pi calls ``model`` over Chat Completions: through the HUD gateway, or at
+    ``OPENAI_BASE_URL`` with ``OPENAI_API_KEY``."""
+
+    model_name: str = "Pi"
+    model: str = Field(default="deepseek/deepseek-v4.1-flash", validation_alias=_model_alias)
+
+
 class Citation(BaseModel):
     """A span of agent output linked to its source, normalized across providers."""
 

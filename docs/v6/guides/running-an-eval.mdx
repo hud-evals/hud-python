@@ -38,15 +38,17 @@ and launch - no CLI required. See [evaluations on the platform](/platform/evalua
 
 ### Choosing an agent
 
-The agent name is an [agent type](/v6/reference/agents#agent-types). `claude_cli` and `codex_cli` run
-Claude Code and Codex inside the environment's workspace. An agent calls its provider with its own key
-when one is set, and otherwise the [HUD gateway](/v6/reference/agents#create-agent) with `HUD_API_KEY`;
-`--gateway` forces the gateway. Switching models is a single flag, and `hud models list` shows every
+The agent name is an [agent type](/v6/reference/agents#agent-types). `claude_cli`, `codex_cli` and `pi`
+run Claude Code, Codex and Pi inside the environment's workspace; `pi` runs open and other
+OpenAI-compatible models. An agent calls its provider with its own key when one is set, and otherwise
+the [HUD gateway](/v6/reference/agents#create-agent) with `HUD_API_KEY`; `--gateway` forces the
+gateway. Switching models is a single flag, and `hud models list` shows every
 model the gateway knows.
 
 ```bash
 hud eval "My Taskset" claude_cli --model claude-haiku-4-5   # a cheaper model for fast iteration
 hud eval "My Taskset" codex_cli --model gpt-5.6-sol
+hud eval "My Taskset" pi --model deepseek/deepseek-v4.1-flash
 ```
 
 `claude`, `openai`, `gemini` and `openai_compatible` still run HUD's

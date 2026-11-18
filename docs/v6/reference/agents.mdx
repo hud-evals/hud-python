@@ -1,6 +1,6 @@
 ---
 title: "Agents"
-description: "Agents in HUD: the Claude Code and Codex CLI agents, create_agent and the HUD gateway, the deprecated provider agents, and how to wire your own agent into a task run."
+description: "Agents in HUD: the Claude Code, Codex and Pi CLI agents, create_agent and the HUD gateway, the deprecated provider agents, and how to wire your own agent into a task run."
 icon: "robot"
 mode: "wide"
 ---
@@ -24,6 +24,7 @@ The SDK's agents run a coding agent's own CLI inside the environment's workspace
 |-------|------|--------|---------------|
 | `ClaudeCLIAgent` | Claude Code (`claude`) | `ClaudeCLIConfig` | `claude-sonnet-5` |
 | `CodexCLIAgent` | Codex (`codex exec`) | `CodexCLIConfig` | `gpt-5.6-sol` |
+| `PiAgent` | [Pi](https://pi.dev) (`pi --mode json`) | `PiConfig` | `deepseek/deepseek-v4.1-flash` |
 
 ```python
 from hud.agents import create_agent
@@ -35,15 +36,27 @@ Each config lives in `hud.agents.types`, and every setting (`model`, `timeout_se
 `reasoning_effort`, ...) lives on it; `__call__(run)` takes only the run. `timeout_seconds` bounds the
 whole run, and `ClaudeCLIConfig.max_steps` is Claude Code's `--max-turns`.
 
+`PiAgent` is the harness for open and other OpenAI-compatible models: Pi calls its model over Chat
+Completions, through the HUD gateway with `HUD_API_KEY`, or at `OPENAI_BASE_URL` (default
+`https://api.openai.com/v1`) with `OPENAI_API_KEY`. It always needs one of those, since it ignores
+any Pi login in the workspace. The environment's MCP servers reach it as Pi tools; Pi speaks only
+streamable HTTP to them, so an `sse` or `websocket` MCP capability fails the run. It runs in POSIX
+workspaces and has no computer use yet.
+
+```python
+agent = create_agent("pi")
+```
+
 The SDK also ships HUD's older [provider agents](#provider-agents), which are deprecated.
 
 ### What a CLI agent needs
 
 - **A workspace.** The agent runs its CLI over the environment's `ssh` capability, against the
-  workspace filesystem. POSIX and Windows workspaces both work; `ClaudeCLIAgent` computer use over an
-  `rfb` capability needs a POSIX workspace.
-- **The CLI.** `claude` or `codex` must be installed in the workspace, unless the runtime provides a
-  managed copy.
+  workspace filesystem. POSIX and Windows workspaces both work for Claude Code and Codex; `PiAgent`,
+  and `ClaudeCLIAgent` computer use over an `rfb` capability, need a POSIX workspace.
+- **The CLI.** `claude`, `codex` or `pi` must be installed in the workspace, unless the runtime
+  provides a managed copy. Pi ships a native binary per platform on its GitHub releases, and the npm
+  package `@earendil-works/pi-coding-agent`.
 - **A model route.** In a sandboxed workspace the CLI never holds a model key. It reaches its model
   through the rollout's `inference` connection, which you can pass in `rollout(connections=...)`;
   otherwise `rollout` binds it to the gateway with `HUD_API_KEY` when the agent routes to the gateway
@@ -89,17 +102,18 @@ An agent type names an agent in `hud eval`, in `create_agent`, and in what `Host
 |-------------|-----------|-----------------|
 | `claude_cli` | `ClaudeCLIAgent` | `ClaudeCLIAgent` (alias of `claude`) |
 | `codex_cli` | `CodexCLIAgent` | `CodexCLIAgent` (alias of `openai`) |
+| `pi` | `PiAgent` | `PiAgent` |
 | `claude` | `ClaudeAgent` | `ClaudeCLIAgent` |
 | `openai` | `OpenAIAgent` | `CodexCLIAgent` |
 | `gemini` | `GeminiAgent` | a Gemini CLI agent |
-| `openai_compatible` | `OpenAIChatAgent` | removed |
+| `openai_compatible` | `OpenAIChatAgent` | removed; use `pi` |
 
 ## Provider agents
 
 <Warning>
 The provider agents are deprecated and hud v0.7.0 removes them. Each one warns when it is constructed.
-Use `ClaudeCLIAgent` in place of `ClaudeAgent` and `CodexCLIAgent` in place of `OpenAIAgent`.
-`GeminiAgent` and `OpenAIChatAgent` have no CLI replacement yet.
+Use `ClaudeCLIAgent` in place of `ClaudeAgent`, `CodexCLIAgent` in place of `OpenAIAgent`, and
+`PiAgent` in place of `OpenAIChatAgent`. `GeminiAgent` has no CLI replacement yet.
 </Warning>
 
 A provider agent is HUD's own tool-call loop over one provider's API. Each run it reads the
