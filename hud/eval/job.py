@@ -1,4 +1,4 @@
-"""Jobs and their platform reporting, a no-op without telemetry and an API key."""
+"""Jobs, and the trace records written locally and reported to the platform."""
 
 from __future__ import annotations
 
@@ -6,14 +6,18 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from hud.graders.base import Grade
 from hud.settings import settings
+from hud.telemetry.exporter import write_local
+from hud.telemetry.span import TRACE_SCHEMA, record_span
 from hud.utils.platform import PlatformClient
+from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.types import Trace
+    from hud.utils.serialization import JsonObject
 
 logger = logging.getLogger("hud.eval.job")
 
@@ -76,10 +80,9 @@ async def trace_enter(
     model: str | None = None,
     parent_trace_id: str | None = None,
 ) -> None:
-    if not settings.reporting_enabled:
-        return
-    await _report(
-        f"/trace/{trace_id}/enter",
+    await _record(
+        trace_id,
+        "enter",
         {
             "job_id": job_id,
             "group_id": group_id,
@@ -90,11 +93,10 @@ async def trace_enter(
     )
 
 
-async def trace_exit(trace: Trace) -> None:
-    if not settings.reporting_enabled or trace.trace_id is None:
-        return
-    await _report(
-        f"/trace/{trace.trace_id}/exit",
+async def trace_exit(trace: Trace, trace_id: str) -> None:
+    await _record(
+        trace_id,
+        "exit",
         {
             "status": trace.status or "completed",
             "reward": trace.reward,
@@ -105,6 +107,24 @@ async def trace_exit(trace: Trace) -> None:
             "metadata": trace.extra or None,
         },
     )
+
+
+async def _record(trace_id: str, phase: Literal["enter", "exit"], payload: dict[str, Any]) -> None:
+    """Write one trace record to the local trace file and report it to the platform."""
+    body = {k: v for k, v in payload.items() if v is not None}
+    now = now_iso()
+    write_local(
+        record_span(
+            trace_id,
+            name=f"trace.{phase}",
+            schema=TRACE_SCHEMA,
+            payload=cast("JsonObject", body),
+            started_at=now,
+            ended_at=now,
+        )
+    )
+    if settings.reporting_enabled:
+        await _report(f"/trace/{trace_id}/{phase}", body)
 
 
 async def _report(path: str, payload: dict[str, Any]) -> None:

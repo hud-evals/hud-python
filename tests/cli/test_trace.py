@@ -59,7 +59,7 @@ async def write_a_report(
     rollout and of ``hud``, so rendered paths stay short.
     """
     monkeypatch.chdir(tmp_path)
-    hud_env.set(HUD_TELEMETRY_LOCAL_DIR="spans")
+    hud_env.set(HUD_TRACE_DIR="spans")
     workspace = tmp_path / "workspace"
     report = workspace / "REPORT.md"
     env = Environment("report")
@@ -99,10 +99,12 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
         ("agent_message", None),
         ("tool_call", "write"),
         ("agent_message", None),
+        ("outcome", None),
     ]
     assert result.json[1]["arguments"] == {"filePath": "REPORT.md", "content": "PASS"}
     assert "4 bytes" in result.json[1]["result_text"]
     assert result.json[2]["text"] == "Wrote it."
+    assert (result.json[3]["status"], result.json[3]["reward"]) == ("completed", 1.0)
 
 
 async def test_a_local_trace_renders_despite_a_record_cut_short(

@@ -187,7 +187,7 @@ def test_a_deployed_template_runs_on_hud_and_its_trace_reads_back(
     deployed = project.hud("deploy", "--no-env", "--yes", timeout=1800)
     assert deployed.exit_code == 0, deployed
     project.write_rows(data_file)
-    live.set(HUD_TELEMETRY_ENABLED="1", HUD_TELEMETRY_LOCAL_DIR=str(traces))
+    live.set(HUD_TELEMETRY_ENABLED="1", HUD_TRACE_DIR=str(traces))
 
     run = evaluated(
         project.hud(*EVAL, *REAL_MODEL, "--model", HOSTED_MODEL, "--runtime", "hud", timeout=900)
@@ -195,7 +195,7 @@ def test_a_deployed_template_runs_on_hud_and_its_trace_reads_back(
 
     assert_lifecycle(steps(run["trace_id"], traces), data_file)
     # Without a local span directory, `hud trace get` reads the trace from the platform.
-    live.set(HUD_TELEMETRY_LOCAL_DIR=None)
+    live.set(HUD_TRACE_DIR=None)
     events = read_back(project.hud, run["trace_id"])
     (traces / "remote-events.json").write_text(json.dumps(events, indent=2))
 

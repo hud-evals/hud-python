@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from dotenv import dotenv_values
+from pydantic import AliasChoices
 
 from hud.settings import Settings, settings
 from hud.telemetry import flush
@@ -100,9 +101,14 @@ class HudEnv:
         monkeypatch.setenv("HOME", str(home))
         monkeypatch.setenv("USERPROFILE", str(home))
         settings_read = [
-            field.validation_alias
+            name
             for field in Settings.model_fields.values()
-            if isinstance(field.validation_alias, str)
+            for name in (
+                field.validation_alias.choices
+                if isinstance(field.validation_alias, AliasChoices)
+                else [field.validation_alias]
+            )
+            if isinstance(name, str)
         ]
         for name in (*settings_read, *PROVIDER_ENV):
             monkeypatch.delenv(name, raising=False)
@@ -250,12 +256,14 @@ def spans(trace_id: str | None, span_dir: Path | None = None) -> list[dict[str, 
     """Every span exported for the run ``trace_id``, in start order.
 
     Spans land in ``<span_dir>/<trace id as 32 hex>.jsonl``; the span directory
-    is the SDK's own (``HUD_TELEMETRY_LOCAL_DIR``, else ``~/.hud/spans`` while
-    uploads are off).
+    defaults to the SDK's local trace directory (``HUD_TRACE_DIR``, else
+    ``~/.hud/traces``).
     """
     if trace_id is None:
         raise ValueError("the run has no trace id, so it exported no spans")
-    directory = span_dir or Path(settings.span_dir or "")
+    directory = span_dir or settings.local_trace_dir
+    if directory is None:
+        return []
     path = directory / f"{uuid.UUID(trace_id).hex}.jsonl"
     if not path.exists():
         return []
