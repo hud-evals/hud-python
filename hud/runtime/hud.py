@@ -48,8 +48,8 @@ class HUDRuntime:
     async def _runtime_session(self, task: Task) -> AsyncGenerator[Runtime]:
         if task.runtime_config is not None:
             # The lease resolves the env by name, so an image or Compose recipe is only
-            # provenance and cpu/memory only warn; a GPU, OS, TPU or limits change what is
-            # graded, so those fail.
+            # provenance and cpu/memory only warn; a GPU, OS, TPU, limits or data change what
+            # is graded, so those fail.
             resources = task.runtime_config.resources
             if (
                 resources is not None
@@ -59,12 +59,15 @@ class HUDRuntime:
                     or resources.tpu is not None
                 )
             ) or (
-                task.runtime_config.limits is not None
-                and task.runtime_config.limits.model_dump(exclude_none=True)
+                (
+                    task.runtime_config.limits is not None
+                    and task.runtime_config.limits.model_dump(exclude_none=True)
+                )
+                or task.runtime_config.data is not None
             ):
                 raise ValueError(
-                    "HUDRuntime cannot honor this task's declared placement requirements or "
-                    "limits on an "
+                    "HUDRuntime cannot honor this task's declared placement requirements, "
+                    "limits or data on an "
                     "already-deployed env; run it on a placement that provisions them"
                 )
             softly_ignored = task.runtime_config.model_dump(

@@ -7,7 +7,9 @@ import contextlib
 import json
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, Self, runtime_checkable
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -15,6 +17,7 @@ from pydantic import (
     Field,
     SerializationInfo,
     field_serializer,
+    field_validator,
     model_validator,
 )
 
@@ -84,6 +87,53 @@ class RuntimeLimits(BaseModel):
     run_timeout_s: int | None = Field(default=None, gt=0)
 
 
+class RuntimeDataFile(BaseModel):
+    """One platform data file and the path it appears at under the mount."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: UUID
+    path: str = Field(min_length=1, max_length=512)
+
+    @field_validator("path")
+    @classmethod
+    def _relative_path(cls, value: str) -> str:
+        parts = value.strip("/").split("/")
+        if not all(parts) or any(part in (".", "..") for part in parts):
+            raise ValueError("data.files[].path must be a relative path without '.' or '..'")
+        return "/".join(parts)
+
+
+class RuntimeData(BaseModel):
+    """Platform data files mounted into the environment at ``mount_path``.
+
+    ``readonly`` mounts them read-only; ``overlay`` adds a writable layer that is
+    discarded when the rollout ends.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    files: list[RuntimeDataFile] = Field(min_length=1, max_length=32)
+    mount_path: str = "/data"
+    mode: Literal["overlay", "readonly"] = "overlay"
+
+    @field_validator("mount_path")
+    @classmethod
+    def _absolute_mount_path(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if not path.is_absolute() or path == PurePosixPath("/") or ".." in path.parts:
+            raise ValueError("data.mount_path must be an absolute path other than /")
+        return str(path)
+
+    @model_validator(mode="after")
+    def _distinct_files(self) -> Self:
+        if len({file.file_id for file in self.files}) != len(self.files):
+            raise ValueError("data.files names the same data file more than once")
+        if len({file.path for file in self.files}) != len(self.files):
+            raise ValueError("data.files uses the same path more than once")
+        return self
+
+
 class RuntimeConfig(BaseModel):
     """Typed task-environment launch requirements.
 
@@ -96,6 +146,7 @@ class RuntimeConfig(BaseModel):
     compose: ComposeProject | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
+    data: RuntimeData | None = None
 
     @field_serializer("resources", "limits", when_used="json")
     def _serialize_options(

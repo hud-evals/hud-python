@@ -28,8 +28,11 @@ from hud.runtime import (
     HUDRuntime,
     LocalRuntime,
     ModalRuntime,
+    Provider,
     Runtime,
     RuntimeConfig,
+    RuntimeData,
+    RuntimeDataFile,
     Shared,
     SubprocessRuntime,
 )
@@ -288,3 +291,19 @@ async def test_a_verifier_in_its_own_sandbox_receives_the_actors_session_files(
     (trace,) = job.traces
     assert trace.reward == reward
     assert ("runtime session contains" in (trace.error or "")) is link
+
+
+@pytest.mark.parametrize("runtime", [DockerRuntime(), HUDRuntime()], ids=["docker", "hud"])
+async def test_runtimes_that_cannot_mount_data_refuse_it(runtime: Provider) -> None:
+    """A task that declares data never runs on a placement without it."""
+    task = Task(
+        env="echo",
+        id="echo",
+        runtime_config=RuntimeConfig(
+            data=RuntimeData(files=[RuntimeDataFile(file_id=uuid.uuid4(), path="rows.csv")]),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="data"):
+        async with runtime(task):
+            pass

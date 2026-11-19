@@ -85,6 +85,7 @@ RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2
 | `compose` | `ComposeProject(document, root, service_access)`. Mutually exclusive with `image`. |
 | `resources` | Placement requests: CPU, memory, disk, acceptable GPU types and count, OS, or TPU slice. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
+| `data` | `RuntimeData(files, mount_path, mode)`: platform data files mounted into the environment. Each `RuntimeDataFile(file_id, path)` appears at `path` under `mount_path` (default `/data`). `mode` is `overlay` (default; writes are discarded when the rollout ends) or `readonly`. |
 
 Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
 is best effort: `DockerRuntime` admits against available disk, while providers without disk
@@ -92,6 +93,7 @@ sizing proceed with their default capacity.
 `HUDRuntime` proceeds on the deployed environment's defaults and warns when it ignores CPU, memory,
 or storage requirements; it rejects GPU, OS, TPU, and `limits`. Modal accepts one GPU type.
 `LocalRuntime` rejects a per-task `runtime_config`.
+Only `HostedRuntime` mounts `data`; every other runtime rejects it.
 
 `run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
 Without one, `DockerRuntime` sets no lifetime bound, while `ModalRuntime` and HUD-hosted Modal
