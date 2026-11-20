@@ -4,17 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import json
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, Self, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    ClassVar,
+    Literal,
+    Protocol,
+    Self,
+    runtime_checkable,
+)
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     SerializationInfo,
+    StringConstraints,
     field_serializer,
     field_validator,
     model_validator,
@@ -86,7 +97,7 @@ class RuntimeLimits(BaseModel):
     run_timeout_s: int | None = Field(default=None, gt=0)
 
 
-class RuntimeData(BaseModel):
+class RuntimeDataMount(BaseModel):
     """One folder of the team's shared data, mounted into the environment at ``mount_path``.
 
     ``prefix`` is a path inside the team's shared data; empty means all of it.
@@ -97,15 +108,15 @@ class RuntimeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prefix: str = Field(default="", max_length=512)
-    mount_path: str = "/data"
-    mode: Literal["overlay", "readonly"] = "overlay"
+    mount_path: str
+    mode: Literal["readonly", "overlay"] = "readonly"
 
     @field_validator("prefix")
     @classmethod
     def _relative_prefix(cls, value: str) -> str:
         parts = [part for part in value.split("/") if part]
         if any(part in (".", "..") for part in parts):
-            raise ValueError("data.prefix must be a relative path without '.' or '..'")
+            raise ValueError("prefix must be a relative path without '.' or '..'")
         return "".join(f"{part}/" for part in parts)
 
     @field_validator("mount_path")
@@ -113,8 +124,11 @@ class RuntimeData(BaseModel):
     def _absolute_mount_path(cls, value: str) -> str:
         path = PurePosixPath(value)
         if not path.is_absolute() or path == PurePosixPath("/") or ".." in path.parts:
-            raise ValueError("data.mount_path must be an absolute path other than /")
+            raise ValueError("mount_path must be an absolute path other than /")
         return str(path)
+
+
+RuntimeDataName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")]
 
 
 class RuntimeConfig(BaseModel):
@@ -129,7 +143,19 @@ class RuntimeConfig(BaseModel):
     compose: ComposeProject | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
-    data: RuntimeData | None = None
+    data: dict[RuntimeDataName, RuntimeDataMount] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=8,
+    )
+
+    @model_validator(mode="after")
+    def _separate_data_mounts(self) -> Self:
+        paths = sorted(PurePosixPath(mount.mount_path) for mount in (self.data or {}).values())
+        for outer, inner in itertools.pairwise(paths):
+            if inner == outer or outer in inner.parents:
+                raise ValueError(f"data mounts {outer} and {inner} overlap")
+        return self
 
     @field_serializer("resources", "limits", when_used="json")
     def _serialize_options(

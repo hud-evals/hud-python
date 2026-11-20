@@ -85,7 +85,7 @@ RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2
 | `compose` | `ComposeProject(document, root, service_access)`. Mutually exclusive with `image`. |
 | `resources` | Placement requests: CPU, memory, disk, acceptable GPU types and count, OS, or TPU slice. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
-| `data` | `RuntimeData(prefix, mount_path, mode)`: one folder of the team's shared data mounted into the environment at `mount_path` (default `/data`). `prefix` is a path inside the shared data; empty mounts all of it. `mode` is `overlay` (default; writes are discarded when the rollout ends) or `readonly`. |
+| `data` | Named folders of the team's shared data, each mounted into the environment: `{name: RuntimeDataMount(prefix, mount_path, mode)}`. See [Data mounts](#data-mounts). |
 
 Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
 is best effort: `DockerRuntime` admits against available disk, while providers without disk
@@ -94,6 +94,29 @@ sizing proceed with their default capacity.
 or storage requirements; it rejects GPU, OS, TPU, and `limits`. Modal accepts one GPU type.
 `LocalRuntime` rejects a per-task `runtime_config`.
 Only `HostedRuntime` mounts `data`; every other runtime rejects it.
+
+### Data mounts
+
+`data` maps a name to one folder of the team's shared data and where it appears in the environment:
+
+```python
+RuntimeConfig(
+    data={
+        "inputs": RuntimeDataMount(prefix="sets/a", mount_path="/data/inputs"),
+        "refs": RuntimeDataMount(prefix="refs", mount_path="/data/refs", mode="overlay"),
+    },
+)
+```
+
+| Field | Meaning |
+|-------|---------|
+| name | Lowercase letters, digits, `-` and `_`, up to 32 characters. Up to 8 mounts. |
+| `prefix` | Path inside the team's shared data. Empty mounts all of it. |
+| `mount_path` | Absolute path in the environment. Mount paths cannot be equal or nested. |
+| `mode` | `readonly` (default) or `overlay`. |
+
+- `readonly`: the folder cannot be written.
+- `overlay`: the environment can edit, rename and delete freely; the changes are discarded when the rollout ends and never reach the stored folder.
 
 `run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
 Without one, `DockerRuntime` sets no lifetime bound, while `ModalRuntime` and HUD-hosted Modal
