@@ -114,7 +114,7 @@ RuntimeConfig(
 |-------|---------|
 | name | Lowercase letters, digits, `-` and `_`, up to 32 characters. Up to 8 mounts. |
 | `prefix` | Path inside the team's shared data. Empty mounts all of it. |
-| `mount_path` | Absolute path in the environment. Mount paths cannot be equal or nested. |
+| `mount_path` | Absolute path in the environment, built from letters, digits, `.`, `_` and `-`. Mount paths cannot be equal or nested. HUD-hosted rollouts accept only `/data` and paths under it. |
 | `mode` | A `RuntimeDataMode`: `READONLY` (default) or `OVERLAY`. The strings `"readonly"` and `"overlay"` are accepted too. |
 
 - `RuntimeDataMode.READONLY`: the folder cannot be written.

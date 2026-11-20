@@ -317,7 +317,7 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
             "data": {
                 "inputs": {"prefix": "sets/a", "mount_path": "/data/inputs"},
                 "refs": {"prefix": "refs", "mount_path": "/data/refs", "mode": "overlay"},
-                "all": {"mount_path": "/shared"},
+                "all": {"mount_path": "/data/all"},
             },
         },
     )
@@ -326,7 +326,7 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
     assert {name: (m.prefix, m.mount_path, m.mode) for name, m in config.data.items()} == {
         "inputs": ("sets/a/", "/data/inputs", RuntimeDataMode.READONLY),
         "refs": ("refs/", "/data/refs", RuntimeDataMode.OVERLAY),
-        "all": ("", "/shared", RuntimeDataMode.READONLY),
+        "all": ("", "/data/all", RuntimeDataMode.READONLY),
     }
     assert config.model_dump(mode="json")["data"]["refs"]["mode"] == "overlay"
 
@@ -339,10 +339,22 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
         {"Bad Name": {"mount_path": "/data"}},
         {"a": {"mount_path": "/data", "prefix": "../other"}},
         {"a": {"mount_path": "/"}},
+        {"a": {"mount_path": "/data,readonly=false"}},
+        {"a": {"mount_path": "/data/my files"}},
         {"a": {"mount_path": "/data", "mode": "readwrite"}},
         {},
     ],
-    ids=["nested", "same-path", "name", "prefix-climbs", "root", "unknown-mode", "empty"],
+    ids=[
+        "nested",
+        "same-path",
+        "name",
+        "prefix-climbs",
+        "root",
+        "path-comma",
+        "path-space",
+        "unknown-mode",
+        "empty",
+    ],
 )
 def test_runtime_config_rejects_data_mounts_that_cannot_coexist(data: dict[str, Any]) -> None:
     """Mount paths must not overlap, and names and prefixes stay inside their bounds."""

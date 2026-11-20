@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import itertools
 import json
+import re
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -97,6 +98,9 @@ class RuntimeLimits(BaseModel):
     run_timeout_s: int | None = Field(default=None, gt=0)
 
 
+_MOUNT_PATH_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")
+
+
 class RuntimeDataMode(StrEnum):
     """What happens to writes under a data mount."""
 
@@ -115,7 +119,7 @@ class RuntimeDataMount(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prefix: str = Field(default="", max_length=512)
-    mount_path: str
+    mount_path: str = Field(max_length=255)
     mode: RuntimeDataMode = RuntimeDataMode.READONLY
 
     @field_validator("prefix")
@@ -132,6 +136,8 @@ class RuntimeDataMount(BaseModel):
         path = PurePosixPath(value)
         if not path.is_absolute() or path == PurePosixPath("/") or ".." in path.parts:
             raise ValueError("mount_path must be an absolute path other than /")
+        if not all(_MOUNT_PATH_SEGMENT.fullmatch(part) for part in path.parts[1:]):
+            raise ValueError("mount_path segments may use only letters, digits, '.', '_' and '-'")
         return str(path)
 
 
