@@ -342,6 +342,7 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
         {"a": {"mount_path": "/data,readonly=false"}},
         {"a": {"mount_path": "/data/my files"}},
         {"a": {"mount_path": "/data", "mode": "readwrite"}},
+        {"a": {"mount_path": "/data", "prefix": "p" * 512}},
         {},
     ],
     ids=[
@@ -353,6 +354,7 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
         "path-comma",
         "path-space",
         "unknown-mode",
+        "prefix-too-long-once-stored",
         "empty",
     ],
 )

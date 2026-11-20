@@ -99,6 +99,8 @@ class RuntimeLimits(BaseModel):
 
 
 _MOUNT_PATH_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")
+# Applies to the stored prefix, which always ends in "/".
+_PREFIX_MAX_LENGTH = 512
 
 
 class RuntimeDataMode(StrEnum):
@@ -118,7 +120,7 @@ class RuntimeDataMount(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    prefix: str = Field(default="", max_length=512)
+    prefix: str = Field(default="", max_length=_PREFIX_MAX_LENGTH)
     mount_path: str = Field(max_length=255)
     mode: RuntimeDataMode = RuntimeDataMode.READONLY
 
@@ -128,7 +130,10 @@ class RuntimeDataMount(BaseModel):
         parts = [part for part in value.split("/") if part]
         if any(part in (".", "..") for part in parts):
             raise ValueError("prefix must be a relative path without '.' or '..'")
-        return "".join(f"{part}/" for part in parts)
+        prefix = "".join(f"{part}/" for part in parts)
+        if len(prefix) > _PREFIX_MAX_LENGTH:
+            raise ValueError(f"prefix is longer than {_PREFIX_MAX_LENGTH} characters")
+        return prefix
 
     @field_validator("mount_path")
     @classmethod
