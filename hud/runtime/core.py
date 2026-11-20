@@ -4,17 +4,31 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import json
+import re
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
+from enum import StrEnum
+from pathlib import PurePosixPath
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    ClassVar,
+    Protocol,
+    Self,
+    runtime_checkable,
+)
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     SerializationInfo,
+    StringConstraints,
     field_serializer,
+    field_validator,
     model_validator,
 )
 
@@ -84,6 +98,57 @@ class RuntimeLimits(BaseModel):
     run_timeout_s: int | None = Field(default=None, gt=0)
 
 
+_MOUNT_PATH_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")
+# Applies to the stored prefix, which always ends in "/".
+_PREFIX_MAX_LENGTH = 512
+
+
+class RuntimeDataMode(StrEnum):
+    """What happens to writes under a data mount."""
+
+    READONLY = "readonly"
+    """The folder cannot be written."""
+    OVERLAY = "overlay"
+    """Writes land in a layer that is discarded when the rollout ends."""
+
+
+class RuntimeDataMount(BaseModel):
+    """One folder of the team's shared data, mounted into the environment at ``mount_path``.
+
+    ``prefix`` is a path inside the team's shared data; empty means all of it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    prefix: str = Field(default="", max_length=_PREFIX_MAX_LENGTH)
+    mount_path: str = Field(max_length=255)
+    mode: RuntimeDataMode = RuntimeDataMode.READONLY
+
+    @field_validator("prefix")
+    @classmethod
+    def _relative_prefix(cls, value: str) -> str:
+        parts = [part for part in value.split("/") if part]
+        if any(part in (".", "..") for part in parts):
+            raise ValueError("prefix must be a relative path without '.' or '..'")
+        prefix = "".join(f"{part}/" for part in parts)
+        if len(prefix) > _PREFIX_MAX_LENGTH:
+            raise ValueError(f"prefix is longer than {_PREFIX_MAX_LENGTH} characters")
+        return prefix
+
+    @field_validator("mount_path")
+    @classmethod
+    def _absolute_mount_path(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if not path.is_absolute() or path == PurePosixPath("/") or ".." in path.parts:
+            raise ValueError("mount_path must be an absolute path other than /")
+        if not all(_MOUNT_PATH_SEGMENT.fullmatch(part) for part in path.parts[1:]):
+            raise ValueError("mount_path segments may use only letters, digits, '.', '_' and '-'")
+        return str(path)
+
+
+RuntimeDataName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")]
+
+
 class RuntimeConfig(BaseModel):
     """Typed task-environment launch requirements.
 
@@ -96,6 +161,19 @@ class RuntimeConfig(BaseModel):
     compose: ComposeProject | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
+    data: dict[RuntimeDataName, RuntimeDataMount] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=8,
+    )
+
+    @model_validator(mode="after")
+    def _separate_data_mounts(self) -> Self:
+        paths = sorted(PurePosixPath(mount.mount_path) for mount in (self.data or {}).values())
+        for outer, inner in itertools.pairwise(paths):
+            if inner == outer or outer in inner.parents:
+                raise ValueError(f"data mounts {outer} and {inner} overlap")
+        return self
 
     @field_serializer("resources", "limits", when_used="json")
     def _serialize_options(

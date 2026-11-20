@@ -16,9 +16,10 @@ import socket
 import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic import ValidationError
 
 from hud import Task
 from hud.agents.base import Agent
@@ -28,8 +29,11 @@ from hud.runtime import (
     HUDRuntime,
     LocalRuntime,
     ModalRuntime,
+    Provider,
     Runtime,
     RuntimeConfig,
+    RuntimeDataMode,
+    RuntimeDataMount,
     Shared,
     SubprocessRuntime,
 )
@@ -288,3 +292,73 @@ async def test_a_verifier_in_its_own_sandbox_receives_the_actors_session_files(
     (trace,) = job.traces
     assert trace.reward == reward
     assert ("runtime session contains" in (trace.error or "")) is link
+
+
+@pytest.mark.parametrize("runtime", [DockerRuntime(), HUDRuntime()], ids=["docker", "hud"])
+async def test_runtimes_that_cannot_mount_data_refuse_it(runtime: Provider) -> None:
+    """A task that declares data never runs on a placement without it."""
+    task = Task(
+        env="echo",
+        id="echo",
+        runtime_config=RuntimeConfig(
+            data={"inputs": RuntimeDataMount(prefix="sets/a", mount_path="/data/inputs")},
+        ),
+    )
+
+    with pytest.raises(ValueError, match="data"):
+        async with runtime(task):
+            pass
+
+
+def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> None:
+    """Each named mount keeps its own folder, path and mode."""
+    config = RuntimeConfig.model_validate(
+        {
+            "data": {
+                "inputs": {"prefix": "sets/a", "mount_path": "/data/inputs"},
+                "refs": {"prefix": "refs", "mount_path": "/data/refs", "mode": "overlay"},
+                "all": {"mount_path": "/data/all"},
+            },
+        },
+    )
+
+    assert config.data is not None
+    assert {name: (m.prefix, m.mount_path, m.mode) for name, m in config.data.items()} == {
+        "inputs": ("sets/a/", "/data/inputs", RuntimeDataMode.READONLY),
+        "refs": ("refs/", "/data/refs", RuntimeDataMode.OVERLAY),
+        "all": ("", "/data/all", RuntimeDataMode.READONLY),
+    }
+    assert config.model_dump(mode="json")["data"]["refs"]["mode"] == "overlay"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"a": {"mount_path": "/data"}, "b": {"mount_path": "/data/b"}},
+        {"a": {"mount_path": "/data"}, "b": {"mount_path": "/data"}},
+        {"Bad Name": {"mount_path": "/data"}},
+        {"a": {"mount_path": "/data", "prefix": "../other"}},
+        {"a": {"mount_path": "/"}},
+        {"a": {"mount_path": "/data,readonly=false"}},
+        {"a": {"mount_path": "/data/my files"}},
+        {"a": {"mount_path": "/data", "mode": "readwrite"}},
+        {"a": {"mount_path": "/data", "prefix": "p" * 512}},
+        {},
+    ],
+    ids=[
+        "nested",
+        "same-path",
+        "name",
+        "prefix-climbs",
+        "root",
+        "path-comma",
+        "path-space",
+        "unknown-mode",
+        "prefix-too-long-once-stored",
+        "empty",
+    ],
+)
+def test_runtime_config_rejects_data_mounts_that_cannot_coexist(data: dict[str, Any]) -> None:
+    """Mount paths must not overlap, and names and prefixes stay inside their bounds."""
+    with pytest.raises(ValidationError):
+        RuntimeConfig.model_validate({"data": data})
