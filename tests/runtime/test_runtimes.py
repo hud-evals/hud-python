@@ -32,7 +32,6 @@ from hud.runtime import (
     Runtime,
     RuntimeConfig,
     RuntimeData,
-    RuntimeDataFile,
     Shared,
     SubprocessRuntime,
 )
@@ -300,7 +299,7 @@ async def test_runtimes_that_cannot_mount_data_refuse_it(runtime: Provider) -> N
         env="echo",
         id="echo",
         runtime_config=RuntimeConfig(
-            data=RuntimeData(files=[RuntimeDataFile(file_id=uuid.uuid4(), path="rows.csv")]),
+            data=RuntimeData(prefix="sets/a"),
         ),
     )
 
