@@ -32,6 +32,7 @@ from hud.runtime import (
     Provider,
     Runtime,
     RuntimeConfig,
+    RuntimeDataMode,
     RuntimeDataMount,
     Shared,
     SubprocessRuntime,
@@ -323,10 +324,11 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
 
     assert config.data is not None
     assert {name: (m.prefix, m.mount_path, m.mode) for name, m in config.data.items()} == {
-        "inputs": ("sets/a/", "/data/inputs", "readonly"),
-        "refs": ("refs/", "/data/refs", "overlay"),
-        "all": ("", "/shared", "readonly"),
+        "inputs": ("sets/a/", "/data/inputs", RuntimeDataMode.READONLY),
+        "refs": ("refs/", "/data/refs", RuntimeDataMode.OVERLAY),
+        "all": ("", "/shared", RuntimeDataMode.READONLY),
     }
+    assert config.model_dump(mode="json")["data"]["refs"]["mode"] == "overlay"
 
 
 @pytest.mark.parametrize(
@@ -337,9 +339,10 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
         {"Bad Name": {"mount_path": "/data"}},
         {"a": {"mount_path": "/data", "prefix": "../other"}},
         {"a": {"mount_path": "/"}},
+        {"a": {"mount_path": "/data", "mode": "readwrite"}},
         {},
     ],
-    ids=["nested", "same-path", "name", "prefix-climbs", "root", "empty"],
+    ids=["nested", "same-path", "name", "prefix-climbs", "root", "unknown-mode", "empty"],
 )
 def test_runtime_config_rejects_data_mounts_that_cannot_coexist(data: dict[str, Any]) -> None:
     """Mount paths must not overlap, and names and prefixes stay inside their bounds."""

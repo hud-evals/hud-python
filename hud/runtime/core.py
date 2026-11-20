@@ -8,13 +8,13 @@ import itertools
 import json
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
-    Literal,
     Protocol,
     Self,
     runtime_checkable,
@@ -97,19 +97,26 @@ class RuntimeLimits(BaseModel):
     run_timeout_s: int | None = Field(default=None, gt=0)
 
 
+class RuntimeDataMode(StrEnum):
+    """What happens to writes under a data mount."""
+
+    READONLY = "readonly"
+    """The folder cannot be written."""
+    OVERLAY = "overlay"
+    """Writes land in a layer that is discarded when the rollout ends."""
+
+
 class RuntimeDataMount(BaseModel):
     """One folder of the team's shared data, mounted into the environment at ``mount_path``.
 
     ``prefix`` is a path inside the team's shared data; empty means all of it.
-    ``readonly`` mounts it read-only; ``overlay`` adds a writable layer that is
-    discarded when the rollout ends.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     prefix: str = Field(default="", max_length=512)
     mount_path: str
-    mode: Literal["readonly", "overlay"] = "readonly"
+    mode: RuntimeDataMode = RuntimeDataMode.READONLY
 
     @field_validator("prefix")
     @classmethod
