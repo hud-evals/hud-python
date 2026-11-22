@@ -60,6 +60,7 @@ class _JobsGroup(CLIGroup):
             UUID(args[0])
         except ValueError:
             return super().resolve_command(ctx, args)
+        warn_deprecated("`hud jobs <job-id>`", "use `hud jobs get <job-id>`")
         ctx.default_map = {"get": ctx.params}
         return "get", self.commands["get"], args
 

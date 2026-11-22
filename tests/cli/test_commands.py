@@ -1,7 +1,7 @@
 """What every ``hud`` command does alike: anonymous analytics, an interrupt, asking before it
 changes anything, the error document a failure prints, the error kind a platform status
-maps to, retrying a transient failure, one id per line under ``--quiet``, and never
-echoing a secret it was given.
+maps to, retrying a transient failure, one id per line under ``--quiet``, never echoing a
+secret it was given, and running a deprecated spelling as the kept one with a warning.
 
 The CLI owns these contracts once, so each table holds one row per distinct way a command
 reaches them, not one row per command.
@@ -115,6 +115,32 @@ LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = 
         {},
         {"GET /v2/jobs": {"items": [{"id": "job-1"}, {"id": "job-2"}], "total": 2}},
         ["job-1", "job-2"],
+    ),
+}
+
+PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000001"
+# the spelling the warning names -> (the deprecated invocation, the kept one it matches)
+EVAL = ["eval", "tasks.py", "claude", "--dry-run"]
+DEPRECATED: dict[str, tuple[list[str], list[str]]] = {
+    "hud eval --remote": ([*EVAL, "--remote"], [*EVAL, "--runtime", "hosted"]),
+    "hud eval --full": (
+        [*EVAL, "--full"],
+        [*EVAL, "--all", "--auto-respond", "--max-steps", "100"],
+    ),
+    "hud eval --group-size": ([*EVAL, "--group-size", "3"], [*EVAL, "--group", "3"]),
+    "hud init --preset": (
+        ["init", "demo", "-p", "blank", "--dry-run"],
+        ["init", "demo", "-t", "blank", "--dry-run"],
+    ),
+    "hud jobs <job-id>": (["jobs", JOB_ID], ["jobs", "get", JOB_ID]),
+    "hud trace <trace-id>": (["trace", TRACE_ID], ["trace", "get", TRACE_ID]),
+    "hud project create --directory": (
+        ["project", "create", "demo", "-C", "sub", "--dry-run"],
+        ["project", "-C", "sub", "create", "demo", "--dry-run"],
+    ),
+    "hud project use --directory": (
+        ["project", "use", "demo", "-C", "sub", "--dry-run"],
+        ["project", "-C", "sub", "use", "demo", "--dry-run"],
     ),
 }
 
@@ -294,6 +320,36 @@ def test_a_mistyped_option_names_its_command(argv: list[str], command: str, hud:
     assert result.json["suggestion"].endswith(f" {command} --help'."), result
     if command == "init":
         assert "Possible options: --template" in result.json["message"], result
+
+
+@pytest.mark.parametrize("spelling", sorted(DEPRECATED))
+def test_a_deprecated_spelling_warns_and_does_what_the_kept_one_does(
+    spelling: str, signed_in: FakeServices, hud: Hud
+) -> None:
+    deprecated, kept = DEPRECATED[spelling]
+    write_files(hud.cwd, {"tasks.py": TASKS_PY, "sub/": ""})
+    project = {"id": PROJECT_ID, "name": "demo", "capabilities": {"create": True}}
+    serve(
+        signed_in,
+        {
+            f"GET /v2/jobs/{JOB_ID}/traces": {"items": [{"id": TRACE_ID}], "total": 1},
+            f"GET /v2/trace/{TRACE_ID}/events": {
+                "events": [{"kind": "agent_message"}],
+                "status": "completed",
+            },
+            "GET /v2/projects": {"items": [project], "total": 1},
+            f"GET /v2/projects/{PROJECT_ID}": project,
+        },
+    )
+
+    old = hud(*deprecated, "--json")
+    new = hud(*kept, "--json")
+
+    assert (old.exit_code, old.json) == (0, new.json), old
+    warned = " ".join(old.stderr.split())
+    assert f"`{spelling}" in warned, old
+    assert "is deprecated and will be removed in hud v0.7.0" in warned, old
+    assert f"`{spelling}" not in new.stderr, new
 
 
 @pytest.mark.parametrize("name", sorted(FAILING))

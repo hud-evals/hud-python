@@ -26,6 +26,7 @@ from hud.telemetry.span import (
     normalize_trace_id,
 )
 from hud.types import STEP_SCHEMA, Step, TextContent
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -48,6 +49,7 @@ class _TraceGroup(CLIGroup):
             UUID(args[0])
         except ValueError:
             return super().resolve_command(ctx, args)
+        warn_deprecated("`hud trace <trace-id>`", "use `hud trace get <trace-id>`")
         return "get", self.commands["get"], args
 
 

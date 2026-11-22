@@ -30,7 +30,7 @@ Every command that changes platform state takes `--dry-run`, which previews the 
 
 If the HUD API deprecates a route that `hud` calls, `hud` prints a warning to stderr with the route's sunset date and replacement. Upgrade `hud` when you see one. SDK code receives it as `hud.utils.exceptions.HudDeprecationWarning`, a `FutureWarning`. The same warning names the current path when code imports a name from a path that hud v0.7.0 removes, such as `from hud.eval import Taskset`.
 
-Resource commands use noun-verb grammar (`hud jobs list`, `hud models list`, `hud task start`). `hud cancel` is a hidden, deprecated alias for `hud jobs cancel`.
+Resource commands use noun-verb grammar (`hud jobs list`, `hud models list`, `hud task start`).
 
 ## Build & iterate
 
@@ -52,7 +52,7 @@ hud init my-env --dir envs            # coding → ./envs/my-env
 
 | Option | Description |
 |--------|-------------|
-| `--template`, `-t` | Example environment to use: `coding`, `cua`, `blank`, or `argument-hints`. Omit for the interactive picker; a named non-interactive run uses `coding`. `--preset`/`-p` are aliases. |
+| `--template`, `-t` | Example environment to use: `coding`, `cua`, `blank`, or `argument-hints`. Omit for the interactive picker; a named non-interactive run uses `coding`. |
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 | `--json` | Structured result on stdout. |
@@ -117,13 +117,12 @@ Run and grade tasks from a Python file, a directory, JSON/JSONL, or a platform t
 ```bash
 # Split layout (hud init): templates in env.py, task rows in tasks.py
 hud eval tasks.py claude
-hud eval tasks.py claude --full --group 3
+hud eval tasks.py claude --all --group 3
 
 # Single-file layout: env + tasks list in one file
 hud eval env.py claude
 hud eval env.py claude --model claude-haiku-4-5   # cheaper model for fast iteration
 hud eval env.py claude --all                      # every task, not just the first
-hud eval env.py claude --full                     # every task; provider agents also auto-respond, 100 steps
 ```
 
 Local Python environments run in a new process for each rollout:
@@ -161,27 +160,22 @@ timeout, is still graded when it can be; its `trace_error` says what failed.
 
 | Option | Description |
 |--------|-------------|
-| `--full` | Run the whole dataset (`--all`); the deprecated provider agents also get `--auto-respond --max-steps 100`. |
 | `--all` | Run every task instead of just the first. |
 | `--model`, `-m` | Model id. |
 | `--gateway`, `-g` | Force LLM calls through the HUD gateway. Agents use a provider key when one is set and the gateway otherwise; pass this to use the gateway even when a provider key is present. |
-| `--group` (alias `--group-size`) | Runs per task - a group of repeats whose reward spread you can inspect. |
+| `--group` | Runs per task - a group of repeats whose reward spread you can inspect. |
 | `--max-concurrent` | Cap parallel rollouts. |
-| `--max-steps` | Deprecated; removed in hud v0.7.0 with the provider agents. Caps a provider agent's steps per task (default 10; `--full` makes it 100). CLI agents ignore it and run until done or `timeout_seconds` (`--config timeout_seconds=1800`). |
 | `--auto-respond` | Prompt the agent to continue when it answers without a tool call. |
 | `--task-ids` | Comma-separated slugs or 0-based indices. |
 | `--config`, `-c` | Agent config `key=value` (repeatable). The value is read as JSON when it parses (`5`, `true`, `{"temperature": 0.2}`) and as text otherwise; quote a string that is valid JSON (`system_prompt='"null"'`). `claude.max_tokens=1` targets one agent. |
 | `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
 | `--very-verbose`, `-vv` | Debug-level logs. |
 | `--runtime` | `local`: a Python process or Docker container per rollout. `hud`: local agent, deployed environment. `hosted`: agent and environment on HUD. `docker`, `modal`: run using the task's container configuration. `tcp://host:port`: connect to a running environment. Defaults to `local` for files and `hosted` for platform tasksets. |
-| `--remote` | Alias for `--runtime hosted`. |
 | `--yes`, `-y` | Skip confirmation prompt (required when stdin is not a TTY). |
 | `--json` | Structured results on stdout. |
 | `--dry-run` | Print the resolved eval plan without running. |
 
 #### `.hud_eval.toml`
-
-Deprecated, and removed in hud v0.7.0: `hud eval` warns when it loads one. Pass run settings as flags and agent settings with `--config`.
 
 Defaults for the directory you run `hud eval` from. Precedence is CLI arguments, then this file, then built-in defaults; a missing file just means defaults.
 
@@ -240,15 +234,15 @@ hud project list                         # visible Projects and access
 hud project create browser-evals         # create and use a Project (team admins)
 hud project create browser-evals --no-use
 hud project use browser-evals           # name or ID; save project_id to .hud/config.json
-hud project use browser-evals -C ./my-env
+hud project -C ./my-env use browser-evals
 ```
 
 | Command or option | Description |
 |-------------------|-------------|
 | `hud project [--directory PATH]` | Show where new resources from a directory will be created. `-C` is an alias. |
 | `hud project list` | List visible Projects, marking the team default and read-only entries. |
-| `hud project create <name>` | Create and pin a Project. Accepts `--description`, `--directory`/`-C`, `--no-use`, `--dry-run`, and `--yes`. |
-| `hud project use <name-or-id>` | Pin a directory to an existing writable Project. Names are normalized (`My Project` = `my-project`). Accepts `--directory`/`-C`. |
+| `hud project create <name>` | Create and pin a Project. Accepts `--description`, `--no-use`, `--dry-run`, and `--yes`. |
+| `hud project use <name-or-id>` | Pin a directory to an existing writable Project. Names are normalized (`My Project` = `my-project`). |
 
 #### Project selection
 

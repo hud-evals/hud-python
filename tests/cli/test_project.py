@@ -60,6 +60,19 @@ def test_use_links_the_directory_to_the_project_under_these_credentials(
     assert "sk-hud-test" not in json.dumps(stored)
 
 
+def test_the_group_directory_wins_over_a_subcommands_deprecated_one(
+    projects: FakeServices, hud: Hud
+) -> None:
+    (hud.cwd / "kept").mkdir()
+    (hud.cwd / "old").mkdir()
+
+    result = hud("project", "-C", "kept", "use", "browser-evals", "-C", "old", "--json")
+
+    assert result.exit_code == 0, result
+    assert (hud.cwd / "kept" / ".hud" / "config.json").exists()
+    assert not (hud.cwd / "old" / ".hud").exists()
+
+
 def test_a_name_two_projects_share_must_be_given_as_an_id(
     signed_in: FakeServices, hud: Hud
 ) -> None:

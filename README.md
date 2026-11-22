@@ -79,7 +79,7 @@ A built image is the **end product for your tasks**: one build packs every task 
 ```bash
 hud deploy
 hud sync tasks my-taskset
-hud eval my-taskset --remote
+hud eval my-taskset --runtime hosted
 ```
 
 → [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
