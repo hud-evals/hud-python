@@ -250,7 +250,9 @@ class ClaudeCLIConfig(AgentConfig):
     @model_validator(mode="after")
     def _warn_max_steps(self) -> Self:
         if "max_steps" in self.model_fields_set:
-            warn_deprecated("`ClaudeCLIConfig.max_steps`", "bound the run with `timeout_seconds`")
+            warn_deprecated(
+                "`ClaudeCLIConfig.max_steps`", "bound the run with `timeout_seconds`", stacklevel=3
+            )
         return self
 
 
