@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from .conftest import API_KEY, IDENTITY
+
 if TYPE_CHECKING:
     from tests.conftest import Hud, HudEnv
     from tests.fixtures.services import FakeServices
@@ -39,3 +41,15 @@ def test_the_api_key_comes_from_the_environment_then_the_project_then_hud_set(
 
     assert result.exit_code == 0, result
     assert [request.bearer for request in services.requests("api", "GET", "/v2/jobs")] == [sent]
+
+
+def test_whoami_reports_the_api_and_team_the_configured_key_acts_as(
+    signed_in: FakeServices, hud: Hud
+) -> None:
+    result = hud("whoami", "--json")
+
+    assert result.exit_code == 0, result
+    assert result.json == {"api_url": signed_in.url("api"), **IDENTITY}
+    assert [request.bearer for request in signed_in.requests("api", "GET", "/v2/auth/me")] == [
+        API_KEY
+    ]
