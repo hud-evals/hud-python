@@ -43,6 +43,7 @@ from hud.environment.namespace import (
 )
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.environment.utils import forward_output
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -554,6 +555,15 @@ class Workspace:
         hosts_path: Path | str | None = None,
         hand_over_root: bool = True,
     ) -> None:
+        for name, value in (
+            ("host_key_path", host_key_path),
+            ("authorized_client_keys", authorized_client_keys),
+        ):
+            if value is not None:
+                warn_deprecated(
+                    f"`Workspace({name}=...)`",
+                    "the workspace generates its keys in `credentials_dir`",
+                )
         self.root: Path = Path(root).resolve()
         self._cred_dir: Path | None = None
         self._configured_cred_dir = Path(credentials_dir) if credentials_dir else None

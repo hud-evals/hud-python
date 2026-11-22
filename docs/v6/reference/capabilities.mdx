@@ -293,8 +293,8 @@ For a complete repository workspace with hidden-test grading, run `hud init my-c
 | `shell_gid` | `int \| None` | Group for agent commands when `shell_uid` drops them. Defaults to `shell_uid`. |
 | `hand_over_root` | `bool` | Hand the root directory to `shell_uid` at start. Set `False` when the image already set its owner. Default `True`. |
 | `require_isolation` | `bool` | Refuse to start unless `bwrap` can sandbox sessions, instead of running them unisolated. Default `False`. |
-| `host_key_path` | `Path \| None` | Reuse a host key instead of generating one. |
-| `authorized_client_keys` | `list[Path] \| None` | Authorize specific client public keys. |
+| `host_key_path` | `Path \| None` | Deprecated; removed in hud v0.7.0. Reuses a host key instead of generating one in `credentials_dir`. |
+| `authorized_client_keys` | `list[Path] \| None` | Deprecated; removed in hud v0.7.0. Authorizes these client public keys instead of the one the workspace generates. |
 | `credentials_dir` | `Path \| str \| None` | Where the session's SSH keys are written. Defaults to a fresh temporary directory; point it inside anything you mask from sessions. |
 | `hosts_path` | `Path \| str \| None` | Where the workspace's own `/etc/hosts` is written. Defaults to `credentials_dir`. |
 | `track_files` | `bool` | Serve file-tracking telemetry over the workspace lifecycle. Constructor default `False`; `env.workspace(...)` defaults it to `HUD_FILE_TRACKING_ENABLED` (on). |
