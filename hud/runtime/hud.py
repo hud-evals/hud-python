@@ -13,6 +13,7 @@ import httpx2
 
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
+from hud.utils.deprecation import warn_deprecated
 
 from .core import Runtime
 
@@ -38,6 +39,8 @@ class HUDRuntime:
         *,
         runtime_url: str | None = None,
     ) -> None:
+        if runtime_url is not None:
+            warn_deprecated("`HUDRuntime(runtime_url=...)`", "set `HUD_RUNTIME_URL`")
         self.runtime_url = runtime_url
         self._warned_unsupported_config = False
 

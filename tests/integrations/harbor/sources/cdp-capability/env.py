@@ -6,7 +6,7 @@ from hud import Environment
 from hud.capabilities import Capability
 
 env = Environment("demo")
-env.add_capability(Capability.cdp(url="ws://127.0.0.1:9222"))
+env.add_capability(Capability(name="browser", protocol="cdp/1.3", url="ws://127.0.0.1:9222"))
 markers = os.environ.get("EXPORT_TEST_MARKERS")
 
 

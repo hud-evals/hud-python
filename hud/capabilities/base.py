@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Self
 from urllib.parse import urlsplit, urlunsplit
 
+from hud.utils.deprecation import warn_deprecated
+
 SCHEME_RE: re.Pattern[str] = re.compile(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):")
 
 
@@ -121,6 +123,10 @@ class Capability:
         target_id: str | None = None,
     ) -> Capability:
         """``cdp/1.3`` — Chromium DevTools over WebSocket."""
+        warn_deprecated(
+            "`Capability.cdp`",
+            'use `Capability(name="browser", protocol="cdp/1.3", url="ws://host:port")`',
+        )
         normalized = normalize_url(url, default_scheme="ws", default_port=9222)
         params: dict[str, Any] = {}
         if target_id is not None:

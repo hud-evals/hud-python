@@ -56,6 +56,26 @@ class AgentConfig(BaseModel):
     model: str = Field(default="unknown", validation_alias=_model_alias)
     gateway: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_unknown_keys(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or cls.model_config.get("extra", "ignore") != "ignore":
+            return data
+        accepted = set(cls.model_fields)
+        for field in cls.model_fields.values():
+            if isinstance(field.validation_alias, AliasChoices):
+                accepted.update(c for c in field.validation_alias.choices if isinstance(c, str))
+        unknown = sorted(set(data) - accepted)
+        if unknown:
+            keys = ", ".join(f"`{key}`" for key in unknown)
+            warn_deprecated(
+                f"`{cls.__name__}` with unknown keys {keys} (ignored)",
+                f"use the fields `{cls.__name__}` defines",
+                change="will be an error",
+                stacklevel=3,
+            )
+        return data
+
 
 class ToolAgentConfig(AgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)

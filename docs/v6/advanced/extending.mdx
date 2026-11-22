@@ -147,10 +147,11 @@ from hud.capabilities import Capability
 env = Environment(
     name="full-stack",
     capabilities=[
-        Capability.cdp(url="ws://127.0.0.1:9222"),    # cdp: a browser you run
+        # cdp: a browser you run
+        Capability(name="browser", protocol="cdp/1.3", url="ws://127.0.0.1:9222"),
     ],
 )
-env.workspace("/workspace")                           # ssh: shell + files, served by the env
+env.workspace("/workspace")  # ssh: shell + files, served by the env
 ```
 
 The same environment serves a shell-only coding task and a browser-driving task - the difference is
