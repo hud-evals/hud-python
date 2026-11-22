@@ -30,7 +30,7 @@ Every command that changes platform state takes `--dry-run`, which previews the 
 
 If the HUD API deprecates a route that `hud` calls, `hud` prints a warning to stderr with the route's sunset date and replacement. Upgrade `hud` when you see one. SDK code receives it as `hud.utils.exceptions.HudDeprecationWarning`, a `FutureWarning`. The same warning names the current path when code imports a name from a path that hud v0.7.0 removes, such as `from hud.eval import Taskset`.
 
-Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). `hud cancel` is a hidden, deprecated alias for `hud jobs cancel`.
+Resource commands use noun-verb grammar (`hud jobs list`, `hud models list`, `hud task start`). `hud cancel` is a hidden, deprecated alias for `hud jobs cancel`.
 
 ## Build & iterate
 
@@ -411,9 +411,6 @@ hud trace get <trace-id> --json   # raw event list
 |---------|-------------|
 | `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. |
 | `hud models list` | List gateway models (`--json`, `--quiet`). |
-| `hud models fork <model> --name <slug>` | Fork a trainable model (`--json`, `--dry-run`, `--yes`, `--if-not-exists`). |
-| `hud models checkpoints <model>` | List a model's checkpoint tree. |
-| `hud models head <model> [--set <checkpoint-id>]` | Show - or set - a model's active checkpoint (`--dry-run`, `--yes` with `--set`). |
 | `hud jobs cancel` | Cancel a running job, one of its traces, or every active job (`--trace-id`, `--all`, `--yes`, `--dry-run`, `--json`). |
 | `hud version` | Show the CLI version (`--json`). |
 

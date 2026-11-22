@@ -17,6 +17,7 @@ from hud.cli import (
 )
 from hud.settings import settings
 from hud.train.client import TrainingClient
+from hud.utils.deprecation import TRAINING_REPLACEMENT, warn_deprecated
 from hud.utils.exceptions import HudRequestError
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole
@@ -29,6 +30,14 @@ hud_console = HUDConsole()
 class _Forked(TypedDict):
     id: str
     model_name: str
+
+
+def _warn_training_command(command: str) -> None:
+    warn_deprecated(
+        f"`hud models {command}`",
+        TRAINING_REPLACEMENT,
+        change="will be removed with `hud.train`",
+    )
 
 
 models_app = CLI(
@@ -122,6 +131,7 @@ def fork_model(
         hud models fork claude-sonnet-4-6 --name my-sonnet --if-not-exists
         hud models fork claude-sonnet-4-6 --name my-sonnet --dry-run --json[/not dim]
     """
+    _warn_training_command("fork")
     if dry_run:
         hud_console.stdout.print(f"[dim]--dry-run: would fork {source!r} as {name!r}[/dim]")
         return {
@@ -182,6 +192,7 @@ def list_checkpoints(
         hud models checkpoints <model> --json
         hud models checkpoints <model> --quiet[/not dim]
     """
+    _warn_training_command("checkpoints")
     model_id = resolve_gateway_model(model).id
     checkpoints = asyncio.run(TrainingClient(model_id).checkpoints())
     rows = [checkpoint.model_dump() for checkpoint in checkpoints]
@@ -243,6 +254,7 @@ def show_head(
         hud models head <model> --set <checkpoint-id> --yes
         hud models head <model> --set <checkpoint-id> --dry-run --json[/not dim]
     """
+    _warn_training_command("head")
     model_id = resolve_gateway_model(model).id
     client = TrainingClient(model_id)
     view = f"{settings.hud_web_url.rstrip('/')}/models/{model_id}?tab=checkpoints"

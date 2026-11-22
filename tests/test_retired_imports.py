@@ -1,7 +1,7 @@
 """Import paths v0.6.23 exported keep working until hud v0.7.0, with a warning naming the new one.
 
 ``RETIRED`` lists v0.6.23's exports that left their module, beside the module that
-holds them now.
+holds them now. The training client has no new home; its warning names what replaces it.
 
 Annotations here are evaluated at definition, so a template defined inside a test
 can use helpers imported inside it.
@@ -44,7 +44,6 @@ RETIRED = [
     ("hud", "connect", "hud.clients"),
     ("hud", "SyncPlan", "hud.cli.tasksets"),
     ("hud", "instrument", "hud.telemetry"),
-    ("hud", "TrainingClient", "hud.train"),
     *[("hud.eval", name, "hud") for name in ["Grade", "Job", "Run", "Task", "Taskset", "Trace"]],
     ("hud.eval", "rollout", "hud.eval.run"),
     ("hud.eval", "SyncPlan", "hud.cli.tasksets"),
@@ -91,6 +90,31 @@ def test_every_retired_import_warns_with_the_new_path_and_returns_the_same_objec
             broken.append(f"{old}.{name}: not the object at `{new}`")
 
     assert broken == []
+
+
+@pytest.mark.parametrize("module", ["hud", "hud.train"])
+def test_the_training_client_warns_once_that_it_leaves_the_sdk(module: str) -> None:
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        value = import_module(module).TrainingClient
+
+    messages = {
+        str(warning.message) for warning in record if warning.category is HudDeprecationWarning
+    }
+    assert len(messages) == 1, messages
+    (message,) = messages
+    assert f"`TrainingClient` from `{module}`" in message
+    assert "hud v0.7.0" in message
+    assert "`fireworks-rl-training` cookbook" in message
+    assert value is import_module("hud.train.client").TrainingClient
+
+
+def test_a_wildcard_import_of_the_training_package_still_binds_its_names() -> None:
+    namespace: dict[str, object] = {}
+    with pytest.warns(HudDeprecationWarning):
+        exec("from hud.train import *", namespace)
+
+    assert namespace["TrainingClient"] is import_module("hud.train.client").TrainingClient
 
 
 def test_the_sdk_imports_no_retired_path_of_its_own() -> None:

@@ -68,7 +68,8 @@ class Settings(BaseSettings):
 
     hud_rl_url: str = Field(
         default="https://rl.hud.ai",
-        description="Base URL for the HUD training (RL) service",
+        description="Base URL for the HUD training (RL) service; deprecated, removed in hud "
+        "v0.7.0 with hud.train",
         validation_alias="HUD_RL_URL",
     )
 

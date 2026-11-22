@@ -26,6 +26,7 @@ from hud.train.types import (
     TrainInput,
     TrajectoryPayload,
 )
+from hud.utils.deprecation import TRAINING_REPLACEMENT, warn_deprecated
 from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.gateway import resolve_gateway_model
 from hud.utils.platform import PlatformClient
@@ -148,6 +149,10 @@ class TrainingClient:
     ) -> None:
         self.model = model
         self._api_key = api_key or settings.api_key
+        if base_url is None and "hud_rl_url" in settings.model_fields_set:
+            warn_deprecated(
+                "`HUD_RL_URL`", TRAINING_REPLACEMENT, change="will be removed with `hud.train`"
+            )
         self._rl_url = (base_url or settings.hud_rl_url).rstrip("/")
         self._api_url = (api_url or settings.hud_api_url).rstrip("/")
         self._model_id: str | None = None
