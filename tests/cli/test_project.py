@@ -120,7 +120,7 @@ def test_a_corrupt_link_is_refused_and_left_alone(projects: FakeServices, hud: H
     assert (hud.cwd / ".hud" / "config.json").read_text() == '{"broken":'
 
 
-def test_an_older_camelcase_link_keeps_its_ids_when_rewritten(
+def test_an_older_camelcase_link_warns_and_keeps_its_ids_when_rewritten(
     projects: FakeServices, hud: Hud
 ) -> None:
     (hud.cwd / ".hud").mkdir()
@@ -129,9 +129,13 @@ def test_an_older_camelcase_link_keeps_its_ids_when_rewritten(
     )
 
     result = hud("project", "use", "browser-evals", "--json")
+    again = hud("project", "--json")
 
     stored = linked(hud)
     assert result.exit_code == 0, result
+    assert "hud v0.7.0" in " ".join(result.stderr.split()), result
+    assert (again.exit_code, again.json["project"]["id"]) == (0, BROWSER), again
+    assert "hud v0.7.0" not in again.stderr, again
     assert stored is not None
     assert (stored["registry_id"], stored["taskset_id"], stored["project_id"]) == (
         OTHER_ID,
