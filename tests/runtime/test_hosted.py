@@ -120,6 +120,14 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
             id="completed-with-an-older-images-loose-evaluation",
         ),
         pytest.param(
+            {"status": "completed", "reward": 1.0, "evaluation_result": {"score": True}},
+            1.0,
+            "completed",
+            None,
+            True,
+            id="completed-with-an-older-images-boolean-score",
+        ),
+        pytest.param(
             {"status": "error", "reward": None, "error": "env exploded"},
             0.0,
             "error",

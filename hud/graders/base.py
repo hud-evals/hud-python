@@ -86,6 +86,20 @@ class Grade(BaseModel):
     is_error: bool = Field(default=False, alias="isError")
     subscores: list[SubScore] | None = None
 
+    @model_validator(mode="after")
+    def _subscores_explain_reward(self) -> Grade:
+        if not self.subscores:
+            return self
+        weighted = sum(subscore.value * subscore.weight for subscore in self.subscores)
+        if abs(weighted - self.reward) > 0.01:
+            warn_deprecated(
+                f"A grade whose subscores don't explain its reward (value x weight sums to "
+                f"{weighted:.4f}, the reward is {self.reward:.4f})",
+                "set the reward to the weighted sum, or the weights to what the reward used",
+                change="will raise",
+            )
+        return self
+
     @property
     def evaluation(self) -> dict[str, Any]:
         """The frame the platform records, without ``info`` at any level."""
@@ -142,13 +156,6 @@ class EvaluationResult(BaseModel):
             warnings.warn(
                 f"Positive subscore weights should sum to ~1.0 (got {pos_weight_sum:.4f}). "
                 f"Weights represent proportional contributions to the reward.",
-                stacklevel=2,
-            )
-        weighted_sum = sum(s.value * s.weight for s in self.subscores)
-        if abs(weighted_sum - self.reward) > 0.01:
-            warnings.warn(
-                f"Subscores don't match reward: "
-                f"sum(value*weight)={weighted_sum:.4f} but reward={self.reward:.4f}",
                 stacklevel=2,
             )
         return self

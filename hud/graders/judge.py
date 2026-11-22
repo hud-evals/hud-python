@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.gateway import build_gateway_client
 
 from .base import Grader, SubScore
@@ -53,8 +54,8 @@ class _Criterion:
 class LLMJudgeGrader(Grader):
     """Grade an answer against weighted criteria with an LLM judge on the HUD gateway.
 
-    Criteria are judged concurrently, one call each. A negative weight marks an error the
-    answer must not make, and counts as a penalty when the judge finds it.
+    Criteria are judged concurrently, one call each. Negative weights (deprecated) count as
+    penalties when the judge finds the criterion met.
     """
 
     name = "LLMJudgeGrader"
@@ -75,7 +76,14 @@ class LLMJudgeGrader(Grader):
             )
         parsed = _parse_criteria(criteria)
         if not parsed:
-            return SubScore(name=cls.name, value=0.0, info={"error": "no criteria provided"})
+            raise ValueError("LLMJudgeGrader needs at least one criterion; got none")
+        if penalties := [c.requirement for c in parsed if c.weight < 0]:
+            warn_deprecated(
+                f"`LLMJudgeGrader` with negative criteria ({penalties!r})",
+                "grade each penalty as its own negative-weight subscore in `combine`",
+                change="will raise",
+                stacklevel=3,
+            )
 
         client = cast("AsyncOpenAI", build_gateway_client("openai"))
         answer_text = str(answer)
