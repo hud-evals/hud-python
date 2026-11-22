@@ -168,6 +168,8 @@ class ModalRuntime:
         import modal
 
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+        if config.data is not None:
+            raise ValueError("ModalRuntime does not support runtime_config.data")
         resources = config.resources
         if resources is not None:
             resources.require_support("ModalRuntime", {"cpu", "memory_mb", "gpu"})
