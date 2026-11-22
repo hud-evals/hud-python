@@ -168,7 +168,7 @@ timeout, is still graded when it can be; its `trace_error` says what failed.
 | `--group` (alias `--group-size`) | Runs per task - a group of repeats whose reward spread you can inspect. |
 | `--max-concurrent` | Cap parallel rollouts. |
 | `--max-steps` | Deprecated; removed in hud v0.7.0 with the provider agents. Caps a provider agent's steps per task (default 10; `--full` makes it 100). CLI agents ignore it and run until done or `timeout_seconds` (`--config timeout_seconds=1800`). |
-| `--auto-respond` | Prompt the agent to continue when it answers without a tool call. |
+| `--auto-respond` | Prompt the agent to continue when it answers without a tool call. `gpt-6-luna`, called through the HUD gateway, decides whether to continue or stop; if that call fails, the trace ends in error. |
 | `--task-ids` | Comma-separated slugs or 0-based indices. |
 | `--config`, `-c` | Agent config `key=value` (repeatable). The value is read as JSON when it parses (`5`, `true`, `{"temperature": 0.2}`) and as text otherwise; quote a string that is valid JSON (`system_prompt='"null"'`). `claude.max_tokens=1` targets one agent. |
 | `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |

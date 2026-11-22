@@ -1,6 +1,6 @@
 """What the provider agents' shared tool loop decides: that a call cut off mid-arguments
-is refused, how long a tool may take, when a lost workspace ends the run, and that
-colliding MCP tool names fail it.
+is refused, how long a tool may take, when a lost workspace ends the run, that
+colliding MCP tool names fail it, and that a failed auto-respond decision fails it.
 
 The loop is one implementation every provider agent runs, so each rule is checked on
 one agent; what each provider does differently is ``test_provider_agents``."""
@@ -25,6 +25,7 @@ from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call
 from tests.fixtures.relay import relay
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -229,3 +230,30 @@ async def test_two_mcp_tools_qualified_to_one_name_fail_the_run(
         "[agent loop] ValueError: MCP tool name collision after qualification: 'a__b__c'"
     )
     assert models.requests() == []
+
+
+@pytest.mark.parametrize(
+    ("decision", "error"),
+    [
+        (
+            Turn(fail=Reply(status=400, json={"error": {"message": "model is deprecated"}})),
+            "model is deprecated",
+        ),
+        (Turn(truncated=True), "returned no decision text"),
+    ],
+    ids=["refused", "no-text"],
+)
+async def test_a_failed_auto_respond_decision_fails_the_run(
+    models: Models, tmp_path: Path, decision: Turn, error: str
+) -> None:
+    def answer(request: ModelRequest) -> Turn:
+        return decision if request.protocol == "responses" else Turn(text="Shall I go on?")
+
+    models.respond(answer)
+
+    task = workspace_task(tmp_path / "ws")
+    config = OpenAIChatConfig(model="qwen3.6-plus", auto_respond=True)
+    (trace,) = (await task().run(OpenAIChatAgent(config))).traces
+
+    assert trace.status == "error"
+    assert error in (trace.error or "")

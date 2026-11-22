@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Literal, cast
 
 from openai.types.responses import ResponseOutputText
@@ -11,8 +10,6 @@ from hud.utils.gateway import build_gateway_client
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
-
-logger = logging.getLogger(__name__)
 
 ResponseType = Literal["STOP", "CONTINUE"]
 
@@ -45,12 +42,7 @@ async def auto_respond(
     if not enabled or not content:
         return None
 
-    try:
-        decision = await _determine_response(content)
-    except Exception as exc:
-        logger.warning("Auto-respond failed: %s", exc)
-        return None
-
+    decision = await _determine_response(content)
     if decision == "STOP":
         return None
 
@@ -64,7 +56,7 @@ async def auto_respond(
 async def _determine_response(
     agent_message: str,
     *,
-    model: str = "gpt-5",
+    model: str = "gpt-6-luna",
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
 ) -> ResponseType:
     # A client per call: its connection pool belongs to the event loop that opened it.
@@ -91,9 +83,10 @@ async def _determine_response(
                 content.text for content in item.content if isinstance(content, ResponseOutputText)
             )
 
-    response_text = "".join(text_parts)
+    response_text = "".join(text_parts).strip().upper()
     if not response_text:
-        return "CONTINUE"
-
-    response_text = response_text.strip().upper()
+        raise RuntimeError(
+            f"auto-respond model {model} returned no decision text "
+            f"(response status {response.status!r}, {response.incomplete_details})"
+        )
     return "STOP" if "STOP" in response_text else "CONTINUE"
