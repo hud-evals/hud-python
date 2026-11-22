@@ -104,7 +104,7 @@ __all__ = [
 
 _RETIRED = {
     **moved_to("hud.capabilities", "Capability"),
-    **moved_to("hud.environment.egress", "Peer", "WorkspaceRoute"),
+    **moved_to("hud.environment.egress", "Peer"),
     **moved_to("hud.environment.workspace", "DEFAULT_SYSTEM_MOUNTS", "MountKind"),
 }
 

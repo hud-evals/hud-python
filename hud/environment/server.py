@@ -22,7 +22,6 @@ from hud.graders import EvaluationResult
 from hud.graders.base import Grade, grade_problems
 from hud.utils.process import run_until_terminated
 
-from .egress import WorkspaceRoute
 from .env import Answer, current_session_id
 from .utils import (
     CONTROL_FRAME_LIMIT_BYTES,
@@ -259,7 +258,7 @@ class _ControlChannel:
         self.release_if_idle(session_id)
 
     def release_if_idle(self, session_id: str) -> None:
-        """Release the session's connections and routes unless it is live or has a parked task."""
+        """Release the session's connections unless it is live or has a parked task."""
         if session_id not in self.live and session_id not in self.runners:
             self.env.release_session(session_id)
 
@@ -418,15 +417,6 @@ class _Session:
             self.channel.live.add(self.id)
             current_session_id.reset(self._token)
             self._token = current_session_id.set(self.id)
-        raw_routes = params.get("workspace_routes", [])
-        if not isinstance(raw_routes, list):
-            await self._error(msg_id, -32602, "hello: 'workspace_routes' must be a list")
-            return
-        try:
-            workspace_routes = [WorkspaceRoute.from_wire(route) for route in raw_routes]
-        except ValueError as exc:
-            await self._error(msg_id, -32602, f"hello: {exc}")
-            return
         raw_connections = params.get("connections", [])
         if not isinstance(raw_connections, list):
             await self._error(msg_id, -32602, "hello: 'connections' must be a list")
@@ -437,7 +427,6 @@ class _Session:
             await self._error(msg_id, -32602, f"hello: {exc}")
             return
         await self.env.bind_connections(connections, session=self.id)
-        await self.env.bind_workspace_routes(workspace_routes, session=self.id)
         if requested is None:
             # Only a new session: a resume or a rebind must answer within its heartbeat.
             await self.env.open_session()

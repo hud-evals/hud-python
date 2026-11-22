@@ -52,7 +52,6 @@ RETIRED = [
     *[("hud.eval.runtime", name, "hud.runtime") for name in [*RUNTIME_NAMES, "DockerBindMount"]],
     ("hud.environment", "Capability", "hud.capabilities"),
     ("hud.environment", "Peer", "hud.environment.egress"),
-    ("hud.environment", "WorkspaceRoute", "hud.environment.egress"),
     ("hud.environment", "DEFAULT_SYSTEM_MOUNTS", "hud.environment.workspace"),
     ("hud.environment", "MountKind", "hud.environment.workspace"),
     ("hud.types", "EvaluationResult", "hud.graders"),

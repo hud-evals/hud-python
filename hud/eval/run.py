@@ -34,7 +34,6 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
-    from hud.environment.egress import WorkspaceRoute
     from hud.runtime.core import Provider, RuntimeConfig
 
     from .task import Task
@@ -367,7 +366,6 @@ async def rollout(
     trace_id: str | None = None,
     rollout_timeout: float | None = None,
     connections: Sequence[Connection] = (),
-    workspace_routes: Sequence[WorkspaceRoute] = (),
 ) -> Trace:
     """Drive ``agent`` through ``task`` on ``runtime`` and return the graded trace.
 
@@ -441,7 +439,7 @@ async def rollout(
                     )
                     shared_verifier = True
                 _phase = "starting task"
-                async with connect(addr, workspace_routes=workspace_routes) as actor_client:
+                async with connect(addr) as actor_client:
                     client = actor_client
                     bound = [*connections, *_gateway_relay(agent, actor_client, connections)]
                     if bound:
