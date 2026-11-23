@@ -57,7 +57,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         GeminiComputerTool,
         GeminiMCPProxyTool,
     )
-    _deprecated_as = ("`GeminiAgent`", "agent type `gemini` runs a Gemini CLI agent from then")
+    _deprecated_as = ("`GeminiAgent`", "agent type `gemini` becomes a Gemini CLI agent")
 
     def __init__(self, config: GeminiConfig | None = None) -> None:
         super().__init__(config)

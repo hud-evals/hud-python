@@ -65,7 +65,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
     )
     _deprecated_as = (
         "`OpenAIAgent`",
-        "use `CodexCLIAgent` (agent type `codex_cli`), which agent type `openai` runs from then",
+        "use `CodexCLIAgent` (agent type `codex_cli`), which agent type `openai` becomes",
     )
 
     def __init__(self, config: OpenAIConfig | None = None) -> None:

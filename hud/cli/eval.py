@@ -222,8 +222,8 @@ def eval_command(
     if max_steps is not None or "max_steps" in cfg.model_fields_set:
         warn_deprecated(
             "`max_steps` in `hud eval`",
-            "it goes with the provider agents it caps; CLI agents ignore it and run until done "
-            "or `timeout_seconds` (`--config timeout_seconds=...`)",
+            "CLI agents ignore it and run until done or `timeout_seconds` "
+            "(`--config timeout_seconds=...`)",
         )
 
     if runtime is not None and remote:

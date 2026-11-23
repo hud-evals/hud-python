@@ -38,9 +38,8 @@ exported subsets of them."""
 def warn_deprecated(
     subject: str, instead: str, *, change: str = "will be removed", stacklevel: int = 2
 ) -> None:
-    """Warn that ``subject`` is deprecated, saying what hud v0.7.0 does to it and what to do.
+    """Warn that ``subject`` is deprecated and ``change`` in hud v0.7.0; ``instead`` is the fix.
 
-    The message reads "{subject} is deprecated and {change} in hud v0.7.0; {instead}."
     ``stacklevel`` counts from the caller, as ``warnings.warn``'s does.
     """
     warnings.warn(

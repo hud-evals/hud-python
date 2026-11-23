@@ -114,7 +114,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
     )
     _deprecated_as = (
         "`ClaudeAgent`",
-        "use `ClaudeCLIAgent` (agent type `claude_cli`), which agent type `claude` runs from then",
+        "use `ClaudeCLIAgent` (agent type `claude_cli`), which agent type `claude` becomes",
     )
 
     def __init__(self, config: ClaudeConfig | None = None) -> None:

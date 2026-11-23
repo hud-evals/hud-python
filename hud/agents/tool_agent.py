@@ -68,8 +68,6 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
     tool_catalog: ClassVar[tuple[type[AgentTool[Any]], ...]] = ()
     # Capability-client types this agent can drive (derived from the catalog).
     clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
-    # A tool agent hud v0.7.0 removes: its name and what replaces it, for the warning its
-    # construction gives.
     _deprecated_as: ClassVar[tuple[str, str] | None] = None
 
     def __init__(self, config: ConfigT | None = None) -> None:
