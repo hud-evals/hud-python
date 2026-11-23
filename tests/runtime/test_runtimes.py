@@ -329,6 +329,18 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
     assert config.model_dump(mode="json")["data"]["refs"]["mode"] == "overlay"
 
 
+def test_runtime_config_lists_the_files_a_data_mount_shows() -> None:
+    files = [{"key": "f1"}, {"key": "sub//f2", "path": "inputs/report.csv"}]
+    config = RuntimeConfig.model_validate(
+        {"data": {"picked": {"mount_path": "/data/picked", "files": files}}},
+    )
+
+    assert config.model_dump(mode="json")["data"]["picked"]["files"] == [
+        {"key": "f1", "path": "f1"},
+        {"key": "sub/f2", "path": "inputs/report.csv"},
+    ]
+
+
 @pytest.mark.parametrize(
     "data",
     [
@@ -341,6 +353,17 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
         {"a": {"mount_path": "/data/my files"}},
         {"a": {"mount_path": "/data", "mode": "readwrite"}},
         {"a": {"mount_path": "/data", "prefix": "p" * 512}},
+        {"a": {"mount_path": "/data", "files": [{"key": "../f1"}]}},
+        {"a": {"mount_path": "/data", "files": [{"key": "f1", "path": "../x"}]}},
+        {"a": {"mount_path": "/data", "files": [{"key": "my file"}]}},
+        {
+            "a": {
+                "mount_path": "/data",
+                "files": [{"key": "f1", "path": "x"}, {"key": "f2", "path": "x/y"}],
+            }
+        },
+        {"a": {"mount_path": "/data", "mode": "overlay", "files": [{"key": "f1"}]}},
+        {"a": {"mount_path": "/data", "files": []}},
         {},
     ],
     ids=[
@@ -353,6 +376,12 @@ def test_runtime_config_declares_named_data_mounts_with_their_own_modes() -> Non
         "path-space",
         "unknown-mode",
         "prefix-too-long-once-stored",
+        "file-key-climbs",
+        "file-path-climbs",
+        "file-path-space",
+        "nested-file-paths",
+        "files-on-overlay",
+        "no-files",
         "empty",
     ],
 )
