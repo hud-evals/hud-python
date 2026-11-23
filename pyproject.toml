@@ -88,13 +88,13 @@ train = [
 
 [dependency-groups]
 dev = [
-    "ruff==0.17.5",
+    "ruff==0.17.6",
     "pytest>=8.1.1",
     "pytest-asyncio",
     "pytest-xdist",
     "pytest-timeout",
     "dirty-equals",
-    "ty==0.0.105",
+    "ty==0.0.107",
 ]
 
 [tool.uv]
