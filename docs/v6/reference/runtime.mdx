@@ -85,7 +85,7 @@ RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2
 | `compose` | `ComposeProject(document, root, service_access)`. Mutually exclusive with `image`. |
 | `resources` | Placement requests: CPU, memory, disk, acceptable GPU types and count, OS, or TPU slice. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
-| `data` | Named folders of the team's shared data, each mounted into the environment: `{name: RuntimeDataMount(prefix, mount_path, mode)}`. See [Data mounts](#data-mounts). |
+| `data` | Named folders of the team's shared data, each mounted into the environment: `{name: RuntimeDataMount(prefix, mount_path, mode, files)}`. See [Data mounts](#data-mounts). |
 
 Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
 is best effort: `DockerRuntime` admits against available disk, while providers without disk
@@ -119,6 +119,25 @@ RuntimeConfig(
 
 - `RuntimeDataMode.READONLY`: the folder cannot be written.
 - `RuntimeDataMode.OVERLAY`: the environment can edit, rename and delete freely; the changes are discarded when the rollout ends and never reach the stored folder.
+
+A mount can show only chosen files of its folder. List them in `files`, and the environment sees those files and nothing else the folder holds:
+
+```python
+RuntimeDataMount(
+    mount_path="/data/inputs",
+    files=[
+        RuntimeDataFile(key="2f0c9a1e"),
+        RuntimeDataFile(key="reports/q3.bin", path="report.pdf"),
+    ],
+)
+```
+
+| Field | Meaning |
+|-------|---------|
+| `key` | The file's path inside the mounted folder. It cannot contain a comma, a double quote or a control character. |
+| `path` | Where the file appears under `mount_path`, built from letters, digits, `.`, `_` and `-`. Defaults to `key`. Paths cannot be equal or nested. |
+
+A mount lists up to 256 files and must be `READONLY`.
 
 `run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
 Without one, `DockerRuntime` sets no lifetime bound, while `ModalRuntime` and HUD-hosted Modal

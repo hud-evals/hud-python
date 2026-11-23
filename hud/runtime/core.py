@@ -100,6 +100,8 @@ class RuntimeLimits(BaseModel):
 
 _MOUNT_PATH_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")
 _PREFIX_MAX_LENGTH = 512
+# A bind mount's options are comma-separated, so these cannot appear in a file's key.
+_UNBINDABLE = re.compile(r'[,"\x00-\x1f\x7f]')
 
 
 class RuntimeDataMode(StrEnum):
@@ -109,22 +111,69 @@ class RuntimeDataMode(StrEnum):
     OVERLAY = "overlay"
 
 
+def _relative_parts(value: str, field: str) -> list[str]:
+    parts = [part for part in value.split("/") if part]
+    if any(part in (".", "..") for part in parts):
+        raise ValueError(f"{field} must be a relative path without '.' or '..'")
+    return parts
+
+
+class RuntimeDataFile(BaseModel):
+    """One file of a mounted folder, shown at ``path`` under the mount."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=_PREFIX_MAX_LENGTH)
+    path: str = Field(default="", max_length=255, validate_default=True)
+
+    @field_validator("key")
+    @classmethod
+    def _relative_key(cls, value: str) -> str:
+        if _UNBINDABLE.search(value):
+            raise ValueError("key cannot contain a comma, a double quote or a control character")
+        parts = _relative_parts(value, "key")
+        if not parts:
+            raise ValueError("key must name a file")
+        return "/".join(parts)
+
+    @model_validator(mode="after")
+    def _safe_path(self) -> Self:
+        parts = _relative_parts(self.path or self.key, "path")
+        if not all(_MOUNT_PATH_SEGMENT.fullmatch(part) for part in parts):
+            raise ValueError("path segments may use only letters, digits, '.', '_' and '-'")
+        self.path = "/".join(parts)
+        return self
+
+
 class RuntimeDataMount(BaseModel):
-    """One folder of the team's shared data, mounted at ``mount_path``."""
+    """One folder of the team's shared data, mounted at ``mount_path``.
+
+    With ``files``, only those files of the folder appear under the mount.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     prefix: str = Field(default="", max_length=_PREFIX_MAX_LENGTH)
     mount_path: str = Field(max_length=255)
     mode: RuntimeDataMode = RuntimeDataMode.READONLY
+    files: list[RuntimeDataFile] | None = Field(default=None, min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def _separate_files(self) -> Self:
+        if self.files is None:
+            return self
+        if self.mode is not RuntimeDataMode.READONLY:
+            raise ValueError("a mount that lists files must be readonly")
+        paths = sorted(PurePosixPath(file.path) for file in self.files)
+        for outer, inner in itertools.pairwise(paths):
+            if inner == outer or outer in inner.parents:
+                raise ValueError(f"files {outer} and {inner} overlap")
+        return self
 
     @field_validator("prefix")
     @classmethod
     def _relative_prefix(cls, value: str) -> str:
-        parts = [part for part in value.split("/") if part]
-        if any(part in (".", "..") for part in parts):
-            raise ValueError("prefix must be a relative path without '.' or '..'")
-        prefix = "".join(f"{part}/" for part in parts)
+        prefix = "".join(f"{part}/" for part in _relative_parts(value, "prefix"))
         if len(prefix) > _PREFIX_MAX_LENGTH:
             raise ValueError(f"prefix is longer than {_PREFIX_MAX_LENGTH} characters")
         return prefix
