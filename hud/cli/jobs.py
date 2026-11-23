@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 from uuid import UUID
 
@@ -19,7 +18,8 @@ from hud.cli import (
     map_exception,
 )
 from hud.settings import settings
-from hud.utils.exceptions import HudDeprecationWarning, HudException, HudRequestError
+from hud.utils.deprecation import warn_deprecated
+from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import Page, PlatformClient
 
@@ -298,10 +298,5 @@ def jobs_command(
     """
     if ctx.invoked_subcommand is not None:
         return None
-    warnings.warn(
-        "`hud jobs` without a subcommand is deprecated and will be removed in hud v0.7.0; "
-        "use `hud jobs list`.",
-        HudDeprecationWarning,
-        stacklevel=2,
-    )
+    warn_deprecated("`hud jobs` without a subcommand", "use `hud jobs list`")
     return list_command(quiet=quiet, limit=limit)

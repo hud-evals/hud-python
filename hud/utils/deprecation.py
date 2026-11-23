@@ -1,4 +1,4 @@
-"""Retired import paths, served with a warning until hud v0.7.0 removes them."""
+"""Deprecation warnings for what hud v0.7.0 removes or changes, and retired import paths."""
 
 from __future__ import annotations
 
@@ -35,6 +35,21 @@ RUNTIME_NAMES = (
 exported subsets of them."""
 
 
+def warn_deprecated(
+    subject: str, instead: str, *, change: str = "will be removed", stacklevel: int = 2
+) -> None:
+    """Warn that ``subject`` is deprecated, saying what hud v0.7.0 does to it and what to do.
+
+    The message reads "{subject} is deprecated and {change} in hud v0.7.0; {instead}."
+    ``stacklevel`` counts from the caller, as ``warnings.warn``'s does.
+    """
+    warnings.warn(
+        f"{subject} is deprecated and {change} in hud v0.7.0; {instead}.",
+        HudDeprecationWarning,
+        stacklevel=stacklevel + 1,
+    )
+
+
 class Retired(NamedTuple):
     """How to load a retired name's value, and what the warning tells the caller instead."""
 
@@ -64,10 +79,5 @@ def resolve_retired(module: str, name: str, retired: Mapping[str, Retired]) -> A
     entry = retired.get(name)
     if entry is None:
         raise AttributeError(f"module {module!r} has no attribute {name!r}")
-    warnings.warn(
-        f"`{name}` from `{module}` is deprecated and will be removed in hud v0.7.0; "
-        f"{entry.instead}.",
-        HudDeprecationWarning,
-        stacklevel=3,
-    )
+    warn_deprecated(f"`{name}` from `{module}`", entry.instead, stacklevel=3)
     return entry.load()

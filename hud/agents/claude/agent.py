@@ -112,9 +112,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         ClaudeComputerTool,
         ClaudeMCPProxyTool,
     )
-    _removal_notice = (
-        "`ClaudeAgent` is deprecated and will be removed in hud v0.7.0, when agent type "
-        "`claude` runs `ClaudeCLIAgent`; use `ClaudeCLIAgent` (agent type `claude_cli`)."
+    _deprecated_as = (
+        "`ClaudeAgent`",
+        "use `ClaudeCLIAgent` (agent type `claude_cli`), which agent type `claude` runs from then",
     )
 
     def __init__(self, config: ClaudeConfig | None = None) -> None:

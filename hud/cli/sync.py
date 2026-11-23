@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import json
 import sys
-import warnings
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -26,7 +25,8 @@ from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.cli.tasksets import diff, find_taskset, upload_taskset
 from hud.eval.taskset import Taskset
 from hud.settings import settings
-from hud.utils.exceptions import HudDeprecationWarning, HudRequestError
+from hud.utils.deprecation import warn_deprecated
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import Page, PlatformClient
 
@@ -389,12 +389,7 @@ def sync_callback(
             )
         return
 
-    warnings.warn(
-        "`hud sync` without a subcommand is deprecated and will be removed in hud v0.7.0; "
-        "use `hud sync tasks`.",
-        HudDeprecationWarning,
-        stacklevel=2,
-    )
+    warn_deprecated("`hud sync` without a subcommand", "use `hud sync tasks`")
     assert isinstance(ctx.command, TyperGroup)
     command = ctx.command.get_command(ctx, "tasks")
     assert command is not None
