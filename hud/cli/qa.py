@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import warnings
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
@@ -25,7 +24,8 @@ from hud.cli import (
     map_exception,
 )
 from hud.settings import settings
-from hud.utils.exceptions import HudDeprecationWarning, HudException, HudTimeoutError
+from hud.utils.deprecation import warn_deprecated
+from hud.utils.exceptions import HudException, HudTimeoutError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -365,12 +365,7 @@ def qa_command(
     """
     if ctx.invoked_subcommand is not None:
         return None
-    warnings.warn(
-        "`hud qa` without a subcommand is deprecated and will be removed in hud v0.7.0; "
-        "use `hud qa list`.",
-        HudDeprecationWarning,
-        stacklevel=2,
-    )
+    warn_deprecated("`hud qa` without a subcommand", "use `hud qa list`")
     return list_command(quiet=quiet, level=level)
 
 

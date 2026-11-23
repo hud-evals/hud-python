@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-from hud.utils.exceptions import HudDeprecationWarning
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.serialization import json_safe_dict
 
 _SUMMARY_SERIALIZATION_CONTEXT = "hud_summary"
@@ -124,11 +124,8 @@ class EvaluationResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     def __init__(self, **data: Any) -> None:
-        warnings.warn(
-            "`EvaluationResult` is deprecated and will be removed in hud v0.7.0; "
-            "yield a `hud.Grade` (`is_error=` in place of `isError=`).",
-            HudDeprecationWarning,
-            stacklevel=2,
+        warn_deprecated(
+            "`EvaluationResult`", "yield a `hud.Grade` (`is_error=` in place of `isError=`)"
         )
         super().__init__(**data)
 

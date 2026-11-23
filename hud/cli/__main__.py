@@ -32,6 +32,7 @@ from hud.cli.sync import sync_app
 from hud.cli.task import task_app
 from hud.cli.trace import trace_app
 from hud.settings import Settings
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudDeprecationWarning
 from hud.utils.hud_console import HUDConsole
 from hud.version import __version__
@@ -115,11 +116,7 @@ def root_command(
         typer.echo(ctx.get_help())
         raise typer.Exit
     if show_version:
-        warnings.warn(
-            "`hud --version` is deprecated and will be removed in hud v0.7.0; use `hud version`.",
-            HudDeprecationWarning,
-            stacklevel=2,
-        )
+        warn_deprecated("`hud --version`", "use `hud version`")
         version()
         raise typer.Exit
     if ctx.invoked_subcommand is None:

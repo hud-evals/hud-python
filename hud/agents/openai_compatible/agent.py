@@ -44,9 +44,9 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         WriteTool,
         OpenAICompatibleMCPProxyTool,
     )
-    _removal_notice = (
-        "`OpenAIChatAgent` is deprecated and will be removed in hud v0.7.0, along with agent "
-        "type `openai_compatible`; use `PiAgent` (agent type `pi`)."
+    _deprecated_as = (
+        "`OpenAIChatAgent` (agent type `openai_compatible`)",
+        "use `PiAgent` (agent type `pi`)",
     )
 
     def __init__(self, config: OpenAIChatConfig | None = None) -> None:

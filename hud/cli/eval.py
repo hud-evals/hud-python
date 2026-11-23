@@ -7,7 +7,6 @@ import logging
 import os
 import time
 import tomllib
-import warnings
 from enum import StrEnum
 from pathlib import Path
 from string import Template
@@ -28,7 +27,7 @@ from hud.runtime.local import SubprocessRuntime
 from hud.runtime.modal import ModalRuntime
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils.exceptions import HudDeprecationWarning
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -103,11 +102,9 @@ class EvalConfig(BaseModel):
     def load(cls, path: Path = _CONFIG_PATH) -> EvalConfig:
         if not path.exists():
             return cls()
-        warnings.warn(
-            f"`{path}` is deprecated and will be removed in hud v0.7.0; pass run settings as "
-            "`hud eval` flags and agent settings as `--config key=<json>`.",
-            HudDeprecationWarning,
-            stacklevel=2,
+        warn_deprecated(
+            f"`{path}`",
+            "pass run settings as `hud eval` flags and agent settings as `--config key=<json>`",
         )
         fields = {key: value for key, value in settings.model_dump().items() if value is not None}
         mapping: dict[str, Any] = {**os.environ, **fields}
@@ -223,12 +220,10 @@ def eval_command(
     hud_console.info("Initializing evaluation...")
     cfg = EvalConfig.load()
     if max_steps is not None or "max_steps" in cfg.model_fields_set:
-        warnings.warn(
-            "`max_steps` in `hud eval` is deprecated and will be removed in hud v0.7.0 with the "
-            "provider agents it caps; CLI agents ignore it and run until done or "
-            "`timeout_seconds` (`--config timeout_seconds=...`).",
-            HudDeprecationWarning,
-            stacklevel=2,
+        warn_deprecated(
+            "`max_steps` in `hud eval`",
+            "CLI agents ignore it and run until done or `timeout_seconds` "
+            "(`--config timeout_seconds=...`)",
         )
 
     if runtime is not None and remote:

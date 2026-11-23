@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, cast
@@ -18,7 +17,7 @@ from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities.mcp import MCPClient
 from hud.capabilities.ssh import SSHConnectionError
 from hud.types import PromptMessage, Step, StopCondition, TextContent, Tool, ToolCall, ToolResult
-from hud.utils.exceptions import HudDeprecationWarning
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
@@ -69,12 +68,12 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
     tool_catalog: ClassVar[tuple[type[AgentTool[Any]], ...]] = ()
     # Capability-client types this agent can drive (derived from the catalog).
     clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
-    # The warning a tool agent hud v0.7.0 removes gives at construction, naming its replacement.
-    _removal_notice: ClassVar[str | None] = None
+    _deprecated_as: ClassVar[tuple[str, str] | None] = None
 
     def __init__(self, config: ConfigT | None = None) -> None:
-        if self._removal_notice is not None:
-            warnings.warn(self._removal_notice, HudDeprecationWarning, stacklevel=3)
+        if self._deprecated_as is not None:
+            subject, instead = self._deprecated_as
+            warn_deprecated(subject, instead, stacklevel=3)
         super().__init__(config)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
