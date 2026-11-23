@@ -104,7 +104,9 @@ async def trace_exit(
         "status": trace.status or "completed",
         "reward": trace.reward,
         "error": error,
-        "evaluation_result": (None if trace.grade == Grade.ungraded() else trace.evaluation),
+        "evaluation_result": (
+            None if trace.grade == Grade.ungraded() else trace.grade.to_summary()
+        ),
         "stop_reason": trace.stop_reason,
         "metadata": trace.extra or None,
     }

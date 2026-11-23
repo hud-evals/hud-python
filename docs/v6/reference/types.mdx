@@ -47,6 +47,9 @@ subscores), and the trace records the one the environment sent (`trace.grade`). 
 | `is_error` | `bool` | Whether grading failed or never happened. |
 | `subscores` | `list[SubScore] \| None` | The breakdown, as `combine` builds it; see [Graders](/v6/reference/graders#subscore). |
 
+`grade.to_summary()` is the frame without `info` at any level, the form the platform records and
+safe to persist.
+
 ## `Job`
 
 The receipt for one execution: the graded [traces](#trace) of a batch under one platform job id. Every
@@ -83,11 +86,10 @@ streams to the platform as one schema-tagged span.
 |--------|------|-------------|
 | `steps` | `list[Step]` | The ordered trajectory. |
 | `status` | `"completed" \| "error" \| "cancelled" \| None` | How the rollout ended (`trace.is_error` reads it). |
-| `stop_reason` | `"done" \| "max_steps" \| "length" \| "timeout" \| "malformed_tool_call" \| None` | Why the rollout stopped (`trace.is_truncated` reads it: anything but `"done"` means a limit cut it off). |
+| `stop_reason` | `"done" \| "max_steps" \| "length" \| "timeout" \| "malformed_tool_call" \| None` | Why the rollout stopped: anything but `"done"` means a limit cut it off. |
 | `content` | `str \| None` | The final answer (graded). |
 | `grade` | `Grade` | The environment's verdict; an error ("not graded") until graded. |
 | `reward` | `float` | Property: the graded reward (`grade.reward`). |
-| `evaluation` | `dict` | Property: the grade payload, safe to persist. |
 | `prompt_text` | `str \| None` | Property: the prompt the agent was given; `None` when no task started. |
 | `trace_id` | `str \| None` | Keys the trajectory for training. |
 | `slug` | `str \| None` | The task slug it came from; how [`Job.results`](#job) keys traces back to their task without positional zip. |

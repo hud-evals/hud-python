@@ -51,7 +51,7 @@ async def test_repeated_graders_are_named_apart_and_weighted_into_the_reward() -
     (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
 
     assert trace.reward == pytest.approx(0.6)
-    assert trace.evaluation["subscores"] == [
+    assert trace.grade.to_summary()["subscores"] == [
         leaf("BashGrader-2", 0.3, 1.0),
         leaf("BashGrader-3", 0.3, 1.0),
         leaf("BashGrader-1", 0.4, 0.0),
@@ -77,7 +77,7 @@ async def test_a_negative_weight_is_a_penalty_taken_off_the_reward(
     (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
 
     assert trace.reward == pytest.approx(reward)
-    assert [s["weight"] for s in trace.evaluation["subscores"]] == [1.0, -0.2]
+    assert [s["weight"] for s in trace.grade.to_summary()["subscores"]] == [1.0, -0.2]
 
 
 async def test_weights_not_summing_to_one_are_normalized_with_a_warning_and_penalties_kept() -> (
@@ -99,7 +99,7 @@ async def test_weights_not_summing_to_one_are_normalized_with_a_warning_and_pena
         (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
 
     assert trace.reward == pytest.approx(0.8 / 1.1 - 0.1)
-    assert [s["weight"] for s in trace.evaluation["subscores"]] == pytest.approx(
+    assert [s["weight"] for s in trace.grade.to_summary()["subscores"]] == pytest.approx(
         [0.5 / 1.1, 0.3 / 1.1, 0.3 / 1.1, -0.1]
     )
 
@@ -349,4 +349,7 @@ async def test_a_grade_reads_the_same_whether_the_task_yields_a_grade_or_an_eval
         False,
     )
     assert grade.subscores == subscores
-    assert trace.evaluation["subscores"] == [leaf("tests", 0.75, 1.0), leaf("style", 0.25, 0.0)]
+    assert trace.grade.to_summary()["subscores"] == [
+        leaf("tests", 0.75, 1.0),
+        leaf("style", 0.25, 0.0),
+    ]

@@ -355,7 +355,9 @@ class Trace(BaseModel):
 
     @property
     def evaluation(self) -> dict[str, Any]:
-        return self.grade.evaluation
+        """``grade.to_summary()``; deprecated."""
+        warn_deprecated("`Trace.evaluation`", "use `trace.grade.to_summary()`")
+        return self.grade.to_summary()
 
     def final(self, get: Callable[[Step], T | None]) -> T | None:
         """The newest step's non-``None`` answer to ``get``; falsy answers count."""
@@ -374,7 +376,11 @@ class Trace(BaseModel):
 
     @property
     def is_truncated(self) -> bool:
-        """Whether a limit (step budget, token cap, timeout) cut the rollout off."""
+        """Whether a limit (step budget, token cap, timeout) cut the rollout off; deprecated."""
+        warn_deprecated(
+            "`Trace.is_truncated`",
+            "read `trace.stop_reason` (anything but `None` or `'done'` means a limit cut it off)",
+        )
         return self.stop_reason is not None and self.stop_reason != "done"
 
     @property
@@ -409,6 +415,7 @@ class Trace(BaseModel):
         self.steps.append(step)
 
     def __len__(self) -> int:
+        warn_deprecated("`len(trace)`", "use `len(trace.steps)`")
         return len(self.steps)
 
 

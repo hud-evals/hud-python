@@ -100,13 +100,18 @@ class Grade(BaseModel):
             )
         return self
 
-    @property
-    def evaluation(self) -> dict[str, Any]:
+    def to_summary(self) -> dict[str, Any]:
         """The frame the platform records, without ``info`` at any level."""
         frame = self.model_dump(mode="json", exclude={"info"})
         if self.subscores is not None:
             frame["subscores"] = [subscore.to_summary() for subscore in self.subscores]
         return frame
+
+    @property
+    def evaluation(self) -> dict[str, Any]:
+        """``to_summary()``; deprecated."""
+        warn_deprecated("`Grade.evaluation`", "use `Grade.to_summary()`")
+        return self.to_summary()
 
     @classmethod
     def ungraded(cls) -> Grade:
