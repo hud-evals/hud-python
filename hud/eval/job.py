@@ -12,6 +12,7 @@ from hud.graders.base import Grade
 from hud.settings import settings
 from hud.telemetry.exporter import export
 from hud.telemetry.span import TRACE_SCHEMA
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
@@ -21,11 +22,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.eval.job")
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class Job:
-    """The graded traces reported under one platform job id."""
+    """The graded traces reported under one platform job id.
 
-    id: str
+    Pass one as ``job=`` to several ``run`` calls, in one process or many, and each run
+    registers it and reports under it.
+    """
+
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
     name: str
     traces: list[Trace] = field(default_factory=list)
     group: int = 1
@@ -33,16 +38,26 @@ class Job:
 
     @classmethod
     async def start(cls, name: str, *, group: int = 1, taskset_id: str | None = None) -> Job:
-        """Open a job that several ``run`` calls share through ``job=``."""
-        job = cls(id=uuid.uuid4().hex, name=name, group=group, taskset_id=taskset_id)
+        """A job registered before its first run; deprecated."""
+        warn_deprecated("`Job.start`", "construct `Job(name=...)` and pass it as `job=`")
+        job = cls(name=name, group=group, taskset_id=taskset_id)
         await job_enter(job.id, name=name, group=group, taskset_id=taskset_id)
         return job
 
     @property
     def reward(self) -> float:
-        """Mean reward over traces whose grade is not an error (0.0 when there are none)."""
+        """Mean reward over traces whose grade is not an error.
+
+        With none, it warns and returns 0.0; hud v0.7.0 raises.
+        """
         graded = [trace.reward for trace in self.traces if not trace.grade.is_error]
         if not graded:
+            warn_deprecated(
+                f"`Job.reward` with no graded trace ({len(self.errors)} of "
+                f"{len(self.traces)} have an error grade)",
+                "check `job.errors` first",
+                change="will raise",
+            )
             return 0.0
         return sum(graded) / len(graded)
 

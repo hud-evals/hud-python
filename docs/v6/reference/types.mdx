@@ -63,7 +63,7 @@ trace reports under a job, so even a single `task.run` returns a job of one. You
 | `traces` | `list[Trace]` | The graded traces, in expansion order (task-major, then group). |
 | `group` | `int` | Rollouts per task. |
 | `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
-| `reward` | `float` | Property: mean reward across graded traces, excluding `errors` (`0.0` when none were graded). |
+| `reward` | `float` | Property: mean reward across graded traces, excluding `errors`. |
 | `errors` | `list[Trace]` | Property: traces whose `grade.is_error` is true. |
 | `results` | `dict[str, list[Trace]]` | Property: traces grouped by task slug - the alignment-safe alternative to `zip(tasks, job.traces)`, list-valued since `group > 1` gives several traces per task. |
 
@@ -73,8 +73,9 @@ print(job.reward)       # mean across graded traces
 print(len(job.errors))  # traces without a grade
 ```
 
-Each `run` call mints its own job by default. To gather many calls under one id - a training session, a
-multi-turn chat - open one with `Job.start(name, *, group=1, taskset_id=None)` and pass it as `job=`.
+Each `run` call makes its own job by default. To report several calls under one job, pass the same
+`Job(name=..., group=1, taskset_id=None)` as `job=` to each; each run registers it. Pass `id=` to
+report under a job id you already hold, such as one shared by separate processes.
 
 ## `Trace`
 
