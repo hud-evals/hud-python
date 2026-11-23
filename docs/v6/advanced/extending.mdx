@@ -71,7 +71,7 @@ There are two base classes, depending on how much of HUD's loop you want:
 - **`ToolAgent`** (`hud.agents.tool_agent`) - HUD's catalog-driven
   tool-call loop, the base every provider agent subclasses. Implement the provider hooks
   (`get_response`, message/result formatting) and it handles capability wiring, the step loop, and
-  recording.
+  recording. Deprecated with the provider agents; write new agents on `Agent`.
 
 Record the step family that matches what happened - `AgentStep` (a model turn), `ToolStep` (a tool
 round-trip), or `SubagentStep` (a nested rollout); see [Types](/v6/reference/types). `ToolAgent` does all of

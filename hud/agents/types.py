@@ -56,8 +56,6 @@ class AgentConfig(BaseModel):
     def _warn_deprecated_keys(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        # Agent configs written before the field was named ``model`` call it
-        # ``checkpoint_name``; task rows store them in ``agent_config``.
         if "checkpoint_name" in data:
             warn_deprecated(f"`{cls.__name__}.checkpoint_name`", "use `model`", stacklevel=3)
             data = dict(data)

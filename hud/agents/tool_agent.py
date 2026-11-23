@@ -6,7 +6,7 @@ import asyncio
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, cast
 
 from hud.agents.base import Agent
 from hud.agents.misc.response_automation import auto_respond
@@ -68,13 +68,14 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
     tool_catalog: ClassVar[tuple[type[AgentTool[Any]], ...]] = ()
     # Capability-client types this agent can drive (derived from the catalog).
     clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
-    _deprecated_as: ClassVar[tuple[str, str] | None] = None
+    _deprecated_as: ClassVar[tuple[str, str]] = (
+        "`ToolAgent`",
+        "subclass `Agent` and record steps with `run.record`, as the extending guide shows",
+    )
 
-    def __init__(self, config: ConfigT | None = None) -> None:
-        if self._deprecated_as is not None:
-            subject, instead = self._deprecated_as
-            warn_deprecated(subject, instead, stacklevel=3)
-        super().__init__(config)
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        warn_deprecated(*cls._deprecated_as)
+        return super().__new__(cls)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
