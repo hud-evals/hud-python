@@ -134,7 +134,7 @@ RuntimeDataMount(
 
 | Field | Meaning |
 |-------|---------|
-| `key` | The file's path inside the mounted folder. |
+| `key` | The file's path inside the mounted folder. It cannot contain a comma, a double quote or a control character. |
 | `path` | Where the file appears under `mount_path`, built from letters, digits, `.`, `_` and `-`. Defaults to `key`. Paths cannot be equal or nested. |
 
 A mount lists up to 256 files and must be `READONLY`.

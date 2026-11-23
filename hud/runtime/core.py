@@ -100,6 +100,8 @@ class RuntimeLimits(BaseModel):
 
 _MOUNT_PATH_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")
 _PREFIX_MAX_LENGTH = 512
+# A bind mount's options are comma-separated, so these cannot appear in a file's key.
+_UNBINDABLE = re.compile(r'[,"\x00-\x1f\x7f]')
 
 
 class RuntimeDataMode(StrEnum):
@@ -127,6 +129,8 @@ class RuntimeDataFile(BaseModel):
     @field_validator("key")
     @classmethod
     def _relative_key(cls, value: str) -> str:
+        if _UNBINDABLE.search(value):
+            raise ValueError("key cannot contain a comma, a double quote or a control character")
         parts = _relative_parts(value, "key")
         if not parts:
             raise ValueError("key must name a file")

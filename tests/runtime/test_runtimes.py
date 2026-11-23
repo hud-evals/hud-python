@@ -356,6 +356,7 @@ def test_runtime_config_lists_the_files_a_data_mount_shows() -> None:
         {"a": {"mount_path": "/data", "files": [{"key": "../f1"}]}},
         {"a": {"mount_path": "/data", "files": [{"key": "f1", "path": "../x"}]}},
         {"a": {"mount_path": "/data", "files": [{"key": "my file"}]}},
+        {"a": {"mount_path": "/data", "files": [{"key": "x,source=/etc", "path": "f"}]}},
         {
             "a": {
                 "mount_path": "/data",
@@ -379,6 +380,7 @@ def test_runtime_config_lists_the_files_a_data_mount_shows() -> None:
         "file-key-climbs",
         "file-path-climbs",
         "file-path-space",
+        "file-key-comma",
         "nested-file-paths",
         "files-on-overlay",
         "no-files",
