@@ -29,9 +29,15 @@ if TYPE_CHECKING:
 CONFIG_PATH = Path(".hud") / "config.json"
 
 
-class _Identity(BaseModel):
+class Identity(BaseModel):
+    """The user and team a HUD API key acts as, as ``GET /auth/me`` reports them."""
+
     user_id: UUID
+    email: str | None = None
     team_id: UUID
+    team_name: str
+    team_slug: str
+    role: str
 
 
 class AuthScope(BaseModel):
@@ -43,7 +49,7 @@ class AuthScope(BaseModel):
 
     @classmethod
     def resolve(cls, platform: PlatformClient) -> AuthScope:
-        identity = platform.get("/auth/me", _Identity)
+        identity = platform.get("/auth/me", Identity)
         url = urlsplit(platform.api_url)
         if url.scheme not in {"http", "https"} or not url.hostname:
             raise ValueError("HUD API URL must be an HTTP origin")
@@ -329,6 +335,7 @@ class CLIGroup(TyperGroup):
         "trace",
         "models",
         "set",
+        "whoami",
         "version",
     )
 

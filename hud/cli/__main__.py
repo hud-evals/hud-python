@@ -18,7 +18,7 @@ import typer
 from dotenv import dotenv_values
 from packaging.version import parse as parse_version
 
-from hud.cli import CLI, CliError, parse_key_value, set_env_values
+from hud.cli import CLI, CliError, Identity, parse_key_value, set_env_values
 from hud.cli.deploy import deploy_command
 from hud.cli.eval import eval_command
 from hud.cli.harbor import harbor_app
@@ -35,6 +35,7 @@ from hud.settings import Settings
 from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudDeprecationWarning
 from hud.utils.hud_console import HUDConsole
+from hud.utils.platform import PlatformClient
 from hud.version import __version__
 
 if TYPE_CHECKING:
@@ -90,6 +91,27 @@ def set_command(
     hud_console.info(f"Location: {result['path']}")
     hud_console.info(f"Keys: {', '.join(str(key) for key in result['keys'])}")
     return result
+
+
+def whoami() -> dict[str, object]:
+    """Show the HUD API, user, and team the configured API key acts as.
+
+    [not dim]Examples:
+        hud whoami
+        hud whoami --json[/not dim]
+    """
+    platform = PlatformClient.from_settings()
+    identity = platform.get("/auth/me", Identity)
+    HUDConsole().key_value_table(
+        {
+            "API": platform.api_url,
+            "User": identity.email or str(identity.user_id),
+            "Team": f"{identity.team_name} ({identity.team_slug})",
+            "Role": identity.role,
+        },
+        stderr=False,
+    )
+    return {"api_url": platform.api_url, **identity.model_dump(mode="json")}
 
 
 def version() -> dict[str, str]:
@@ -303,6 +325,7 @@ app.command(name="cancel", hidden=True, deprecated=True)(cancel_job_command)
 app.add_typer(trace_app, name="trace")
 app.add_typer(models_app, name="models")
 app.command(name="set")(set_command)
+app.command()(whoami)
 app.command()(version)
 
 if __name__ == "__main__":

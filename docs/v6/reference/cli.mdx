@@ -16,6 +16,9 @@ hud set HUD_API_KEY=your-key-here
 
 This stores the key in `~/.hud/.env`. For CI, set `HUD_API_KEY` in the process environment.
 
+The key's team owns what you deploy and sync. `hud whoami` shows the API URL, user, team, and
+role the configured key acts as (`--json` for the full identity).
+
 ## Flags and output
 
 List, get, create, and status commands accept `--json`. JSON is written to **stdout**; progress and warnings go to **stderr**. With `--json`, a failure is one JSON object on stdout: `{"error": "not_found", "message": "...", "input": {...}, "suggestion": "..."}`. List commands also accept `--quiet` / `-q` for one identifier per line.
@@ -402,6 +405,7 @@ hud trace get <trace-id> --json   # raw event list
 | Command | Description |
 |---------|-------------|
 | `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. |
+| `hud whoami` | Show the API URL, user, team, and role the configured key acts as (`--json`). |
 | `hud models list` | List gateway models (`--json`, `--quiet`). |
 | `hud jobs cancel` | Cancel a running job, one of its traces, or every active job (`--trace-id`, `--all`, `--yes`, `--dry-run`, `--json`). |
 | `hud version` | Show the CLI version (`--json`). |
