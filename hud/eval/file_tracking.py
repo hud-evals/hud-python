@@ -105,27 +105,28 @@ async def file_tracking_observer(client: HudClient, trace_id: str) -> AsyncGener
         yield
         return
 
+    def emit(name: _FileTrackingSpanName, payload: dict[str, Any], started_at: str) -> None:
+        export_span(
+            record_span(
+                trace_id,
+                name=name,
+                schema=_FILETRACKING_SCHEMA,
+                payload=payload,
+                started_at=started_at,
+                ended_at=now_iso(),
+            )
+        )
+
     # Env images whose tracker lacks ``setup_diff`` can only ``advance`` past setup; both
     # calls set the baseline agent edits are diffed against.
     ft: FileTrackingClient | None = None
     try:
         ft = await FileTrackingClient.connect(cap)
         if cap.params.get("setup_diff") is True:
-            setup = await ft.call("setup")
-            _emit_file_tracking(
-                trace_id,
-                "filetracking.setup",
-                setup,
-                started_at=now_iso(),
-            )
+            emit("filetracking.setup", await ft.call("setup"), now_iso())
         else:
             await ft.call("advance")
-        _emit_file_tracking(
-            trace_id,
-            "filetracking.snapshot",
-            await ft.call("snapshot"),
-            started_at=now_iso(),
-        )
+        emit("filetracking.snapshot", await ft.call("snapshot"), now_iso())
     except Exception as exc:
         if ft is not None:
             with contextlib.suppress(Exception):
@@ -149,7 +150,7 @@ async def file_tracking_observer(client: HudClient, trace_id: str) -> AsyncGener
                 logger.debug("file tracking diff failed: %s", exc)
                 continue
             if diff.get("files_changed"):
-                _emit_file_tracking(trace_id, "filetracking.diff", diff, started_at=started_at)
+                emit("filetracking.diff", diff, started_at)
 
     task = asyncio.create_task(poll_diffs())
     try:
@@ -174,7 +175,7 @@ async def file_tracking_observer(client: HudClient, trace_id: str) -> AsyncGener
             started_at = now_iso()
             diff = flush.get("diff")
             if isinstance(diff, dict) and diff.get("files_changed"):
-                _emit_file_tracking(trace_id, "filetracking.diff", diff, started_at=started_at)
+                emit("filetracking.diff", diff, started_at)
 
             capture = flush.get("capture")
             if isinstance(capture, dict) and (
@@ -183,27 +184,6 @@ async def file_tracking_observer(client: HudClient, trace_id: str) -> AsyncGener
                 or capture.get("files_eligible")
                 or capture.get("truncated")
             ):
-                _emit_file_tracking(
-                    trace_id, "filetracking.capture", capture, started_at=started_at
-                )
+                emit("filetracking.capture", capture, started_at)
         with contextlib.suppress(Exception):
             await ft.close()
-
-
-def _emit_file_tracking(
-    trace_id: str,
-    span_name: _FileTrackingSpanName,
-    payload: dict[str, Any],
-    *,
-    started_at: str,
-) -> None:
-    export_span(
-        record_span(
-            trace_id,
-            name=span_name,
-            schema=_FILETRACKING_SCHEMA,
-            payload=payload,
-            started_at=started_at,
-            ended_at=now_iso(),
-        )
-    )

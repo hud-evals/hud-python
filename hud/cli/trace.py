@@ -203,40 +203,27 @@ def _step_event(payload: dict[str, Any], span_name: str | None) -> dict[str, Any
             }
         case "tool":
             tool = ToolStep.model_validate(payload)
-            result = tool.result
-            text = "\n".join(
-                block.text
-                for block in (result.content if result is not None else [])
-                if isinstance(block, TextContent)
-            )
-            failed = result is not None and result.isError
-            error = tool.error or ((text or "tool error (no message)") if failed else None)
+            call, result = tool.call, tool.result
+            blocks = result.content if result else []
+            text = "\n".join(block.text for block in blocks if isinstance(block, TextContent))
+            failed = bool(result and result.isError)
             return {
                 "kind": "tool_call",
                 "method": "tools/call",
-                "tool_call_id": tool.call.id if tool.call is not None else None,
-                "tool_name": tool.call.name if tool.call is not None else None,
-                "arguments": (tool.call.arguments if tool.call is not None else None) or {},
+                "tool_call_id": call.id if call else None,
+                "tool_name": call.name if call else None,
+                "arguments": (call.arguments if call else None) or {},
                 "result_text": None if failed else text or None,
-                "error": error,
+                "error": tool.error or ((text or "tool error (no message)") if failed else None),
             }
         case "task":
             step = Step.model_validate(payload)
             task = step.task_call
-            if task is None:
-                # A task step recorded without its call: the platform shows it by span name.
-                return {
-                    "kind": "scenario_setup",
-                    "name": span_name,
-                    "arguments": {},
-                    "result": None,
-                    "error": step.error,
-                }
             return {
-                "kind": "scenario_evaluate" if task.phase == "evaluate" else "scenario_setup",
-                "name": task.name,
-                "arguments": task.arguments if isinstance(task.arguments, dict) else {},
-                "result": task.result,
+                "kind": f"scenario_{task.phase if task else 'setup'}",
+                "name": task.name if task else span_name,
+                "arguments": task.arguments if task and isinstance(task.arguments, dict) else {},
+                "result": task.result if task else None,
                 "error": step.error,
             }
     return None

@@ -30,16 +30,15 @@ logger = logging.getLogger(__name__)
 
 _CODEX_SERVER_NAME = re.compile(r"[A-Za-z0-9_-]+")
 
-
-def _toml_table(values: dict[str, str]) -> str:
-    """``values`` as a TOML inline table, the form ``-c`` takes for a header map."""
-    return "{" + ",".join(f"{json.dumps(k)}={json.dumps(v)}" for k, v in values.items()) + "}"
-
-
 _MANAGED_CODEX_PATHS = {
     "linux-x64": "/usr/local/lib/agents/codex/bin/codex",
     "linux-x64-musl": "/usr/local/lib/agents/codex/bin/codex",
 }
+
+
+def _toml_table(values: dict[str, str]) -> str:
+    """``values`` as a TOML inline table, the form ``-c`` takes for a header map."""
+    return "{" + ",".join(f"{json.dumps(k)}={json.dumps(v)}" for k, v in values.items()) + "}"
 
 
 class CodexEvents:
@@ -295,12 +294,8 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
             for name, value in overrides.items():
                 args.extend(["-c", f"{name}={json.dumps(value)}"])
             if endpoint.headers:
-                args.extend(
-                    [
-                        "-c",
-                        f"model_providers.inference.http_headers={_toml_table(endpoint.headers)}",
-                    ]
-                )
+                headers = _toml_table(endpoint.headers)
+                args.extend(["-c", f"model_providers.inference.http_headers={headers}"])
 
         args.append("-")
         # Injected credentials get a throwaway CODEX_HOME; otherwise an ambient login applies.

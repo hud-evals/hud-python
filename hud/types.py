@@ -302,8 +302,9 @@ class Step(BaseModel, Generic[SourceT_co]):
     def emit(self, *, trace_id: str | None = None) -> None:
         """Export this step under ``trace_id``, else the current trace; deprecated."""
         warn_deprecated("`Step.emit`", "use `hud.telemetry.export_step(trace_id, step)`")
-        if task_run_id := trace_id or get_current_trace_id():
-            export_step(task_run_id, self)
+        trace_id = trace_id or get_current_trace_id()
+        if trace_id:
+            export_step(trace_id, self)
 
 
 TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
