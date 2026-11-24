@@ -128,11 +128,11 @@ async def test_a_graded_rollout_reports_its_reward_evaluation_and_metadata(
         0.5,
         3,
     )
-    evaluation = exited["evaluation_result"]
-    assert (evaluation["score"], evaluation["schema_version"]) == (0.5, "qa.v1")
-    assert "info" not in evaluation
-    (subscore,) = evaluation["subscores"]
-    assert (subscore["name"], subscore["value"], "info" in subscore) == ("format", 0.5, False)
+    assert exited["evaluation_result"] == {
+        "score": 0.5,
+        "schema_version": "qa.v1",
+        "subscores": [{"name": "format", "weight": 1.0, "value": 0.5, "children": None}],
+    }
 
     assert flush(timeout=10)
     (graded,) = [
@@ -162,6 +162,27 @@ async def test_a_rollout_whose_agent_raised_reports_its_error_beside_its_grade(
         1.0,
         "[agent loop] RuntimeError: agent exploded",
     )
+
+
+async def test_a_rollout_whose_grading_failed_still_reports_a_score(
+    reporting: FakeServices,
+) -> None:
+    env = Environment("ungradable")
+
+    @env.template()
+    async def check():
+        yield "go"
+        raise RuntimeError("grader exploded")
+
+    class Raises(Agent):
+        async def __call__(self, run: Run) -> None:
+            raise RuntimeError("agent exploded")
+
+    await check().run(Raises())
+
+    (exited,) = reporting.bodies("api", "POST", TRACE_EXIT)
+    evaluation = exited["evaluation_result"]
+    assert (evaluation["score"], evaluation["isError"]) == (0.0, True)
 
 
 async def test_a_rollout_that_never_launched_reports_where_it_failed(

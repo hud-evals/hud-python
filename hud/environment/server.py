@@ -165,7 +165,7 @@ class TaskRunner:
             grade = Grade.model_validate(_jsonable(evaluation), by_name=False)
         except ValidationError as exc:
             raise ValueError(f"task {self.task.id!r} graded with {grade_problems(exc)}") from exc
-        return grade.model_dump(mode="json")
+        return grade.model_dump(mode="json", exclude_unset=True)
 
     async def cancel(self) -> None:
         if self._gen is not None:

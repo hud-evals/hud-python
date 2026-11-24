@@ -47,8 +47,8 @@ subscores), and the trace records the one the environment sent (`trace.grade`). 
 | `is_error` | `bool` | Whether grading failed or never happened. |
 | `subscores` | `list[SubScore] \| None` | The breakdown, as `combine` builds it; see [Graders](/v6/reference/graders#subscore). |
 
-`grade.to_summary()` is the frame without `info` at any level, the form the platform records and
-safe to persist.
+`grade.to_summary()` is the frame's `score` and the fields the task set, without `info` at any
+level, the form the platform records and safe to persist.
 
 ## `Job`
 

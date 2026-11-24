@@ -101,8 +101,11 @@ class Grade(BaseModel):
         return self
 
     def to_summary(self) -> dict[str, Any]:
-        """The frame the platform records, without ``info`` at any level."""
-        frame = self.model_dump(mode="json", exclude={"info"})
+        """The frame the platform records: the score and the fields set, without ``info``."""
+        frame = {
+            "score": self.reward,
+            **self.model_dump(mode="json", exclude={"info"}, exclude_unset=True),
+        }
         if self.subscores is not None:
             frame["subscores"] = [subscore.to_summary() for subscore in self.subscores]
         return frame
