@@ -27,19 +27,34 @@ workspace configuration, span payloads can include:
 - serialized arguments and results from instrumented functions, plus exception messages; and
 - workspace setup and agent file diffs and final artifacts when workspace file tracking is active.
 
-Spans also include execution metadata such as step order, timings, status, and errors. Trace
-uploads require your API key and power the trace viewer.
+Spans also include execution metadata such as step order, timings, status, and errors. They
+power the trace viewer.
 
-Every run on your machine also writes its trace to `~/.hud/traces/<trace id>.jsonl`, with or
-without an API key: the same spans plus the outcome, which `hud trace get` reads. Hosted runs
-stay on the platform. A span that fails to upload is logged as a warning naming its trace.
+Spans are uploaded only when an API key is configured. With `HUD_TELEMETRY_ENABLED=0`, runs are
+also not registered on the platform; an environment HUD hosts (`HUDRuntime`) still runs. A span
+that fails to upload is logged as a warning naming its trace.
 
-- **No API key (the default):** spans are not uploaded.
-- **`HUD_TELEMETRY_ENABLED=0`:** spans are not uploaded and runs are not registered on the
-  platform. An environment HUD hosts (`HUDRuntime`) still runs.
-- **`HUD_TRACE_DIR=./traces`:** where local trace files go; empty (`HUD_TRACE_DIR=`) writes
-  none. Nothing deletes them. `HUD_TELEMETRY_LOCAL_DIR` is its earlier name.
-- CLI analytics are independent; set `HUD_CLI_ANALYTICS_ENABLED=0` to disable them.
+### Local trace files
+
+Every rollout that runs on your machine also writes its trace to a local file, with or without
+an API key:
+
+```
+~/.hud/traces/<trace id>.jsonl
+```
+
+The file holds the same spans plus the run's outcome (status, reward, error), and
+`hud trace get <trace id>` reads it. Hosted rollouts (`--runtime hosted`) run on the platform
+and write no local file. Local files are never deleted.
+
+Choose another directory, or turn local files off, with `HUD_TRACE_DIR`:
+
+```bash
+HUD_TRACE_DIR=./traces   # write local trace files here
+HUD_TRACE_DIR=           # write none
+```
+
+`HUD_TELEMETRY_LOCAL_DIR`, the setting's earlier name, still works.
 
 ## Anonymous CLI usage events
 
