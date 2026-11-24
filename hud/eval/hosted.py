@@ -121,6 +121,7 @@ async def _submit_and_await(
             f"hosted execution supports the registered agent types "
             f"({', '.join(member.value for member in AgentType)}); got {type(agent).__name__}"
         )
+    agent.check_task(task)
     spec = {"type": agent_type.value, "config": {**agent.dump(), **(task.agent_config or {})}}
     platform = PlatformClient.from_settings()
     payload: dict[str, Any] = {
@@ -141,6 +142,8 @@ async def _submit_and_await(
         runtime_config = task.runtime_config.model_dump(mode="json", exclude_unset=True)
         if runtime_config:
             payload["runtime_config"] = runtime_config
+    if task.validation is not None:
+        payload["validation"] = task.validation
     if task.verifier is not None:
         payload["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
     await platform.apost("/rollouts/submit", json=payload)

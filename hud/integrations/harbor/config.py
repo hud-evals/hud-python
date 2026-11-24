@@ -166,14 +166,6 @@ class ControllerConfig(BaseModel):
     peers: list[Peer]
 
 
-class Solution(BaseModel):
-    """A task's ``solution/solve.sh``, which the controller ships, and the env it runs with."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    env: dict[str, str]
-
-
 class TaskSpec(BaseModel):
     """One Harbor task's grading contract, bound as the ``task`` template argument."""
 
@@ -185,5 +177,3 @@ class TaskSpec(BaseModel):
     separate_verifier: bool
     collect: list[Collect]
     artifacts: list[Artifact]
-    # ``None`` for a task without ``solution/solve.sh``.
-    solution: Solution | None = None

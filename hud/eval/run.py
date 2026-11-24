@@ -192,6 +192,7 @@ class Run:
         best_effort_grade: bool = False,
         runtime_config: RuntimeConfig | None = None,
         connections: Sequence[Connection] = (),
+        validation: list[dict[str, Any]] | None = None,
     ) -> None:
         self._client = client
         self._task_id = task_id
@@ -199,6 +200,8 @@ class Run:
         self._best_effort_grade = best_effort_grade
         self.runtime_config = runtime_config
         self.connections = {connection.name: connection for connection in connections}
+        # The task's ``validation``: its reference solutions, which ``OracleAgent`` runs.
+        self.validation = validation
         self.prompt: str | list[Any] | None = None
         # Episode-scoped connection data (a slot token, a per-episode url) refining the
         # manifest's env-lifetime bindings.
@@ -451,6 +454,7 @@ async def rollout(
                     await asyncio.shield(cleanup)
 
                 scope.push_async_callback(close_actor)
+                agent.check_task(task)
                 addr = await actor.enter_async_context(runtime(task))
                 if (
                     verifier is not None
@@ -477,6 +481,7 @@ async def rollout(
                         best_effort_grade=task.verifier is not None,
                         runtime_config=addr.config or actor_runtime_config,
                         connections=bound,
+                        validation=task.validation,
                     )
                     live.trace.trace_id = trace_id
                     live.trace.runtime = addr.url

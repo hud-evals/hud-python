@@ -310,6 +310,8 @@ class PiConfig(AgentConfig):
 class OracleConfig(AgentConfig):
     model_name: str = "Oracle"
     model: str = "oracle"
+    # The name of the task's reference solution to run; ``None`` runs its first.
+    solution: str | None = Field(default=None, min_length=1)
 
 
 class NopConfig(AgentConfig):

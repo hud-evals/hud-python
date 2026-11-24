@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud import Task, Taskset
-from hud.agents import OpenAIChatAgent
-from hud.agents.types import OpenAIChatConfig
+from hud.agents import OpenAIChatAgent, OracleAgent
+from hud.agents.types import OpenAIChatConfig, OracleConfig
 from hud.runtime import HostedRuntime
 from hud.types import AgentType
 from tests.conftest import eventually
@@ -245,3 +245,30 @@ async def test_the_submission_carries_the_agents_type_and_the_users_config(
     (body,) = services.bodies("api", "POST", SUBMIT)
     assert body["agent"]["type"] == agent_type
     assert config.items() <= body["agent"]["config"].items()
+
+
+async def test_the_oracle_submits_the_tasks_solutions_with_the_row(services: FakeServices) -> None:
+    services.route("api", "POST", SUBMIT, json={"status": "queued"})
+    services.route("api", "GET", POLL, json={"status": "completed", "reward": 1.0})
+    solutions = [{"name": "reveal", "answer": "4"}, {"name": "script", "command": "true"}]
+
+    await Task(env="sums", id="add", validation=solutions).run(
+        OracleAgent(OracleConfig(solution="script")), runtime=HostedRuntime(poll_interval=0)
+    )
+
+    (body,) = services.bodies("api", "POST", SUBMIT)
+    assert (body["agent"]["type"], body["validation"]) == ("oracle", solutions)
+
+
+async def test_the_oracle_submits_nothing_for_a_task_without_a_solution(
+    services: FakeServices,
+) -> None:
+    services.route("api", "POST", SUBMIT, json={"status": "queued"})
+
+    job = await Task(env="sums", id="add").run(
+        OracleAgent(), runtime=HostedRuntime(poll_interval=0)
+    )
+
+    (trace,) = job.traces
+    assert "task 'add' has no reference solution" in (trace.error or "")
+    assert services.bodies("api", "POST", SUBMIT) == []

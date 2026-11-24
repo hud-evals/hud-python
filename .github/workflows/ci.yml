@@ -86,6 +86,12 @@ jobs:
           pytest -m "e2e and docker" --ignore tests/integrations/harbor
           -n 4 --timeout 1800 --durations 20
 
+      - name: Run Harbor reference agents
+        run: >-
+          uv run --locked --python 3.12 --all-extras
+          pytest -m "e2e and docker" tests/integrations/harbor/test_reference_agents.py
+          -n 3 --timeout 1800 --durations 20
+
   sandbox:
     name: Sandbox
     runs-on: ubuntu-latest

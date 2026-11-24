@@ -11,6 +11,7 @@ from hud.agents.types import AgentConfig
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
+    from hud.eval.task import Task
     from hud.utils.serialization import JsonObject
 
 ConfigT_co = TypeVar("ConfigT_co", bound=AgentConfig, covariant=True, default=AgentConfig)
@@ -33,6 +34,9 @@ class Agent(ABC, Generic[ConfigT_co]):
     @abstractmethod
     async def __call__(self, run: Run) -> None:
         """Fill ``run.trace`` with the trajectory and final answer."""
+
+    def check_task(self, task: Task) -> None:
+        """Raise when this agent can't run ``task``; a rollout calls it before starting the env."""
 
     def dump(self) -> JsonObject:
         return self.config.model_dump(mode="json")

@@ -1,9 +1,10 @@
 """``OracleAgent`` and ``NopAgent`` on an adapted Harbor task, run in Docker.
 
-The fixture under ``reference/oracle`` grades a pass only when its ``solution/solve.sh``
-ran as the task's agent user, in the workdir, through the agent's egress, with
-``[solution].env``, and the controller removed ``/solution`` before grading. The
-oracle must get that pass; nop, which leaves the task undone, must not.
+The adapter carries the fixture's ``solution/`` in its task row; the environment holds no
+copy. The fixture under ``reference/oracle`` grades a pass only when its
+``solution/solve.sh`` ran in the workdir, through the agent's egress, with
+``[solution].env``. The oracle must get that pass; nop, which leaves the task undone,
+must not.
 """
 
 from __future__ import annotations
@@ -64,5 +65,5 @@ async def test_the_oracle_reports_a_harbor_task_without_a_solution(
     )
 
     (trace,) = job.traces
-    assert trace.reward == 0.0
-    assert "Harbor task 'oracle' has no solution/solve.sh to run" in (trace.error or "")
+    assert (trace.reward, trace.status) == (0.0, "error")
+    assert "task 'oracle' has no reference solution" in (trace.error or "")

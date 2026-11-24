@@ -134,12 +134,18 @@ def test_eval_runs_the_tasks_it_selects(
     assert sorted(request.prompt for request in gateway.requests()) == prompts
 
 
-REFERENCE_TASKS_PY = """\
+REFERENCE_TASKS_PY = r"""
+import tempfile
+from pathlib import Path
+
 from pydantic import BaseModel
 
 from hud import Environment
 
+ROOT = Path(tempfile.mkdtemp(prefix="hud-reference-"))
+
 env = Environment("demo")
+env.workspace(ROOT, guest_path=str(ROOT))
 
 
 class Pair(BaseModel):
@@ -153,20 +159,17 @@ async def guess(secret: str):
     yield 1.0 if answer == secret else 0.0
 
 
-@guess.solution
-async def reveal(secret: str) -> str:
-    return secret
-
-
 @env.template(id="split", returns=Pair)
 async def split(total: int):
     answer = yield f"Split {total} into two halves."
     yield 1.0 if answer.content == Pair(left=total // 2, right=total - total // 2) else 0.0
 
 
-@split.solution
-async def halve(total: int) -> Pair:
-    return Pair(left=total // 2, right=total - total // 2)
+@env.template(id="write")
+async def write(word: str):
+    yield f"Write {word} to result.txt."
+    result = ROOT / "result.txt"
+    yield 1.0 if result.is_file() and result.read_text() == word + "\n" else 0.0
 
 
 @env.template(id="greet")
@@ -175,36 +178,70 @@ async def greet():
     yield 1.0 if answer else 0.0
 
 
-tasks = [guess(secret="hunter2"), split(total=7), greet()]
+def solved(task, *solutions):
+    task.validation = list(solutions)
+    return task
+
+
+SOLVE_SH = '#!/bin/sh\nprintf "%s\\n" "$WORD" > result.txt\n'
+
+tasks = [
+    solved(guess(secret="hunter2"), {"name": "reveal", "answer": "hunter2"}),
+    solved(split(total=7), {"name": "halve", "answer": {"left": 3, "right": 4}}),
+    solved(
+        write(word="solved"),
+        {
+            "name": "script",
+            "root": ".solution",
+            "files": [{"path": "solve.sh", "content": SOLVE_SH, "executable": True}],
+            "command": "./.solution/solve.sh",
+            "env": {"WORD": "${REFERENCE_WORD:-solved}"},
+        },
+        {"name": "untouched", "command": "true"},
+    ),
+    greet(),
+]
 """
 
 
 @pytest.mark.parametrize(
-    ("agent", "task_ids", "rewards"),
+    ("agent", "rewards"),
     [
-        pytest.param("oracle", "0,1", [1.0, 1.0], id="the-oracle-passes-with-the-solution"),
-        pytest.param("nop", "0,1", [0.0, 0.0], id="nop-fails-without-an-answer"),
+        pytest.param("oracle", [1.0, 1.0, 1.0], id="the-oracle-passes-with-each-first-solution"),
+        pytest.param("nop", [0.0, 0.0, 0.0], id="nop-fails-without-an-answer"),
     ],
 )
 def test_reference_agents_grade_a_task_without_a_model(
-    hud: Hud, agent: str, task_ids: str, rewards: list[float]
+    hud: Hud, agent: str, rewards: list[float]
 ) -> None:
     (hud.cwd / "tasks.py").write_text(REFERENCE_TASKS_PY)
 
-    document = run(hud, "tasks.py", agent, "--task-ids", task_ids)
+    document = run(hud, "tasks.py", agent, "--task-ids", "0,1,2")
 
     assert [run["reward"] for run in document["runs"]] == rewards
+    assert document["error_count"] == 0
+
+
+def test_the_oracle_runs_the_solution_it_is_given_by_name(hud: Hud) -> None:
+    (hud.cwd / "tasks.py").write_text(REFERENCE_TASKS_PY)
+
+    document = run(hud, "tasks.py", "oracle", "--task-ids", "2", "--config", "solution=untouched")
+
+    assert [run["reward"] for run in document["runs"]] == [0.0]
     assert document["error_count"] == 0
 
 
 def test_the_oracle_reports_a_task_without_a_reference_solution(hud: Hud) -> None:
     (hud.cwd / "tasks.py").write_text(REFERENCE_TASKS_PY)
 
-    document = run(hud, "tasks.py", "oracle", "--task-ids", "2")
+    result = hud("eval", "tasks.py", "oracle", "--task-ids", "3", "--yes", "--json")
 
-    (failed,) = document["runs"]
-    assert (failed["reward"], failed["is_error"]) == (0.0, False)
-    assert "task 'greet' has no reference solution" in failed["trace_error"]
+    assert result.exit_code == 1, result
+    (failed,) = result.json["runs"]
+    assert failed["is_error"] is True
+    assert failed["trace_error"].startswith(
+        "[provisioning] ValueError: task 'greet' has no reference solution"
+    )
 
 
 GLM = {

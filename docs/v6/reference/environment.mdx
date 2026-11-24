@@ -53,27 +53,6 @@ The `@env.template()` decorator takes optional arguments:
 | `input` | `Any` | Optional type for the agent's input (JSON schema in the manifest). |
 | `returns` | `Any` | Optional type the agent must produce; the answer arrives as an `Answer[T]`. See [Types](/v6/reference/types). |
 
-### Reference solutions
-
-`@template.solution` registers a task's reference solution: an async function taking the template's
-arguments that does the task in the environment and returns the answer to grade. It runs between setup
-and grading, in an agent's place, when [`OracleAgent`](/v6/reference/agents#reference-agents) drives
-the run; other agents never see it.
-
-```python
-@env.template()
-async def guess(secret: str):
-    answer = yield "Guess the secret."
-    yield 1.0 if answer == secret else 0.0
-
-
-@guess.solution
-async def reveal(secret: str) -> str:
-    return secret
-```
-
-For a template with `returns=`, the solution returns a value of that type.
-
 Grading and collecting tasks into tasksets are their own topics: see [graders](/v6/reference/graders)
 and [Tasks & Tasksets](/v6/reference/tasks).
 
