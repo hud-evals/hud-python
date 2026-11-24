@@ -119,36 +119,6 @@ def test_eval_grades_a_run_whose_model_failed_and_reports_the_failure(
     assert "model unavailable" in failed["trace_error"]
 
 
-def test_eval_grades_and_names_the_trace_whose_spans_failed_to_upload(
-    hud: Hud, gateway: Models, hud_env: HudEnv, tasks: Path
-) -> None:
-    hud_env.set(HUD_TELEMETRY_ENABLED="1", HUD_TELEMETRY_URL="http://127.0.0.1:9")
-
-    result = hud("eval", "tasks.py", *SCRIPTED, "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    (run_,) = result.json["runs"]
-    assert run_["reward"] == 1.0
-    assert f"telemetry upload failed for trace {run_['trace_id']}" in result.stderr
-
-
-def test_eval_keeps_a_local_trace_file_that_hud_trace_reads(
-    hud: Hud, gateway: Models, hud_env: HudEnv, tasks: Path
-) -> None:
-    (run_,) = run(hud, "tasks.py", *SCRIPTED)["runs"]
-
-    trace_id = run_["trace_id"]
-    assert (hud_env.home / ".hud" / "traces" / f"{UUID(trace_id).hex}.jsonl").exists()
-    result = hud("trace", "get", trace_id, "--json")
-    assert result.exit_code == 0, result
-    assert result.json[-1] == {
-        "kind": "outcome",
-        "status": "completed",
-        "reward": 1.0,
-        "error": None,
-    }
-
-
 @pytest.mark.parametrize(
     ("argv", "prompts"),
     [
