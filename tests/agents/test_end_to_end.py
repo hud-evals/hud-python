@@ -3,8 +3,8 @@ the HUD gateway. A reward of 1 proves the prompt reached the model, its tool cal
 the environment, and the grade came from the right task.
 
 The families are ``AgentType``'s members; a fixture is any module in
-``tests/fixtures/envs`` that declares the ``tasks`` it runs. A family added without a model
-here fails at collection.
+``tests/fixtures/envs`` that declares the ``tasks`` it runs. Each family runs its default
+model, so this lane is what proves the defaults work.
 """
 
 from __future__ import annotations
@@ -22,16 +22,6 @@ from tests.fixtures.envs import HERE, source
 if TYPE_CHECKING:
     from tests.conftest import HudEnv
 
-MODELS = {
-    AgentType.CLAUDE: "claude-haiku-5-5",
-    AgentType.OPENAI: "gpt-6-luna",
-    AgentType.GEMINI: "gemini-3.8-flash",
-    AgentType.OPENAI_COMPATIBLE: "grok-4.6",
-    AgentType.CLAUDE_CLI: "claude-haiku-5-5",
-    AgentType.CODEX_CLI: "gpt-6-luna",
-    AgentType.PI: "deepseek/deepseek-v4.1-flash",
-}
-
 FIXTURES = sorted(
     path.stem
     for path in HERE.glob("*.py")
@@ -48,7 +38,6 @@ GATEWAY_DOWN = pytest.mark.skip(reason="the HUD gateway does not serve Gemini's 
 CELLS = [
     pytest.param(
         kind,
-        MODELS[kind],
         fixture,
         id=f"{kind}-{fixture}",
         marks=GATEWAY_DOWN if kind is AgentType.GEMINI else (),
@@ -60,12 +49,12 @@ CELLS = [
 
 @pytest.mark.e2e
 @pytest.mark.live
-@pytest.mark.parametrize(("kind", "model", "fixture"), CELLS)
+@pytest.mark.parametrize(("kind", "fixture"), CELLS)
 async def test_a_real_model_takes_each_fixture_to_its_reward(
-    kind: AgentType, model: str, fixture: str, live: HudEnv
+    kind: AgentType, fixture: str, live: HudEnv
 ) -> None:
     path = source(fixture)
-    agent = kind.cls(kind.config_cls(model=model))
+    agent = kind.cls()
 
     job = await Taskset.from_file(path).run(agent, runtime=LocalRuntime(path))
 
