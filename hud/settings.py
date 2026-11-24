@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import DotEnvSettingsSource, PydanticBaseSettingsSource
 
@@ -132,9 +132,9 @@ class Settings(BaseSettings):
         validation_alias="HUD_CLI_ANALYTICS_ENABLED",
     )
 
-    trace_dir: str | None = Field(
-        default=None,
-        description="Directory for local trace files; unset is ~/.hud/traces, empty writes none.",
+    trace_dir: Path | None = Field(
+        default_factory=lambda: Path.home() / ".hud" / "traces",
+        description="Directory for local trace files; empty writes none.",
         validation_alias=AliasChoices("HUD_TRACE_DIR", "HUD_TELEMETRY_LOCAL_DIR"),
     )
 
@@ -153,17 +153,15 @@ class Settings(BaseSettings):
         validation_alias="HUD_FILE_TRACKING_INTERVAL",
     )
 
+    @field_validator("trace_dir", mode="before")
+    @classmethod
+    def _empty_trace_dir_is_off(cls, value: object) -> object:
+        return None if value == "" else value
+
     @property
     def reporting_enabled(self) -> bool:
         """Whether runs and spans reach the platform: telemetry is on and an API key is set."""
         return bool(self.telemetry_enabled and self.api_key)
-
-    @property
-    def local_trace_dir(self) -> Path | None:
-        """Where local trace files go, or ``None`` when they are off."""
-        if self.trace_dir is None:
-            return Path.home() / ".hud" / "traces"
-        return Path(self.trace_dir) if self.trace_dir else None
 
 
 settings = Settings()

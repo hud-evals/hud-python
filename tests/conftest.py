@@ -260,7 +260,7 @@ def spans(trace_id: str | None, span_dir: Path | None = None) -> list[dict[str, 
     """
     if trace_id is None:
         raise ValueError("the run has no trace id, so it exported no spans")
-    directory = span_dir or settings.local_trace_dir
+    directory = span_dir or settings.trace_dir
     if directory is None:
         return []
     path = directory / f"{uuid.UUID(trace_id).hex}.jsonl"

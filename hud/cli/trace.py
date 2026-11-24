@@ -75,7 +75,7 @@ def get_command(
         hud trace get <trace-id> --json[/not dim]
     """
     otel_id = normalize_trace_id(trace_id)
-    local = settings.local_trace_dir / f"{otel_id}.jsonl" if settings.local_trace_dir else None
+    local = settings.trace_dir / f"{otel_id}.jsonl" if settings.trace_dir else None
 
     events: list[dict[str, Any]]
     if local is not None and local.exists():

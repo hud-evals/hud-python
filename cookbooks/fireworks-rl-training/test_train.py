@@ -33,7 +33,7 @@ from train import (
 def isolate_hud(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "telemetry_enabled", False)
     monkeypatch.setattr(settings, "api_key", None)
-    monkeypatch.setattr(settings, "trace_dir", "")
+    monkeypatch.setattr(settings, "trace_dir", None)
 
 
 @pytest.fixture

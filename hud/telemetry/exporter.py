@@ -60,7 +60,7 @@ def write_local(span: Span) -> None:
 
     A directory that can't be written is warned about once and doesn't fail the run.
     """
-    directory = settings.local_trace_dir
+    directory = settings.trace_dir
     if directory is None:
         return
     try:

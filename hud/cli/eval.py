@@ -551,8 +551,8 @@ def eval_command(
             hud_console.print(
                 f"  [dim]Failed mid-run, graded:[/dim] [yellow]{failed_mid_run}[/yellow]"
             )
-        if not isinstance(placement, HostedRuntime) and settings.local_trace_dir is not None:
-            hud_console.print(f"  [dim]Local traces:[/dim] {settings.local_trace_dir}")
+        if not isinstance(placement, HostedRuntime) and settings.trace_dir is not None:
+            hud_console.print(f"  [dim]Local traces:[/dim] {settings.trace_dir}")
         if len(job.traces) <= 50:
             details = Table(title="Details", show_header=True, header_style="bold")
             details.add_column("#", style="dim", justify="right", width=4)

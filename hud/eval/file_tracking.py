@@ -96,7 +96,7 @@ async def file_tracking_observer(client: HudClient, trace_id: str) -> AsyncGener
     binds ``filetracking``; the binding alone opts in, whatever ``HUD_FILE_TRACKING_ENABLED``
     says. A failed tracking setup logs a warning and the block runs untracked.
     """
-    if settings.local_trace_dir is None and not settings.reporting_enabled:
+    if settings.trace_dir is None and not settings.reporting_enabled:
         yield
         return
     try:
