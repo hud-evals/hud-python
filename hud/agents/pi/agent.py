@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from hud.agents.cli import WINDOWS_SHELLS, CLIAgent, model_endpoint, resolve_executable, run_jsonl
 from hud.agents.computer import mcp as computer_mcp
 from hud.agents.types import AgentStep, PiConfig, ToolStep, Usage
+from hud.telemetry.context import get_trace_headers
 from hud.types import ContentBlock, ImageContent, Step, TextContent, ToolCall, ToolResult
 from hud.utils.time import now_iso
 
@@ -233,12 +234,13 @@ class PiAgent(CLIAgent[PiConfig]):
                             f"MCP server {name!r} uses transport {cap.params.get('transport')!r}; "
                             "pi reaches only streamable-HTTP MCP servers"
                         )
-                    server: dict[str, Any] = {"url": cap.url}
+                    headers = get_trace_headers()
                     if token := cap.params.get("auth_token"):
                         # Pi expands the variable, so the token stays out of the config file.
                         variable = f"HUD_MCP_TOKEN_{len(mcp_servers)}"
                         env[variable] = token
-                        server["headers"] = {"Authorization": f"Bearer ${{{variable}}}"}
+                        headers["Authorization"] = f"Bearer ${{{variable}}}"
+                    server: dict[str, Any] = {"url": cap.url, "headers": headers}
                 elif family == "rfb":
                     name = "computer-use" if screens == 1 else f"computer-use-{cap.name}"
                     server = await bridges.enter_async_context(

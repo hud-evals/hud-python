@@ -29,7 +29,7 @@ SCHEMA = "hud.filetracking.v1"
 def tracking_often(hud_env: HudEnv, tmp_path: Path) -> None:
     hud_env.set(
         HUD_TELEMETRY_ENABLED="1",
-        HUD_TELEMETRY_LOCAL_DIR=str(tmp_path / "spans"),
+        HUD_TRACE_DIR=str(tmp_path / "spans"),
         HUD_FILE_TRACKING_INTERVAL="0.05",
     )
 

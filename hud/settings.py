@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import DotEnvSettingsSource, PydanticBaseSettingsSource
 
@@ -122,7 +122,7 @@ class Settings(BaseSettings):
 
     telemetry_enabled: bool = Field(
         default=True,
-        description="Enable telemetry for the HUD SDK",
+        description="Upload runs and their traces to the HUD platform",
         validation_alias="HUD_TELEMETRY_ENABLED",
     )
 
@@ -132,12 +132,10 @@ class Settings(BaseSettings):
         validation_alias="HUD_CLI_ANALYTICS_ENABLED",
     )
 
-    telemetry_local_dir: str | None = Field(
-        default=None,
-        description="If set, also write each telemetry span to <dir>/<trace_id>.jsonl "
-        "locally. Independent of the backend exporter — works with no API key. "
-        "When unset and telemetry is disabled, spans go to ~/.hud/spans.",
-        validation_alias="HUD_TELEMETRY_LOCAL_DIR",
+    trace_dir: Path | None = Field(
+        default_factory=lambda: Path.home() / ".hud" / "traces",
+        description="Directory for local trace files; empty writes none.",
+        validation_alias=AliasChoices("HUD_TRACE_DIR", "HUD_TELEMETRY_LOCAL_DIR"),
     )
 
     file_tracking_enabled: bool = Field(
@@ -155,18 +153,15 @@ class Settings(BaseSettings):
         validation_alias="HUD_FILE_TRACKING_INTERVAL",
     )
 
+    @field_validator("trace_dir", mode="before")
+    @classmethod
+    def _empty_trace_dir_is_off(cls, value: object) -> object:
+        return None if value == "" else value
+
     @property
     def reporting_enabled(self) -> bool:
         """Whether runs and spans reach the platform: telemetry is on and an API key is set."""
         return bool(self.telemetry_enabled and self.api_key)
-
-    @property
-    def span_dir(self) -> str | None:
-        if self.telemetry_local_dir:
-            return self.telemetry_local_dir
-        if not self.telemetry_enabled:
-            return str(Path.home() / ".hud" / "spans")
-        return None
 
 
 settings = Settings()

@@ -38,8 +38,9 @@ EVENTS: list[dict[str, Any]] = [
 
 @pytest.fixture
 def events(signed_in: FakeServices) -> None:
-    signed_in.route("api", "GET", f"/v2/trace/{COMPACT_TRACE_ID}/events", json={"events": EVENTS})
-    signed_in.route("api", "GET", f"/v2/trace/{TRACE_ID}/events", json={"events": EVENTS})
+    trace = {"events": EVENTS, "status": "completed", "reward": 0.5}
+    signed_in.route("api", "GET", f"/v2/trace/{COMPACT_TRACE_ID}/events", json=trace)
+    signed_in.route("api", "GET", f"/v2/trace/{TRACE_ID}/events", json=trace)
 
 
 def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: None) -> None:
@@ -59,7 +60,7 @@ async def write_a_report(
     rollout and of ``hud``, so rendered paths stay short.
     """
     monkeypatch.chdir(tmp_path)
-    hud_env.set(HUD_TELEMETRY_LOCAL_DIR="spans")
+    hud_env.set(HUD_TRACE_DIR="spans")
     workspace = tmp_path / "workspace"
     report = workspace / "REPORT.md"
     env = Environment("report")
@@ -95,14 +96,23 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
     result = hud("trace", "get", trace_id, "--json", cwd=tmp_path)
 
     assert result.exit_code == 0, result
-    assert [(event["kind"], event.get("tool_name")) for event in result.json] == [
-        ("agent_message", None),
-        ("tool_call", "write"),
-        ("agent_message", None),
+    setup, prompt, call_write, written, answer, graded, outcome = result.json
+    assert [event["kind"] for event in result.json] == [
+        "scenario_setup",
+        "user_message",
+        "agent_message",
+        "tool_call",
+        "agent_message",
+        "scenario_evaluate",
+        "outcome",
     ]
-    assert result.json[1]["arguments"] == {"filePath": "REPORT.md", "content": "PASS"}
-    assert "4 bytes" in result.json[1]["result_text"]
-    assert result.json[2]["text"] == "Wrote it."
+    assert prompt["text"] == "Write PASS to REPORT.md."
+    assert call_write["tool_calls"][0]["name"] == written["tool_name"] == "write"
+    assert written["arguments"] == {"filePath": "REPORT.md", "content": "PASS"}
+    assert "4 bytes" in written["result_text"]
+    assert answer["text"] == "Wrote it."
+    assert (setup["name"], graded["name"]) == ("write_report", "write_report")
+    assert (outcome["status"], outcome["reward"]) == ("completed", 1.0)
 
 
 async def test_a_local_trace_renders_despite_a_record_cut_short(

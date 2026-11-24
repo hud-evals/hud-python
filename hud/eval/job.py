@@ -1,4 +1,4 @@
-"""Jobs and their platform reporting, a no-op without telemetry and an API key."""
+"""Jobs, each trace's root span, and their platform reporting."""
 
 from __future__ import annotations
 
@@ -10,10 +10,13 @@ from typing import TYPE_CHECKING, Any
 
 from hud.graders.base import Grade
 from hud.settings import settings
+from hud.telemetry.exporter import export
+from hud.telemetry.span import TRACE_SCHEMA
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
     from hud.types import Trace
+    from hud.utils.serialization import JsonObject
 
 logger = logging.getLogger("hud.eval.job")
 
@@ -90,21 +93,39 @@ async def trace_enter(
     )
 
 
-async def trace_exit(trace: Trace) -> None:
-    if not settings.reporting_enabled or trace.trace_id is None:
-        return
-    await _report(
-        f"/trace/{trace.trace_id}/exit",
-        {
-            "status": trace.status or "completed",
-            "reward": trace.reward,
-            # A step error the agent recovered from isn't a trace error.
-            "error": trace.error if trace.is_error else None,
-            "evaluation_result": (None if trace.grade == Grade.ungraded() else trace.evaluation),
-            "stop_reason": trace.stop_reason,
-            "metadata": trace.extra or None,
-        },
+async def trace_exit(
+    trace: Trace, *, model: str | None, parent_trace_id: str | None, started_at: str
+) -> None:
+    """Export the trace's root span and report the trace's end to the platform."""
+    assert trace.trace_id is not None
+    # A step error the agent recovered from isn't a trace error.
+    error = trace.error if trace.is_error else None
+    outcome: JsonObject = {
+        "status": trace.status or "completed",
+        "reward": trace.reward,
+        "error": error,
+        "evaluation_result": (None if trace.grade == Grade.ungraded() else trace.evaluation),
+        "stop_reason": trace.stop_reason,
+        "metadata": trace.extra or None,
+    }
+    root: JsonObject = {
+        "job_id": trace.job_id,
+        "group_id": trace.group_id,
+        "task_slug": trace.slug,
+        "model": model,
+        "parent_trace_id": parent_trace_id,
+        **outcome,
+    }
+    export(
+        trace.trace_id,
+        name="trace",
+        schema=TRACE_SCHEMA,
+        payload=root,
+        started_at=started_at,
+        error=error,
     )
+    if settings.reporting_enabled:
+        await _report(f"/trace/{trace.trace_id}/exit", outcome)
 
 
 async def _report(path: str, payload: dict[str, Any]) -> None:

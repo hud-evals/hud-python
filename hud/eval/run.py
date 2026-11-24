@@ -14,12 +14,17 @@ from pydantic import ValidationError
 from hud.agents.cli import CLIAgent
 from hud.agents.types import AgentConfig
 from hud.capabilities.connection import Connection
-from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients.client import HudProtocolError, connect
 from hud.graders.base import Grade, grade_problems
 from hud.runtime.core import resolve_runtime_config
 from hud.settings import settings
-from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
+from hud.telemetry.context import (
+    get_current_trace_id,
+    get_mcp_trace_id,
+    get_trace_headers,
+    set_trace_context,
+)
+from hud.telemetry.exporter import export
 from hud.telemetry.span import normalize_trace_id
 from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
 from hud.utils.gateway import routes_to_gateway
@@ -36,6 +41,7 @@ if TYPE_CHECKING:
     from hud.clients.client import HudClient
     from hud.environment.egress import WorkspaceRoute
     from hud.runtime.core import Provider, RuntimeConfig
+    from hud.utils.serialization import JsonObject
 
     from .task import Task
 
@@ -162,6 +168,19 @@ def parse_grade(frame: dict[str, Any]) -> Grade:
         raise HudProtocolError(-32603, f"tasks.grade: {grade_problems(exc)}") from exc
 
 
+def export_step(trace_id: str, step: Step[Any]) -> None:
+    """Export ``step`` as a span of the trace ``trace_id``, for steps recorded outside a run."""
+    export(
+        trace_id,
+        name=f"step.{step.source}",
+        schema=step.schema_tag,
+        payload=cast("JsonObject", step.model_dump(mode="json", exclude_none=True)),
+        started_at=step.started_at,
+        ended_at=step.ended_at,
+        error=step.error,
+    )
+
+
 class Run:
     """The live handle an agent drives for one task; its ``trace`` is graded on exit."""
 
@@ -209,7 +228,13 @@ class Run:
         return self.trace.prompt_text or ""
 
     def record(self, step: Step) -> None:
+        """Append ``step`` to the trace and export it under the trace's id.
+
+        A run built without ``rollout`` has no trace id and records in memory only.
+        """
         self.trace.record(step)
+        if self.trace.trace_id is not None:
+            export_step(self.trace.trace_id, step)
 
     async def __aenter__(self) -> Self:
         started_at = now_iso()
@@ -394,6 +419,7 @@ async def rollout(
     parent_trace_id = parent.hex if parent is not None else None
     config = getattr(agent, "config", None)
     agent_model = config.model if isinstance(config, AgentConfig) else None
+    started_at = now_iso()
     with set_trace_context(trace_id, parent_trace_id=parent_trace_id):
         await trace_enter(
             trace_id,
@@ -454,13 +480,14 @@ async def rollout(
                         runtime_config=addr.config or actor_runtime_config,
                         connections=bound,
                     )
+                    live.trace.trace_id = trace_id
                     live.trace.runtime = addr.url
                     async with live:
                         run = live  # set once live; earlier failures yield Trace.failed
                         _phase = "agent loop"
                         try:
                             try:
-                                async with file_tracking_observer(actor_client):
+                                async with file_tracking_observer(actor_client, trace_id):
                                     if agent_timeout is None:
                                         await agent(run)
                                     else:
@@ -589,12 +616,15 @@ async def rollout(
         trace.job_id = job_id
         trace.group_id = group_id
         trace.slug = task.slug
+        exit_trace = trace_exit(
+            trace, model=agent_model, parent_trace_id=parent_trace_id, started_at=started_at
+        )
         if cancellation is not None:
             # The platform still closes the trace; a hung report must not hold the cancel.
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(trace_exit(trace), timeout=5.0)
+                await asyncio.wait_for(exit_trace, timeout=5.0)
             raise cancellation
-        await trace_exit(trace)
+        await exit_trace
     return trace
 
 

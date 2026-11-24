@@ -19,6 +19,8 @@ SCHEMA_ATTRIBUTE = "hud.schema"
 PAYLOAD_ATTRIBUTE = "hud.payload"
 # Attribute carrying the task-run id the exporter groups uploads by.
 TASK_RUN_ID_ATTRIBUTE = "hud.task_run_id"
+# Schema of a trace's root span: who ran it and how it ended.
+TRACE_SCHEMA = "hud.trace.v1"
 
 
 class SpanEvent(BaseModel):

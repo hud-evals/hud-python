@@ -7,20 +7,11 @@ import contextlib
 import json
 import logging
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, Literal, Self, TypeAlias
+from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import urlsplit
 
 from hud.settings import settings
-from hud.telemetry.context import get_current_trace_id
-from hud.telemetry.exporter import queue_span
-from hud.telemetry.span import (
-    PAYLOAD_ATTRIBUTE,
-    SCHEMA_ATTRIBUTE,
-    TASK_RUN_ID_ATTRIBUTE,
-    Span,
-    new_span_id,
-    normalize_trace_id,
-)
+from hud.telemetry.exporter import export
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
@@ -35,12 +26,6 @@ _DRAIN_TIMEOUT = 10.0
 # flush can carry a 50 MiB diff plus base64 capture and JSON escaping overhead.
 _FRAME_LIMIT_BYTES = 160 * 1024 * 1024
 _FILETRACKING_SCHEMA = "hud.filetracking.v1"
-_FileTrackingSpanName: TypeAlias = Literal[
-    "filetracking.capture",
-    "filetracking.diff",
-    "filetracking.setup",
-    "filetracking.snapshot",
-]
 
 
 class FileTrackingClient:
@@ -97,14 +82,14 @@ class FileTrackingClient:
 
 
 @asynccontextmanager
-async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
-    """Stream workspace diffs and final artifacts as spans during the block.
+async def file_tracking_observer(client: HudClient, trace_id: str) -> AsyncGenerator[None]:
+    """Stream workspace diffs and final artifacts as spans of ``trace_id`` during the block.
 
-    A no-op unless telemetry is on and the env binds ``filetracking``; the binding
-    alone opts in, whatever ``HUD_FILE_TRACKING_ENABLED`` says. A failed tracking
-    setup logs a warning and the block runs untracked.
+    A no-op unless the trace is recorded somewhere (a local file or an upload) and the env
+    binds ``filetracking``; the binding alone opts in, whatever ``HUD_FILE_TRACKING_ENABLED``
+    says. A failed tracking setup logs a warning and the block runs untracked.
     """
-    if not settings.telemetry_enabled:
+    if settings.trace_dir is None and not settings.reporting_enabled:
         yield
         return
     try:
@@ -120,17 +105,12 @@ async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
         ft = await FileTrackingClient.connect(cap)
         if cap.params.get("setup_diff") is True:
             setup = await ft.call("setup")
-            _emit_file_tracking(
-                "filetracking.setup",
-                setup,
-                started_at=now_iso(),
-            )
+            export(trace_id, name="filetracking.setup", schema=_FILETRACKING_SCHEMA, payload=setup)
         else:
             await ft.call("advance")
-        _emit_file_tracking(
-            "filetracking.snapshot",
-            await ft.call("snapshot"),
-            started_at=now_iso(),
+        snapshot = await ft.call("snapshot")
+        export(
+            trace_id, name="filetracking.snapshot", schema=_FILETRACKING_SCHEMA, payload=snapshot
         )
     except Exception as exc:
         if ft is not None:
@@ -155,7 +135,13 @@ async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
                 logger.debug("file tracking diff failed: %s", exc)
                 continue
             if diff.get("files_changed"):
-                _emit_file_tracking("filetracking.diff", diff, started_at=started_at)
+                export(
+                    trace_id,
+                    name="filetracking.diff",
+                    schema=_FILETRACKING_SCHEMA,
+                    payload=diff,
+                    started_at=started_at,
+                )
 
     task = asyncio.create_task(poll_diffs())
     try:
@@ -180,7 +166,13 @@ async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
             started_at = now_iso()
             diff = flush.get("diff")
             if isinstance(diff, dict) and diff.get("files_changed"):
-                _emit_file_tracking("filetracking.diff", diff, started_at=started_at)
+                export(
+                    trace_id,
+                    name="filetracking.diff",
+                    schema=_FILETRACKING_SCHEMA,
+                    payload=diff,
+                    started_at=started_at,
+                )
 
             capture = flush.get("capture")
             if isinstance(capture, dict) and (
@@ -189,33 +181,12 @@ async def file_tracking_observer(client: HudClient) -> AsyncGenerator[None]:
                 or capture.get("files_eligible")
                 or capture.get("truncated")
             ):
-                _emit_file_tracking("filetracking.capture", capture, started_at=started_at)
+                export(
+                    trace_id,
+                    name="filetracking.capture",
+                    schema=_FILETRACKING_SCHEMA,
+                    payload=capture,
+                    started_at=started_at,
+                )
         with contextlib.suppress(Exception):
             await ft.close()
-
-
-def _emit_file_tracking(
-    span_name: _FileTrackingSpanName,
-    payload: dict[str, Any],
-    *,
-    started_at: str,
-    ended_at: str | None = None,
-) -> bool:
-    task_run_id = get_current_trace_id()
-    if task_run_id is None:
-        return False
-    span = Span(
-        name=span_name,
-        trace_id=normalize_trace_id(task_run_id),
-        span_id=new_span_id(),
-        start_time=started_at,
-        end_time=ended_at or now_iso(),
-        status_code="OK",
-        attributes={
-            SCHEMA_ATTRIBUTE: _FILETRACKING_SCHEMA,
-            TASK_RUN_ID_ATTRIBUTE: task_run_id,
-            PAYLOAD_ATTRIBUTE: payload,
-        },
-    )
-    queue_span(span.model_dump(mode="json"))
-    return True
