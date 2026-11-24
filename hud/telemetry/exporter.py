@@ -14,7 +14,14 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx2
 
 from hud.settings import settings
-from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE, Span, record_span
+from hud.telemetry.span import (
+    PAYLOAD_ATTRIBUTE,
+    SCHEMA_ATTRIBUTE,
+    TASK_RUN_ID_ATTRIBUTE,
+    Span,
+    new_span_id,
+    normalize_trace_id,
+)
 from hud.utils.requests import make_request_sync
 from hud.utils.time import now_iso
 
@@ -55,7 +62,62 @@ _local_lock = threading.Lock()
 _unwritable: set[Path] = set()
 
 
-def write_local(span: Span) -> None:
+def export(
+    trace_id: str,
+    *,
+    name: str,
+    schema: str,
+    payload: JsonObject,
+    started_at: str | None = None,
+    ended_at: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Export one schema-tagged record of the trace ``trace_id``; times default to now."""
+    now = now_iso()
+    export_span(
+        Span(
+            name=name,
+            trace_id=normalize_trace_id(trace_id),
+            span_id=new_span_id(),
+            start_time=started_at or now,
+            end_time=ended_at or now,
+            status_code="ERROR" if error else "OK",
+            status_message=error,
+            attributes={
+                SCHEMA_ATTRIBUTE: schema,
+                TASK_RUN_ID_ATTRIBUTE: trace_id,
+                PAYLOAD_ATTRIBUTE: payload,
+            },
+        )
+    )
+
+
+def export_step(trace_id: str, step: Step[Any]) -> None:
+    """Export ``step`` as one span of the trace ``trace_id``."""
+    export(
+        trace_id,
+        name=f"step.{step.source}",
+        schema=step.schema_tag,
+        payload=cast("JsonObject", step.model_dump(mode="json", exclude_none=True)),
+        started_at=step.started_at,
+        ended_at=step.ended_at,
+        error=step.error,
+    )
+
+
+def export_span(span: Span) -> None:
+    """Write a built ``span`` to its local trace file and queue it for the HUD platform.
+
+    The upload needs telemetry on and an API key.
+    """
+    _write_local(span)
+    if not settings.reporting_enabled:
+        return
+    _ensure_worker()
+    _queue.put(span.model_dump(mode="json"))
+
+
+def _write_local(span: Span) -> None:
     """Append ``span`` to its trace's local file, when local trace files are on.
 
     A directory that can't be written is warned about once and doesn't fail the run.
@@ -74,34 +136,6 @@ def write_local(span: Span) -> None:
             _unwritable.add(directory)
         if first:
             logger.warning("local trace files can't be written to %s: %s", directory, exc)
-
-
-def export_span(span: Span) -> None:
-    """Write ``span`` to its local trace file and queue it for the HUD platform.
-
-    The upload needs telemetry on and an API key.
-    """
-    write_local(span)
-    if not settings.reporting_enabled:
-        return
-    _ensure_worker()
-    _queue.put(span.model_dump(mode="json"))
-
-
-def export_step(trace_id: str, step: Step[Any]) -> None:
-    """Export ``step`` as one span of the trace ``trace_id``."""
-    now = now_iso()
-    export_span(
-        record_span(
-            trace_id,
-            name=f"step.{step.source}",
-            schema=step.schema_tag,
-            payload=cast("JsonObject", step.model_dump(mode="json", exclude_none=True)),
-            started_at=step.started_at or now,
-            ended_at=step.ended_at or now,
-            error=step.error,
-        )
-    )
 
 
 def flush(timeout: float = 10.0) -> bool:

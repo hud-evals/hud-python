@@ -162,7 +162,7 @@ def _local_events(path: Path) -> list[dict[str, Any]]:
         if not isinstance(payload, dict):
             continue
         schema = attrs.get(SCHEMA_ATTRIBUTE)
-        if schema == TRACE_SCHEMA and span.get("name") == "trace.exit":
+        if schema == TRACE_SCHEMA:
             outcome = {
                 "kind": "outcome",
                 "status": payload.get("status"),

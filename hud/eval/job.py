@@ -1,4 +1,4 @@
-"""Jobs, and the trace records written locally and reported to the platform."""
+"""Jobs, each trace's root span, and their platform reporting."""
 
 from __future__ import annotations
 
@@ -6,14 +6,13 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from hud.graders.base import Grade
 from hud.settings import settings
-from hud.telemetry.exporter import write_local
-from hud.telemetry.span import TRACE_SCHEMA, record_span
+from hud.telemetry.exporter import export
+from hud.telemetry.span import TRACE_SCHEMA
 from hud.utils.platform import PlatformClient
-from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.types import Trace
@@ -80,9 +79,10 @@ async def trace_enter(
     model: str | None = None,
     parent_trace_id: str | None = None,
 ) -> None:
-    await _record(
-        trace_id,
-        "enter",
+    if not settings.reporting_enabled:
+        return
+    await _report(
+        f"/trace/{trace_id}/enter",
         {
             "job_id": job_id,
             "group_id": group_id,
@@ -93,39 +93,39 @@ async def trace_enter(
     )
 
 
-async def trace_exit(trace: Trace) -> None:
+async def trace_exit(
+    trace: Trace, *, model: str | None, parent_trace_id: str | None, started_at: str
+) -> None:
+    """Export the trace's root span, who ran it and how it ended, and report the end."""
     assert trace.trace_id is not None
-    await _record(
+    # A step error the agent recovered from isn't a trace error.
+    error = trace.error if trace.is_error else None
+    outcome = {
+        "status": trace.status or "completed",
+        "reward": trace.reward,
+        "error": error,
+        "evaluation_result": (None if trace.grade == Grade.ungraded() else trace.evaluation),
+        "stop_reason": trace.stop_reason,
+        "metadata": trace.extra or None,
+    }
+    identity = {
+        "job_id": trace.job_id,
+        "group_id": trace.group_id,
+        "task_slug": trace.slug,
+        "model": model,
+        "parent_trace_id": parent_trace_id,
+    }
+    root = {k: v for k, v in {**identity, **outcome}.items() if v is not None}
+    export(
         trace.trace_id,
-        "exit",
-        {
-            "status": trace.status or "completed",
-            "reward": trace.reward,
-            # A step error the agent recovered from isn't a trace error.
-            "error": trace.error if trace.is_error else None,
-            "evaluation_result": (None if trace.grade == Grade.ungraded() else trace.evaluation),
-            "stop_reason": trace.stop_reason,
-            "metadata": trace.extra or None,
-        },
-    )
-
-
-async def _record(trace_id: str, phase: Literal["enter", "exit"], payload: dict[str, Any]) -> None:
-    """Write one trace record to the local trace file and report it to the platform."""
-    body = {k: v for k, v in payload.items() if v is not None}
-    now = now_iso()
-    write_local(
-        record_span(
-            trace_id,
-            name=f"trace.{phase}",
-            schema=TRACE_SCHEMA,
-            payload=cast("JsonObject", body),
-            started_at=now,
-            ended_at=now,
-        )
+        name="trace",
+        schema=TRACE_SCHEMA,
+        payload=cast("JsonObject", root),
+        started_at=started_at,
+        error=error,
     )
     if settings.reporting_enabled:
-        await _report(f"/trace/{trace_id}/{phase}", body)
+        await _report(f"/trace/{trace.trace_id}/exit", outcome)
 
 
 async def _report(path: str, payload: dict[str, Any]) -> None:

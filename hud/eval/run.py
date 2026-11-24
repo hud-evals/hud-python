@@ -403,6 +403,7 @@ async def rollout(
     parent_trace_id = parent.hex if parent is not None else None
     config = getattr(agent, "config", None)
     agent_model = config.model if isinstance(config, AgentConfig) else None
+    started_at = now_iso()
     with set_trace_context(trace_id, parent_trace_id=parent_trace_id):
         await trace_enter(
             trace_id,
@@ -599,12 +600,15 @@ async def rollout(
         trace.job_id = job_id
         trace.group_id = group_id
         trace.slug = task.slug
+        exit_trace = trace_exit(
+            trace, model=agent_model, parent_trace_id=parent_trace_id, started_at=started_at
+        )
         if cancellation is not None:
             # The platform still closes the trace; a hung report must not hold the cancel.
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(trace_exit(trace), timeout=5.0)
+                await asyncio.wait_for(exit_trace, timeout=5.0)
             raise cancellation
-        await trace_exit(trace)
+        await exit_trace
     return trace
 
 
