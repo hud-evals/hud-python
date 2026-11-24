@@ -190,14 +190,12 @@ class Run:
         task_id: str,
         args: dict[str, Any],
         *,
-        trace_id: str,
         best_effort_grade: bool = False,
         runtime_config: RuntimeConfig | None = None,
         connections: Sequence[Connection] = (),
     ) -> None:
         self._client = client
         self._task_id = task_id
-        self._trace_id = trace_id
         self._args = args
         self._best_effort_grade = best_effort_grade
         self.runtime_config = runtime_config
@@ -230,9 +228,13 @@ class Run:
         return self.trace.prompt_text or ""
 
     def record(self, step: Step) -> None:
-        """Append ``step`` to the trace and export it under the trace's id."""
+        """Append ``step`` to the trace and export it under the trace's id.
+
+        A run built without ``rollout`` has no trace id and records in memory only.
+        """
         self.trace.record(step)
-        export_step(self._trace_id, step)
+        if self.trace.trace_id is not None:
+            export_step(self.trace.trace_id, step)
 
     async def __aenter__(self) -> Self:
         started_at = now_iso()
@@ -474,11 +476,11 @@ async def rollout(
                         actor_client,
                         task.id,
                         task.args,
-                        trace_id=trace_id,
                         best_effort_grade=task.verifier is not None,
                         runtime_config=addr.config or actor_runtime_config,
                         connections=bound,
                     )
+                    live.trace.trace_id = trace_id
                     live.trace.runtime = addr.url
                     async with live:
                         run = live  # set once live; earlier failures yield Trace.failed
