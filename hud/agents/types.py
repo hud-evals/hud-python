@@ -117,7 +117,7 @@ ClaudeThinkingConfig = (
 
 class ClaudeConfig(ToolAgentConfig):
     model_name: str = "Claude"
-    model: str = "claude-sonnet-4-6"
+    model: str = "claude-haiku-5-5"
     tool_timeout_seconds: float | None = Field(default=120, gt=0, allow_inf_nan=False)
     max_tokens: int = 16384
     use_computer_beta: bool = True
@@ -146,7 +146,7 @@ class ClaudeConfig(ToolAgentConfig):
 
 class GeminiConfig(ToolAgentConfig):
     model_name: str = "Gemini"
-    model: str = "gemini-3.1-pro-preview"
+    model: str = "gemini-3.8-flash"
     temperature: float | None = None
     top_p: float | None = None
     top_k: int | None = None
@@ -159,7 +159,7 @@ class GeminiConfig(ToolAgentConfig):
 
 class OpenAIConfig(ToolAgentConfig):
     model_name: str = "OpenAI"
-    model: str = "gpt-5.6"
+    model: str = "gpt-6-luna"
     max_output_tokens: int | None = None
     temperature: float | None = None
     reasoning: Reasoning | None = None
@@ -200,7 +200,7 @@ def _dropped_keys(raw: Any, kept: Any, path: str = "") -> list[str]:
 
 class OpenAIChatConfig(ToolAgentConfig):
     model_name: str = "OpenAI Chat"
-    model: str = "gpt-5.4-mini"
+    model: str = "deepseek/deepseek-v4.1-flash"
     checkpoint: str | None = Field(
         default=None,
         description="Specific checkpoint name for inference routing. "
@@ -221,7 +221,7 @@ class ClaudeCLIConfig(AgentConfig):
 
     system_prompt: str | None = None
     model_name: str = "Claude CLI"
-    model: str = "claude-sonnet-5"
+    model: str = "claude-haiku-5-5"
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
     # Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
@@ -261,7 +261,7 @@ class CodexCLIConfig(AgentConfig):
     """
 
     model_name: str = "Codex CLI"
-    model: str = "gpt-5.6-sol"
+    model: str = "gpt-6-luna"
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     # Maps to ``model_reasoning_effort``; unset leaves the CLI's own default.
     reasoning_effort: CodexReasoningEffort | None = None

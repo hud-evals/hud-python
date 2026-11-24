@@ -62,7 +62,7 @@ async def auto_respond(
 async def _determine_response(
     agent_message: str,
     *,
-    model: str = "gpt-5",
+    model: str = "gpt-6-luna",
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
 ) -> ResponseType:
     # A client per call: its connection pool belongs to the event loop that opened it.

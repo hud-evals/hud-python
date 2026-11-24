@@ -22,8 +22,8 @@ The SDK's agents run a coding agent's own CLI inside the environment's workspace
 
 | Agent | Runs | Config | Default model |
 |-------|------|--------|---------------|
-| `ClaudeCLIAgent` | Claude Code (`claude`) | `ClaudeCLIConfig` | `claude-sonnet-5` |
-| `CodexCLIAgent` | Codex (`codex exec`) | `CodexCLIConfig` | `gpt-5.6-sol` |
+| `ClaudeCLIAgent` | Claude Code (`claude`) | `ClaudeCLIConfig` | `claude-haiku-5-5` |
+| `CodexCLIAgent` | Codex (`codex exec`) | `CodexCLIConfig` | `gpt-6-luna` |
 | `PiAgent` | [Pi](https://pi.dev) (`pi --mode json`) | `PiConfig` | `deepseek/deepseek-v4.1-flash` |
 
 ```python
@@ -161,7 +161,7 @@ To call a provider with your own key, construct the agent directly:
 from hud.agents import ClaudeCLIAgent
 from hud.agents.types import ClaudeCLIConfig
 
-agent = ClaudeCLIAgent(ClaudeCLIConfig(model="claude-sonnet-5", timeout_seconds=1800))
+agent = ClaudeCLIAgent(ClaudeCLIConfig(model="claude-sonnet-5-5", timeout_seconds=1800))
 ```
 
 Constructed directly, an agent uses the provider key when one is set and the gateway otherwise;
@@ -195,10 +195,10 @@ loops against `run.prompt_messages`.
 
 | Agent | API | Config | Default model |
 |-------|-----|--------|---------------|
-| `ClaudeAgent` | Anthropic Messages | `ClaudeConfig` | `claude-sonnet-4-6` |
-| `OpenAIAgent` | OpenAI Responses | `OpenAIConfig` | `gpt-5.6` |
-| `GeminiAgent` | Gemini | `GeminiConfig` | `gemini-3.1-pro-preview` |
-| `OpenAIChatAgent` | OpenAI Chat Completions, any compatible server via `base_url` | `OpenAIChatConfig` | `gpt-5.4-mini` |
+| `ClaudeAgent` | Anthropic Messages | `ClaudeConfig` | `claude-haiku-5-5` |
+| `OpenAIAgent` | OpenAI Responses | `OpenAIConfig` | `gpt-6-luna` |
+| `GeminiAgent` | Gemini | `GeminiConfig` | `gemini-3.8-flash` |
+| `OpenAIChatAgent` | OpenAI Chat Completions, any compatible server via `base_url` | `OpenAIChatConfig` | `deepseek/deepseek-v4.1-flash` |
 
 Settings specific to these agents:
 
