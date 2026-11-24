@@ -6,7 +6,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from hud.graders.base import Grade
 from hud.settings import settings
@@ -96,11 +96,11 @@ async def trace_enter(
 async def trace_exit(
     trace: Trace, *, model: str | None, parent_trace_id: str | None, started_at: str
 ) -> None:
-    """Export the trace's root span, who ran it and how it ended, and report the end."""
+    """Export the trace's root span and report the trace's end to the platform."""
     assert trace.trace_id is not None
     # A step error the agent recovered from isn't a trace error.
     error = trace.error if trace.is_error else None
-    outcome = {
+    outcome: JsonObject = {
         "status": trace.status or "completed",
         "reward": trace.reward,
         "error": error,
@@ -108,19 +108,19 @@ async def trace_exit(
         "stop_reason": trace.stop_reason,
         "metadata": trace.extra or None,
     }
-    identity = {
+    root: JsonObject = {
         "job_id": trace.job_id,
         "group_id": trace.group_id,
         "task_slug": trace.slug,
         "model": model,
         "parent_trace_id": parent_trace_id,
+        **outcome,
     }
-    root = {k: v for k, v in {**identity, **outcome}.items() if v is not None}
     export(
         trace.trace_id,
         name="trace",
         schema=TRACE_SCHEMA,
-        payload=cast("JsonObject", root),
+        payload=root,
         started_at=started_at,
         error=error,
     )
