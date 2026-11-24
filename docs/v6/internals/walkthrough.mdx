@@ -94,9 +94,9 @@ async def run(self, agent, *, runtime=None, group=None, max_concurrent=None, ...
         group_id = uuid.uuid4().hex
         expanded += [(task, group_id) for _ in range(group)]
 
-    if job is None:                                  # register one platform Job as the receipt
-        job = Job(id=uuid.uuid4().hex, name=..., group=group, ...)
-        await job_enter(job.id, ...)
+    if job is None:                                  # one platform Job as the receipt
+        job = Job(name=..., group=group, ...)
+    await job_enter(job.id, ...)                     # register it (an upsert)
 
     # placement chosen once for the whole batch (the runtime= you passed, or inferred)
     placement = runtime if runtime is not None else self._resolve_placement()
@@ -160,9 +160,8 @@ A `Job` is the accumulator this call fills in and returns - every trace below la
 
 ```python
     if job is None:
-        job = Job(id=uuid.uuid4().hex, name=...,
-                   group=group, ...)
-        await job_enter(job.id, ...)
+        job = Job(name=..., group=group, ...)
+    await job_enter(job.id, ...)
 ```
 
 </div>

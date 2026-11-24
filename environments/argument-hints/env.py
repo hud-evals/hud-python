@@ -22,8 +22,8 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
 import httpx
-from hud import Environment
-from hud.graders import EvaluationResult, LLMJudgeGrader, combine
+from hud import Environment, Grade
+from hud.graders import LLMJudgeGrader, combine
 from hud.settings import settings
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -69,7 +69,7 @@ class Criterion(StrictModel):
     requirement: str = Field(description="What the answer has to do.")
     weight: float = Field(
         default=1.0,
-        description="Share of the score; negative marks an error to penalize.",
+        description="Share of the score, 0 or more.",
     )
 
 
@@ -145,7 +145,7 @@ async def _stage(
     return declared
 
 
-async def _grade(answer: str, question: str, criteria: list[Criterion]) -> EvaluationResult:
+async def _grade(answer: str, question: str, criteria: list[Criterion]) -> Grade:
     """Judge the answer against the criteria, which are the grader's own input."""
     return await combine(
         LLMJudgeGrader.grade(

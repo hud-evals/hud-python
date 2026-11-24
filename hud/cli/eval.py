@@ -539,11 +539,15 @@ def eval_command(
     task_id_by_slug = {task.slug: task.id for task in taskset}
 
     errors = set(map(id, job.errors))
+    graded = len(errors) < len(job.traces)
     if job.traces:
         hud_console.print(f"\n[bold]'{cfg.source}' Results[/bold]")
         hud_console.print(f"  [dim]Runs:[/dim] {len(job.traces)}")
         hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s")
-        hud_console.print(f"  [dim]Mean reward:[/dim] [green]{job.reward:.3f}[/green]")
+        if graded:
+            hud_console.print(f"  [dim]Mean reward:[/dim] [green]{job.reward:.3f}[/green]")
+        else:
+            hud_console.print("  [dim]Mean reward:[/dim] [red]no graded traces[/red]")
         if errors:
             hud_console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
         failed_mid_run = sum(trace.is_error and not trace.grade.is_error for trace in job.traces)
@@ -589,10 +593,10 @@ def eval_command(
         "job_id": job.id,
         "source": cfg.source,
         "run_count": len(job.traces),
-        "mean_reward": job.reward,
+        "mean_reward": job.reward if graded else 0.0,
         "error_count": len(errors),
         "elapsed_seconds": elapsed,
         "runs": runs,
     }
     # Errored runs among graded ones still leave a measurement; none graded leaves nothing.
-    return Result(result) if len(errors) == len(job.traces) else result
+    return result if graded else Result(result)

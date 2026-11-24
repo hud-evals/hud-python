@@ -23,7 +23,6 @@ ENV_SOURCE = Path(__file__).resolve().parent.parent / "env.py"
 CRITERIA = [
     {"requirement": "Names exactly three primes.", "weight": 2},
     {"requirement": "Explains each one.", "weight": 1},
-    {"requirement": "Calls a composite number prime.", "weight": -2},
 ]
 
 
@@ -153,37 +152,31 @@ async def test_a_previous_task_leaves_nothing_in_the_files_directory(workspace):
     assert list(files.iterdir()) == []
 
 
-@pytest.mark.parametrize(
-    ("criteria", "score", "judged"),
-    [
-        pytest.param(
-            CRITERIA,
-            1.0,
-            [
-                ("positive", "Names exactly three primes."),
-                ("positive", "Explains each one."),
-                ("negative", "Calls a composite number prime."),
-            ],
-            id="weighted-criteria",
-        ),
-        pytest.param([], 0.0, [], id="no-criteria"),
-    ],
-)
-async def test_the_criteria_reach_the_judge_unchanged(criteria, score, judged, platform):
-    task = row(criteria=criteria)
+async def test_the_criteria_reach_the_judge_unchanged(platform):
+    task = row()
 
     async with served(task) as client:
         await client.start_task(task.id, task.args)
         grade = await client.grade({"answer": "2, 3 and 5"})
 
-    assert grade["score"] == pytest.approx(score)
+    assert grade["score"] == pytest.approx(1.0)
     prompts = [item.body["messages"][-1]["content"] for item in platform.requests("POST", "/")]
-    assert sorted(
-        (prompt.split("<criterion_type>\n")[1].split("\n")[0], prompt.split("<criterion>\n")[1].split("\n")[0])
-        for prompt in prompts
-    ) == sorted(judged)
+    assert sorted(prompt.split("<criterion>\n")[1].split("\n")[0] for prompt in prompts) == sorted(
+        criterion["requirement"] for criterion in CRITERIA
+    )
     assert all("<response>\n2, 3 and 5\n</response>" in prompt for prompt in prompts)
-    assert {item.authorization for item in platform.requests("POST", "/")} <= {"Bearer runtime-key"}
+    assert {item.authorization for item in platform.requests("POST", "/")} == {"Bearer runtime-key"}
+
+
+async def test_a_row_without_criteria_is_a_grading_error(platform):
+    task = row(criteria=[])
+
+    async with served(task) as client:
+        await client.start_task(task.id, task.args)
+        with pytest.raises(HudProtocolError, match="at least one criterion"):
+            await client.grade({"answer": "2, 3 and 5"})
+
+    assert platform.requests("POST", "/") == []
 
 
 @pytest.mark.parametrize("rejected", [set(), {"second"}], ids=["both-graded", "one-judge-rejects"])

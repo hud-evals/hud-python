@@ -9,7 +9,6 @@ tasks = [
         criteria=[
             {"requirement": "Names exactly three numbers, all prime and under 20.", "weight": 2.0},
             {"requirement": "Explains primality for each number.", "weight": 1.0},
-            {"requirement": "Includes a composite number presented as prime.", "weight": -2.0},
         ],
     ),
 ]

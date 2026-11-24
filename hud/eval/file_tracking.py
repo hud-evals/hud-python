@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import urlsplit
 
+from hud.environment.utils import FILE_TRACKING_FRAME_LIMIT_BYTES
 from hud.settings import settings
 from hud.telemetry.exporter import export
 from hud.utils.time import now_iso
@@ -23,8 +24,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.eval.file_tracking")
 
 _DRAIN_TIMEOUT = 10.0
-# flush can carry a 50 MiB diff plus base64 capture and JSON escaping overhead.
-_FRAME_LIMIT_BYTES = 160 * 1024 * 1024
 _FILETRACKING_SCHEMA = "hud.filetracking.v1"
 
 
@@ -49,7 +48,7 @@ class FileTrackingClient:
         reader, writer = await asyncio.open_connection(
             parts.hostname,
             parts.port,
-            limit=_FRAME_LIMIT_BYTES,
+            limit=FILE_TRACKING_FRAME_LIMIT_BYTES,
         )
         return cls(reader, writer)
 

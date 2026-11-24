@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import warnings
 from collections import Counter
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
+
+from hud.utils.deprecation import warn_deprecated
 
 from .base import Grade, SubScore
 
@@ -32,11 +33,11 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> Grade:
     # Normalizing silently would hide a likely authoring mistake (0.5/0.3/0.3 meant
     # as 0.5/0.3/0.2), so warn when the declared weights don't already sum to 1.
     if abs(positive_weight_sum - 1.0) > 0.01:
-        warnings.warn(
-            f"grader weights sum to {positive_weight_sum:.4f}, not 1.0; "
-            f"normalizing, but the effective weights differ from what you set. "
-            f"Make the positive weights sum to 1.0 to silence this.",
-            stacklevel=2,
+        warn_deprecated(
+            f"`combine` with positive weights summing to {positive_weight_sum:.4f} (normalized "
+            "here, so the effective weights differ from the ones set)",
+            "make the positive weights sum to 1.0",
+            change="will raise",
         )
 
     normalized = [
@@ -54,6 +55,42 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> Grade:
         reward=float(sum(item.value * item.weight for item in normalized)),
         done=True,
         subscores=normalized,
+    )
+
+
+def combine_any(weight: float, subscores: list[SubScore], *, name: str = "any") -> SubScore:
+    """A subscore that passes if any input passes (max), with the inputs as children."""
+    warn_deprecated(
+        "`combine_any`",
+        "build the subscore directly: `SubScore(name=..., value=max(s.value for s in "
+        "subscores), weight=..., children=subscores)`",
+    )
+    return _boolean_subscore(name, weight, subscores, max)
+
+
+def combine_all(weight: float, subscores: list[SubScore], *, name: str = "all") -> SubScore:
+    """A subscore that passes only if every input passes (min), with the inputs as children."""
+    warn_deprecated(
+        "`combine_all`",
+        "build the subscore directly: `SubScore(name=..., value=min(s.value for s in "
+        "subscores), weight=..., children=subscores)`",
+    )
+    return _boolean_subscore(name, weight, subscores, min)
+
+
+def _boolean_subscore(
+    name: str, weight: float, subscores: list[SubScore], pick: Callable[[list[float]], float]
+) -> SubScore:
+    if not subscores:
+        raise ValueError("subscores must not be empty")
+    children = [
+        subscore.model_copy(update={"name": unique})
+        for subscore, unique in zip(
+            subscores, _unique_names([s.name for s in subscores]), strict=True
+        )
+    ]
+    return SubScore(
+        name=name, value=pick([s.value for s in subscores]), weight=weight, children=children
     )
 
 

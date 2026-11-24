@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .base import EvaluationResult, Grader, SubScore
 from .bash import BashGrader
-from .combine import combine
+from .combine import combine, combine_all, combine_any
 from .judge import LLMJudgeGrader
 
 __all__ = [
@@ -14,4 +14,6 @@ __all__ = [
     "LLMJudgeGrader",
     "SubScore",
     "combine",
+    "combine_all",
+    "combine_any",
 ]

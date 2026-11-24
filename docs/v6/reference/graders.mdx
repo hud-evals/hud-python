@@ -81,18 +81,17 @@ result = await LLMJudgeGrader.grade(
 
 The default model is `claude-sonnet-5-5`. Pass `model` to use a different judge.
 
-`criteria` items are strings, or `(requirement, weight)` tuples. A negative weight marks an error to
-avoid: the criterion scores as a penalty, MET when the answer actually makes the mistake.
+`criteria` items are strings, or `(requirement, weight)` tuples with a weight of 0 or more. An
+empty rubric is a grading error.
 
 The returned `SubScore` has one child per criterion: `name` is the requirement, `value` is
-`1.0`/`0.0` for the verdict (on a negative-weight criterion, `1.0` means the error is present),
-and `info["reason"]` is the judge's justification. The rubric value is the weighted
-pass-fraction: `sum(value * weight)` over the positive weights, clamped to 0-1. A judge reply
+`1.0`/`0.0` for the verdict, and `info["reason"]` is the judge's justification. The rubric value
+is the weighted mean of the verdicts: `sum(value * weight)` over the total weight. A judge reply
 without a `MET` or `UNMET` verdict is a grading error.
 
 ## `combine` - compose multiple graders
 
-`await combine(*items)` takes `SubScore`s and grader coroutines, runs the coroutines in parallel, and combines the results into a weighted `Grade`. Positive weights are normalized to sum to `1.0`; negative weights are penalties. Repeated names get numeric suffixes (`BashGrader-1`, `BashGrader-2`).
+`await combine(*items)` takes `SubScore`s and grader coroutines, runs the coroutines in parallel, and combines the results into a `Grade` whose reward is the weighted sum of the subscores. Positive weights sum to `1.0`. Negative weights are penalties, and nothing clamps, so a penalty can take the reward below 0. Repeated names get numeric suffixes (`BashGrader-1`, `BashGrader-2`).
 
 ```python
 @env.template()
@@ -105,7 +104,18 @@ async def composed(answer: str = ""):
     )
 ```
 
-Each subscore appears in the trace, so a partial reward is legible. A `SubScore` can keep the subscores it was derived from on `children`, so a grading tree survives into the trace.
+Each subscore appears in the trace, so a partial reward is legible. A `SubScore` can keep the subscores it was derived from on `children`, so a grading tree survives into the trace. How a node derives its value from its children is yours to write; for example, "tests pass via `pytest` or via `make test`" as one subscore:
+
+```python
+pytest_run = await BashGrader.grade(weight=1.0, command="pytest -q")
+make_run = await BashGrader.grade(weight=1.0, command="make test")
+tests = SubScore(
+    name="tests",
+    value=max(pytest_run.value, make_run.value),
+    weight=0.5,
+    children=[pytest_run, make_run],
+)
+```
 
 ## Custom graders
 
@@ -141,8 +151,8 @@ preserves the measurements used to derive its value in `children`:
 | `info` | `None` | Grader-specific details recorded on the evaluation span. |
 
 `combine` returns a [`Grade`](/v6/reference/types#grade) carrying the subscores; a task can also
-build one itself, as `Grade(reward=..., subscores=[...])`. `EvaluationResult`, the older grade
-payload with a camelCase `isError`, is deprecated: it still grades, with a warning, until hud v0.7.0.
+build one itself, as `Grade(reward=..., subscores=[...])`. A grade's subscores explain its reward:
+the sum of each subscore's `value` times its `weight` equals `reward`.
 
 Graders run as the second yield of a [task](/v6/reference/tasks). An
 authoritative grader that needs a distinct environment can run as a

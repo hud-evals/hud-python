@@ -78,23 +78,25 @@ async def test_a_rollout_given_a_job_reports_none_of_its_own(reporting: FakeServ
     assert (reporting.requests("api", "POST", JOB_ENTER), entered["job_id"]) == ([], job_id)
 
 
-async def test_an_open_job_is_reported_once_for_every_call_it_spans(
+async def test_runs_given_one_job_report_under_it_in_one_process_or_many(
     reporting: FakeServices,
 ) -> None:
-    env = checked()
-    job = await Job.start("training", group=2)
+    known = uuid.uuid4().hex
+    first = Job(name="forge", id=known, group=2)
+    second = Job(name="forge", id=known, group=2)  # the same job, as another process builds it
 
-    await Task(env="checked", id="check").run(
-        ScriptedAgent("yes"), runtime=LocalRuntime(env), job=job
-    )
-    await Task(env="checked", id="check").run(
-        ScriptedAgent("yes"), runtime=LocalRuntime(env), job=job
-    )
+    for job in (first, first, second):
+        await Task(env="checked", id="check").run(
+            ScriptedAgent("yes"), runtime=LocalRuntime(checked()), job=job
+        )
 
-    assert [(b["name"], b["group"]) for b in reporting.bodies("api", "POST", JOB_ENTER)] == [
-        ("training", 2)
-    ]
-    assert {e["job_id"] for e in reporting.bodies("api", "POST", TRACE_ENTER)} == {job.id}
+    registered = {r.path.split("/")[4] for r in reporting.requests("api", "POST", JOB_ENTER)}
+    assert {uuid.UUID(job_id).hex for job_id in registered} == {known}
+    assert {(b["name"], b["group"]) for b in reporting.bodies("api", "POST", JOB_ENTER)} == {
+        ("forge", 2)
+    }
+    assert {e["job_id"] for e in reporting.bodies("api", "POST", TRACE_ENTER)} == {known}
+    assert (len(first.traces), len(second.traces)) == (4, 2)
 
 
 async def test_a_graded_rollout_reports_its_reward_evaluation_and_metadata(

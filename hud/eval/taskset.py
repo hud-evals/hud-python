@@ -300,12 +300,11 @@ class Taskset:
 
         if job is None:
             job = Job(
-                id=uuid.uuid4().hex,
                 name=_job_name(self.name, task_list, group),
                 group=group,
                 taskset_id=self.taskset_id,
             )
-            await job_enter(job.id, name=job.name, group=group, taskset_id=self.taskset_id)
+        await job_enter(job.id, name=job.name, group=job.group, taskset_id=job.taskset_id)
         job_id = job.id
         limit = asyncio.Semaphore(max_concurrent) if max_concurrent else contextlib.nullcontext()
 

@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 
 CONTROL_FRAME_LIMIT_BYTES = 16 * 1024 * 1024
+# A file-tracking flush can carry a 50 MiB diff plus base64 capture and JSON escaping overhead.
+FILE_TRACKING_FRAME_LIMIT_BYTES = 160 * 1024 * 1024
 
 
 class InvalidFrameError(ValueError):

@@ -27,6 +27,7 @@ from hud.telemetry.context import (
 from hud.telemetry.exporter import export
 from hud.telemetry.span import normalize_trace_id
 from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -34,7 +35,7 @@ from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from types import TracebackType
 
     from hud.agents.base import Agent
@@ -147,20 +148,39 @@ def _episode_bindings(started: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return cast("dict[str, dict[str, Any]]", raw)
 
 
+# Released env servers forward a dict yield with only the score checked; per field, how
+# to spot a mistyped value and how those servers read it.
+_LOOSE_GRADE_FIELDS: dict[str, tuple[Callable[[Any], bool], Callable[[Any], Any]]] = {
+    "score": (lambda v: isinstance(v, bool), float),
+    "done": (lambda v: not isinstance(v, bool), bool),
+    "isError": (lambda v: not isinstance(v, bool), bool),
+    "content": (lambda v: not isinstance(v, str | None), lambda _: None),
+    "info": (lambda v: not isinstance(v, dict), lambda _: {}),
+    "subscores": (lambda v: not isinstance(v, list | None), lambda _: None),
+}
+
+
 def parse_grade(frame: dict[str, Any]) -> Grade:
+    """A ``tasks.grade`` frame as a ``Grade``.
+
+    A boolean ``score``, or a mistyped ``done``, ``isError``, ``content``, ``info`` or
+    ``subscores``, is read as released SDKs read it, with a warning; hud v0.7.0 rejects it.
+    """
     if "score" not in frame:
         raise HudProtocolError(
             -32603, f"tasks.grade: a grade frame needs a 'score', got keys {sorted(frame)}"
         )
-    content, info, subscores = frame.get("content"), frame.get("info"), frame.get("subscores")
-    frame = {
-        **frame,
-        "done": bool(frame.get("done", True)),
-        "content": content if isinstance(content, str) else None,
-        "info": info if isinstance(info, dict) else {},
-        "isError": bool(frame.get("isError", False)),
-        "subscores": subscores if isinstance(subscores, list) else None,
-    }
+    frame = dict(frame)
+    for field, (mistyped, read_as) in _LOOSE_GRADE_FIELDS.items():
+        if field in frame and mistyped(frame[field]):
+            value = frame[field]
+            frame[field] = read_as(value)
+            warn_deprecated(
+                f"A `tasks.grade` frame whose field {field!r} is {value!r} (read as "
+                f"{frame[field]!r})",
+                "yield a `hud.Grade` from the task so the frame is typed",
+                change="will be an error",
+            )
     try:
         return Grade.model_validate(frame, by_name=False)
     except ValidationError as exc:
