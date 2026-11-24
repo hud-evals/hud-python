@@ -122,7 +122,7 @@ class Settings(BaseSettings):
 
     telemetry_enabled: bool = Field(
         default=True,
-        description="Upload runs and their traces to the HUD platform (only with an API key)",
+        description="Upload runs and their traces to the HUD platform",
         validation_alias="HUD_TELEMETRY_ENABLED",
     )
 
