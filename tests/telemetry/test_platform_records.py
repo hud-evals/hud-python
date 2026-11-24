@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from fastmcp import FastMCP
 
-from hud import Environment, Grade, Job, Task, Taskset
+from hud import Environment, Job, Task, Taskset
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.capabilities import MCPClient
@@ -99,23 +99,21 @@ async def test_runs_given_one_job_report_under_it_in_one_process_or_many(
     assert (len(first.traces), len(second.traces)) == (4, 2)
 
 
-@pytest.mark.parametrize("form", ["dict", "grade"])
 async def test_a_graded_rollout_reports_its_reward_evaluation_and_metadata(
-    reporting: FakeServices, form: str
+    reporting: FakeServices,
 ) -> None:
     env = Environment("graded")
     stdout = "PASS\n" * 20_000
-    frame = {
-        "score": 0.5,
-        "schema_version": "qa.v1",
-        "info": {"stdout": stdout},
-        "subscores": [{"name": "format", "weight": 1.0, "value": 0.5, "info": {"seen": True}}],
-    }
 
     @env.template()
     async def check():
         yield "go"
-        yield frame if form == "dict" else Grade.model_validate(frame)
+        yield {
+            "score": 0.5,
+            "schema_version": "qa.v1",
+            "info": {"stdout": stdout},
+            "subscores": [{"name": "format", "weight": 1.0, "value": 0.5, "info": {"seen": True}}],
+        }
 
     class Annotating(Agent):
         async def __call__(self, run: Run) -> None:

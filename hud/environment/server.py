@@ -156,8 +156,6 @@ class TaskRunner:
             evaluation = {"score": float(evaluation)}
         elif isinstance(evaluation, EvaluationResult):
             evaluation = {**evaluation.model_dump(exclude={"reward"}), "score": evaluation.reward}
-        elif isinstance(evaluation, Grade):
-            evaluation = {"score": evaluation.reward, **evaluation.model_dump(exclude_unset=True)}
         if isinstance(evaluation, dict) and not isinstance(evaluation.get("score"), (int, float)):
             raise TypeError(
                 f"task {self.task.id!r} graded with a dict missing a numeric "
