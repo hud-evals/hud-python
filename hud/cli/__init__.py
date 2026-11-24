@@ -19,6 +19,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from typer._click.exceptions import UsageError
 from typer.core import TyperCommand, TyperGroup
 
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudAuthenticationError, HudRequestError, HudTimeoutError
 from hud.utils.hud_console import HUDConsole
 
@@ -58,8 +59,9 @@ class AuthScope(BaseModel):
 class DirectoryLink(BaseModel):
     """``.hud/config.json``: platform ids plus the credentials that wrote them.
 
-    camelCase ids (``registryId``, ``tasksetId``, ``projectId``) also validate; a file
-    without ``scope`` reads as an unscoped link, which the next update rewrites.
+    hud 0.6.17 and earlier wrote camelCase ids (``registryId``, ``tasksetId``,
+    ``projectId``) and no ``scope``; such a file still validates, reads as an unscoped
+    link, and warns until hud v0.7.0. The next update rewrites it.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -121,7 +123,14 @@ class DirectoryState:
                 f"{path} is not a valid HUD workspace config.",
                 suggestion="Delete the file and run the command again.",
             ) from exc
-        if stored.scope is not None and stored.scope != self.scope:
+        if stored.scope is None:
+            warn_deprecated(
+                f"`{path}` in the hud 0.6.17 format (camelCase ids, no `scope`)",
+                "`hud deploy`, `hud sync env` or `hud project use` in this directory rewrites it "
+                "in the current format",
+                change="will stop loading",
+            )
+        elif stored.scope != self.scope:
             if stored.scope.origin != self.scope.origin:
                 detail = (
                     f"{path} was linked against {stored.scope.origin}, not {self.scope.origin}."

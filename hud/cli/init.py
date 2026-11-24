@@ -15,6 +15,7 @@ import typer
 from packaging.version import Version
 
 from hud.cli import CliError
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 from hud.version import __version__
@@ -44,12 +45,11 @@ def init_command(
     preset: str | None = typer.Option(
         None,
         "--template",
-        "--preset",
         "-t",
-        "-p",
         help="Example environment to use. Omit to choose interactively; non-interactive runs with "
         "a NAME use coding.",
     ),
+    deprecated_preset: str | None = typer.Option(None, "--preset", "-p", hidden=True),
 ) -> Any:
     """Create a new HUD environment package.
 
@@ -64,6 +64,10 @@ def init_command(
     """
     hud_console = HUDConsole()
 
+    if deprecated_preset is not None:
+        warn_deprecated("`hud init --preset`/`-p`", "use `--template`/`-t`")
+        if preset is None:
+            preset = deprecated_preset
     if preset is None:
         if not dry_run and sys.stdin.isatty() and sys.stdout.isatty():
             preset = hud_console.select(

@@ -62,20 +62,8 @@ The `run` is the one object you work with for the whole task. Three things you d
 | `run.record(step)` | Append a step and stream it to the platform live (step types in [Types](/v6/reference/types)). |
 | `run.trace.content = ...` | Set the final answer, graded when the run ends. |
 
-### Reusing HUD's loop: `ToolAgent`
-
-There are two base classes, depending on how much of HUD's loop you want:
-
-- **`Agent`** (`hud.agents`) - the bare seam above. Best for wrapping an external framework or a
-  fully custom loop.
-- **`ToolAgent`** (`hud.agents.tool_agent`) - HUD's catalog-driven
-  tool-call loop, the base every provider agent subclasses. Implement the provider hooks
-  (`get_response`, message/result formatting) and it handles capability wiring, the step loop, and
-  recording. Deprecated with the provider agents; write new agents on `Agent`.
-
 Record the step family that matches what happened - `AgentStep` (a model turn), `ToolStep` (a tool
-round-trip), or `SubagentStep` (a nested rollout); see [Types](/v6/reference/types). `ToolAgent` does all of
-this for you.
+round-trip), or `SubagentStep` (a nested rollout); see [Types](/v6/reference/types).
 
 ### Wrap an existing framework: browser-use on `cdp`
 
@@ -217,7 +205,7 @@ taskset = Taskset("engineering-work", [
 ])
 ```
 
-`hud eval tasks.py claude --full` runs the whole set; `hud sync tasks my-taskset` publishes it. Give
+`hud eval tasks.py claude --all` runs the whole set; `hud sync tasks my-taskset` publishes it. Give
 each task a stable `slug` so it's identifiable on the platform:
 
 ```python tasks.py

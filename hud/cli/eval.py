@@ -141,12 +141,7 @@ def eval_command(
         help=f"Model name (e.g. claude-sonnet-4-6) or agent type ({', '.join(AgentType)})",
     ),
     all: bool = typer.Option(False, "--all", help="Run every task instead of only the first."),
-    full: bool = typer.Option(
-        False,
-        "--full",
-        help="Run every task, and give the deprecated provider agents --auto-respond and "
-        "--max-steps 100 (an explicit --max-steps wins).",
-    ),
+    full: bool = typer.Option(False, "--full", hidden=True),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
     config: list[str] | None = typer.Option(
         None,
@@ -170,7 +165,8 @@ def eval_command(
         "--auto-respond",
         help="Automatically prompt the agent to continue if it does not respond with a tool call",
     ),
-    group_size: int | None = typer.Option(None, "--group", "--group-size", help="Runs per task"),
+    group_size: int | None = typer.Option(None, "--group", help="Runs per task"),
+    deprecated_group_size: int | None = typer.Option(None, "--group-size", hidden=True),
     task_ids: str | None = typer.Option(
         None,
         "--task-ids",
@@ -195,11 +191,7 @@ def eval_command(
         "rollout on the platform), docker, modal, or a tcp:// url. "
         "Default: local for a tasks file; hosted for a platform taskset.",
     ),
-    remote: bool = typer.Option(
-        False,
-        "--remote",
-        help="Run the whole rollout on the HUD platform (same as --runtime hosted)",
-    ),
+    remote: bool = typer.Option(False, "--remote", hidden=True),
 ) -> dict[str, Any] | Result:
     """Run an agent over a tasks file or a platform taskset.
 
@@ -209,11 +201,11 @@ def eval_command(
     Examples:
         hud eval tasks.py claude-sonnet-4-6
         hud eval tasks.py claude
-        hud eval "My Tasks" claude-sonnet-4-6 --full   # Platform taskset, run on the platform
+        hud eval "My Tasks" claude-sonnet-4-6 --all    # Platform taskset, run on the platform
         hud eval tasks.py claude --config max_tokens=32768
         hud eval tasks.py claude --gateway             # Route LLM calls through HUD Gateway
         hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Use the HUD runtime tunnel
-        hud eval tasks.json claude-sonnet-4-6 --remote       # Execute the rollout remotely
+        hud eval tasks.json claude-sonnet-4-6 --runtime hosted  # Execute the rollout remotely
         hud eval tasks.py claude --yes --json
         hud eval tasks.py claude --dry-run --json
     """
@@ -226,6 +218,15 @@ def eval_command(
             "(`--config timeout_seconds=...`)",
         )
 
+    for used, spelling, instead in (
+        (remote, "--remote", "`--runtime hosted`"),
+        (deprecated_group_size is not None, "--group-size", "`--group`"),
+        (full, "--full", "`--all`"),
+    ):
+        if used:
+            warn_deprecated(f"`hud eval {spelling}`", f"use {instead}")
+    if group_size is None:
+        group_size = deprecated_group_size
     if runtime is not None and remote:
         raise ValueError("--runtime and --remote are mutually exclusive placement options")
     overrides: dict[str, Any] = {
@@ -413,7 +414,7 @@ def eval_command(
         if total > 1:
             hud_console.warning(
                 f"Running only 1 of {total} tasks (the first). "
-                f"Add --full to run all {total}, or --task-ids to pick specific ones."
+                f"Add --all to run all {total}, or --task-ids to pick specific ones."
             )
     hud_console.info(f"Loaded {len(taskset)} task(s)")
 

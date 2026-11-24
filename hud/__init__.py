@@ -11,7 +11,13 @@ from .eval.task import Task
 from .eval.taskset import Taskset
 from .graders.base import Grade
 from .types import Trace
-from .utils.deprecation import RUNTIME_NAMES, moved_to, resolve_retired
+from .utils.deprecation import (
+    RUNTIME_NAMES,
+    TRAINING_REPLACEMENT,
+    moved_to,
+    resolve_retired,
+    served_from,
+)
 from .version import __version__
 
 __all__ = [
@@ -38,7 +44,7 @@ _RETIRED = {
     **moved_to("hud.clients", "connect"),
     **moved_to("hud.cli.tasksets", "SyncPlan"),
     **moved_to("hud.telemetry", "instrument"),
-    **moved_to("hud.train", "TrainingClient"),
+    **served_from("hud.train.client", "TrainingClient", instead=TRAINING_REPLACEMENT),
 }
 
 

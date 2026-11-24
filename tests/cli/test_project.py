@@ -60,6 +60,19 @@ def test_use_links_the_directory_to_the_project_under_these_credentials(
     assert "sk-hud-test" not in json.dumps(stored)
 
 
+def test_the_group_directory_wins_over_a_subcommands_deprecated_one(
+    projects: FakeServices, hud: Hud
+) -> None:
+    (hud.cwd / "kept").mkdir()
+    (hud.cwd / "old").mkdir()
+
+    result = hud("project", "-C", "kept", "use", "browser-evals", "-C", "old", "--json")
+
+    assert result.exit_code == 0, result
+    assert (hud.cwd / "kept" / ".hud" / "config.json").exists()
+    assert not (hud.cwd / "old" / ".hud").exists()
+
+
 def test_a_name_two_projects_share_must_be_given_as_an_id(
     signed_in: FakeServices, hud: Hud
 ) -> None:
@@ -107,7 +120,7 @@ def test_a_corrupt_link_is_refused_and_left_alone(projects: FakeServices, hud: H
     assert (hud.cwd / ".hud" / "config.json").read_text() == '{"broken":'
 
 
-def test_an_older_camelcase_link_keeps_its_ids_when_rewritten(
+def test_an_older_camelcase_link_warns_and_keeps_its_ids_when_rewritten(
     projects: FakeServices, hud: Hud
 ) -> None:
     (hud.cwd / ".hud").mkdir()
@@ -116,9 +129,13 @@ def test_an_older_camelcase_link_keeps_its_ids_when_rewritten(
     )
 
     result = hud("project", "use", "browser-evals", "--json")
+    again = hud("project", "--json")
 
     stored = linked(hud)
     assert result.exit_code == 0, result
+    assert "hud v0.7.0" in " ".join(result.stderr.split()), result
+    assert (again.exit_code, again.json["project"]["id"]) == (0, BROWSER), again
+    assert "hud v0.7.0" not in again.stderr, again
     assert stored is not None
     assert (stored["registry_id"], stored["taskset_id"], stored["project_id"]) == (
         OTHER_ID,

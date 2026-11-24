@@ -33,7 +33,7 @@ hud eval tasks.py claude --model claude-opus-4-7 --runtime hud --max-steps 100 -
 ```
 
 The multi-step task wants headroom (`--max-steps 100`). `hud eval` runs the first task only; add
-`--full` for all three or `--task-ids <slug>`.
+`--all` for all three or `--task-ids <slug>`.
 
 For a single local smoke rollout, build and attach to one container, then remove it:
 
