@@ -28,7 +28,7 @@ A capability is `(name, protocol, url, params)` - concrete wire data carrying th
 | `url` | `str` | Connection URL. |
 | `params` | `dict` | Protocol-specific connection params. |
 
-Each protocol has a **factory** (`Capability.ssh`, `.mcp`, `.cdp`, `.rfb`) - a classmethod that builds a valid `Capability` for that protocol, so you don't fill in the four fields by hand. It normalizes the URL (fills in the default scheme and port), sets the right `protocol` id, and packs the protocol-specific params. `cap.to_manifest()` / `Capability.from_manifest(data)` round-trip it on the wire.
+`Capability.ssh`, `Capability.mcp` and `Capability.rfb` build a capability for their protocol: they set the `protocol` id, fill in the URL's default scheme and port, and pack the params. Other protocols, `cdp` among them, use the constructor. `cap.to_manifest()` and `Capability.from_manifest(data)` convert to and from the wire format.
 
 ## Spinning up a capability
 
@@ -117,15 +117,11 @@ async def _down():
 
 ### `cdp` - a browser
 
-```text
-Capability.cdp(*, name="browser", url, target_id=None)
+```python
+Capability(name="browser", protocol="cdp/1.3", url="ws://127.0.0.1:9222")
 ```
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Capability name. Default `"browser"`. |
-| `url` | `str` | DevTools URL (default scheme `ws`, default port `9222`). |
-| `target_id` | `str \| None` | Optional CDP target id. |
+`url` is the DevTools URL. To pin a target, pass `params={"target_id": ...}`. `Capability.cdp` is deprecated.
 
 Playwright ships the Chromium binary (`playwright install chromium`). Add `--no-sandbox` to the launch flags only when running as root in a container.
 
@@ -156,7 +152,7 @@ async def _up():
             "--user-data-dir=" + tempfile.mkdtemp(prefix="cdp_"),
         )
         await asyncio.sleep(1.0)
-    env.add_capability(Capability.cdp(name="browser", url="http://127.0.0.1:9222"))
+    env.add_capability(Capability(name="browser", protocol="cdp/1.3", url="http://127.0.0.1:9222"))
 
 @env.shutdown
 async def _down():
@@ -297,8 +293,8 @@ For a complete repository workspace with hidden-test grading, run `hud init my-c
 | `shell_gid` | `int \| None` | Group for agent commands when `shell_uid` drops them. Defaults to `shell_uid`. |
 | `hand_over_root` | `bool` | Hand the root directory to `shell_uid` at start. Set `False` when the image already set its owner. Default `True`. |
 | `require_isolation` | `bool` | Refuse to start unless `bwrap` can sandbox sessions, instead of running them unisolated. Default `False`. |
-| `host_key_path` | `Path \| None` | Reuse a host key instead of generating one. |
-| `authorized_client_keys` | `list[Path] \| None` | Authorize specific client public keys. |
+| `host_key_path` | `Path \| None` | Deprecated. Reuse a host key instead of generating one. |
+| `authorized_client_keys` | `list[Path] \| None` | Deprecated. Authorize these client public keys instead of a generated one. |
 | `credentials_dir` | `Path \| str \| None` | Where the session's SSH keys are written. Defaults to a fresh temporary directory; point it inside anything you mask from sessions. |
 | `hosts_path` | `Path \| str \| None` | Where the workspace's own `/etc/hosts` is written. Defaults to `credentials_dir`. |
 | `track_files` | `bool` | Serve file-tracking telemetry over the workspace lifecycle. Constructor default `False`; `env.workspace(...)` defaults it to `HUD_FILE_TRACKING_ENABLED` (on). |

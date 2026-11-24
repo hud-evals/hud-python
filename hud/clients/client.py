@@ -31,7 +31,6 @@ if TYPE_CHECKING:
 
     from hud.capabilities.connection import Connection
     from hud.clients.dial import Streams
-    from hud.environment.egress import WorkspaceRoute
     from hud.runtime.core import Runtime
 
 LOGGER = logging.getLogger("hud.clients")
@@ -124,7 +123,6 @@ class HudClient:
         self._call_lock = asyncio.Lock()
         self._closed = False
         self.manifest: Manifest | None = None
-        self.workspace_routes: tuple[WorkspaceRoute, ...] = ()
         self.connections: tuple[Connection, ...] = ()
         self._routes: dict[str, str] = {}
         self._opened: dict[str, CapabilityClient] = {}
@@ -157,24 +155,16 @@ class HudClient:
             tunnel.cancel()
         self._writer.close()
 
-    async def hello(
-        self,
-        session_id: str | None = None,
-        *,
-        workspace_routes: Sequence[WorkspaceRoute] = (),
-    ) -> Manifest:
+    async def hello(self, session_id: str | None = None) -> Manifest:
         """Send ``hello``; cache and return the parsed ``Manifest``.
 
         ``session_id`` resumes that parked session, with its suspended task, instead
         of minting a fresh one.
         """
         params: dict[str, Any] = {}
-        if workspace_routes:
-            params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
         if session_id is not None:
             params["session_id"] = session_id
         result = await self._call("hello", params)
-        self.workspace_routes = tuple(workspace_routes)
         self.connections = ()
         bindings = [Capability.from_manifest(binding) for binding in result["bindings"]]
         self.manifest = Manifest(session_id=result["session_id"], bindings=bindings)
@@ -240,8 +230,6 @@ class HudClient:
         """Bind ``connections`` to this session in place of the ones it holds."""
         assert self.manifest is not None
         params: dict[str, Any] = {"session_id": self.manifest.session_id}
-        if self.workspace_routes:
-            params["workspace_routes"] = [route.to_wire() for route in self.workspace_routes]
         if connections:
             params["connections"] = [connection.to_wire() for connection in connections]
         await self._call("hello", params, reply_timeout=reply_timeout)
@@ -382,7 +370,6 @@ async def _connect_ready(
     dial: Callable[[], Awaitable[Streams]],
     *,
     ready_timeout: float,
-    workspace_routes: Sequence[WorkspaceRoute],
     interval: float = 0.5,
 ) -> HudClient:
     """Connect and complete ``hello``, retrying until the env is ready.
@@ -403,7 +390,7 @@ async def _connect_ready(
 
         client = HudClient(reader, writer, dial=dial)
         try:
-            await client.hello(workspace_routes=workspace_routes)
+            await client.hello()
         except asyncio.CancelledError:
             client.abort()
             raise
@@ -440,7 +427,6 @@ async def connect(
     runtime: Runtime,
     *,
     ready_timeout: float = DEFAULT_READY_TIMEOUT,
-    workspace_routes: Sequence[WorkspaceRoute] = (),
 ) -> AsyncGenerator[HudClient]:
     """Connect a ``HudClient`` to a runtime's control channel, retrying until it answers.
 
@@ -450,7 +436,6 @@ async def connect(
     client = await _connect_ready(
         dialer(runtime.url, runtime.params),
         ready_timeout=_runtime_ready_timeout(runtime, ready_timeout),
-        workspace_routes=workspace_routes,
     )
     owner = asyncio.current_task()
     assert owner is not None

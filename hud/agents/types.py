@@ -9,7 +9,6 @@ from openai.types.responses import ResponseTextConfigParam
 from openai.types.responses.response_create_params import ToolChoice
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import (
-    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -39,10 +38,6 @@ from hud.types import (
 from hud.utils.deprecation import warn_deprecated
 from hud.utils.serialization import json_safe_value
 
-# Agent configs written before the field was named ``model`` call it ``checkpoint_name``;
-# task rows store them in ``agent_config``.
-_model_alias = AliasChoices("model", "checkpoint_name")
-
 ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 # A name a shell assignment accepts.
@@ -53,8 +48,31 @@ PiExtensionFile = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]+\.(t
 class AgentConfig(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     model_name: str = "Agent"
-    model: str = Field(default="unknown", validation_alias=_model_alias)
+    model: str = "unknown"
     gateway: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_deprecated_keys(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "checkpoint_name" in data:
+            warn_deprecated(f"`{cls.__name__}.checkpoint_name`", "use `model`", stacklevel=3)
+            data = dict(data)
+            checkpoint_name = data.pop("checkpoint_name")
+            data.setdefault("model", checkpoint_name)
+        if cls.model_config.get("extra", "ignore") != "ignore":
+            return data
+        unknown = sorted(set(data) - set(cls.model_fields))
+        if unknown:
+            keys = ", ".join(f"`{key}`" for key in unknown)
+            warn_deprecated(
+                f"`{cls.__name__}` with unknown keys {keys} (ignored)",
+                f"use the fields `{cls.__name__}` defines",
+                change="will be an error",
+                stacklevel=3,
+            )
+        return data
 
 
 class ToolAgentConfig(AgentConfig):
@@ -99,7 +117,7 @@ ClaudeThinkingConfig = (
 
 class ClaudeConfig(ToolAgentConfig):
     model_name: str = "Claude"
-    model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
+    model: str = "claude-sonnet-4-6"
     tool_timeout_seconds: float | None = Field(default=120, gt=0, allow_inf_nan=False)
     max_tokens: int = 16384
     use_computer_beta: bool = True
@@ -128,7 +146,7 @@ class ClaudeConfig(ToolAgentConfig):
 
 class GeminiConfig(ToolAgentConfig):
     model_name: str = "Gemini"
-    model: str = Field(default="gemini-3.1-pro-preview", validation_alias=_model_alias)
+    model: str = "gemini-3.1-pro-preview"
     temperature: float | None = None
     top_p: float | None = None
     top_k: int | None = None
@@ -141,7 +159,7 @@ class GeminiConfig(ToolAgentConfig):
 
 class OpenAIConfig(ToolAgentConfig):
     model_name: str = "OpenAI"
-    model: str = Field(default="gpt-5.6", validation_alias=_model_alias)
+    model: str = "gpt-5.6"
     max_output_tokens: int | None = None
     temperature: float | None = None
     reasoning: Reasoning | None = None
@@ -182,7 +200,7 @@ def _dropped_keys(raw: Any, kept: Any, path: str = "") -> list[str]:
 
 class OpenAIChatConfig(ToolAgentConfig):
     model_name: str = "OpenAI Chat"
-    model: str = Field(default="gpt-5.4-mini", validation_alias=_model_alias)
+    model: str = "gpt-5.4-mini"
     checkpoint: str | None = Field(
         default=None,
         description="Specific checkpoint name for inference routing. "
@@ -203,7 +221,7 @@ class ClaudeCLIConfig(AgentConfig):
 
     system_prompt: str | None = None
     model_name: str = "Claude CLI"
-    model: str = Field(default="claude-sonnet-5", validation_alias=_model_alias)
+    model: str = "claude-sonnet-5"
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
     # Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
@@ -230,7 +248,9 @@ class ClaudeCLIConfig(AgentConfig):
     @model_validator(mode="after")
     def _warn_max_steps(self) -> Self:
         if "max_steps" in self.model_fields_set:
-            warn_deprecated("`ClaudeCLIConfig.max_steps`", "bound the run with `timeout_seconds`")
+            warn_deprecated(
+                "`ClaudeCLIConfig.max_steps`", "bound the run with `timeout_seconds`", stacklevel=3
+            )
         return self
 
 
@@ -241,7 +261,7 @@ class CodexCLIConfig(AgentConfig):
     """
 
     model_name: str = "Codex CLI"
-    model: str = Field(default="gpt-5.6-sol", validation_alias=_model_alias)
+    model: str = "gpt-5.6-sol"
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     # Maps to ``model_reasoning_effort``; unset leaves the CLI's own default.
     reasoning_effort: CodexReasoningEffort | None = None
@@ -260,7 +280,7 @@ class PiConfig(AgentConfig):
     """
 
     model_name: str = "Pi"
-    model: str = Field(default="deepseek/deepseek-v4.1-flash", validation_alias=_model_alias)
+    model: str = "deepseek/deepseek-v4.1-flash"
     system_prompt: str | None = None
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
     # The checkpoint of ``model`` the HUD gateway routes to, rather than its active one.

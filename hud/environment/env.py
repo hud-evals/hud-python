@@ -2,8 +2,7 @@
 
 It declares what exists (identity, capabilities, registered templates) and the
 daemon hooks a host runs around serving, and holds the per-session
-connections and routes the server binds. ``hud.environment.server`` puts it on
-the wire.
+connections the server binds. ``hud.environment.server`` puts it on the wire.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 from hud.capabilities.base import Capability
 from hud.settings import settings
 
-from .egress import ConnectionRelay, Peer, WorkspaceRoute
+from .egress import ConnectionRelay, Peer
 from .workspace import Workspace
 
 if TYPE_CHECKING:
@@ -194,9 +193,6 @@ class Environment:
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
         self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
         self._workspaces: dict[str, Workspace] = {}
-        # Controller routes by the control sessions holding them; ``None`` peer when
-        # an authored peer already provides the route.
-        self._workspace_routes: dict[WorkspaceRoute, tuple[Workspace, Peer | None, set[str]]] = {}
         self._connections: dict[str, _BoundConnection] = {}
         self._binding = asyncio.Lock()
 
@@ -356,10 +352,6 @@ class Environment:
         for hook in reversed(self._on_stop):
             with contextlib.suppress(Exception):
                 await hook()
-        for workspace, peer, _sessions in reversed(self._workspace_routes.values()):
-            if peer is not None:
-                workspace.remove_peer(peer)
-        self._workspace_routes.clear()
         for bound in reversed(self._connections.values()):
             bound.release()
         self._connections.clear()
@@ -445,67 +437,8 @@ class Environment:
                 raise
 
     def release_session(self, session: str) -> None:
-        """Release a control session's relays, and its routes once no other session holds them."""
+        """Release a control session's relays."""
         for name, bound in reversed(list(self._connections.items())):
             if bound.session == session:
                 bound.release()
                 del self._connections[name]
-        for route, (workspace, peer, sessions) in reversed(list(self._workspace_routes.items())):
-            sessions.discard(session)
-            if not sessions:
-                if peer is not None:
-                    workspace.remove_peer(peer)
-                del self._workspace_routes[route]
-
-    async def bind_workspace_routes(
-        self, routes: Sequence[WorkspaceRoute], *, session: str
-    ) -> None:
-        """Install a control session's routes into their workspaces."""
-        async with self._binding:
-            if not self._started:
-                raise RuntimeError("environment must be started before workspace routes are bound")
-
-            planned: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
-            for route in dict.fromkeys(routes):
-                if (held := self._workspace_routes.get(route)) is not None:
-                    held[2].add(session)
-                    continue
-                workspace = self._workspace_for(route.capability)
-                if not workspace.bwrap_available or not workspace.owns_netns:
-                    raise RuntimeError(
-                        f"workspace route for {route.capability!r} requires an isolated network"
-                    )
-                matching = [
-                    peer
-                    for peer in workspace.peers
-                    if peer.name == route.host and peer.port == route.port
-                ]
-                if matching:
-                    if any(peer.address != (route.host, route.port) for peer in matching):
-                        raise RuntimeError(
-                            f"workspace route {route.host}:{route.port} conflicts with "
-                            "an authored peer"
-                        )
-                    planned.append((route, workspace, None))
-                    continue
-                planned.append(
-                    (
-                        route,
-                        workspace,
-                        Peer(route.host, route.port, target=(route.host, route.port)),
-                    )
-                )
-
-            bound: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
-            try:
-                for route, workspace, peer in planned:
-                    if peer is not None:
-                        await workspace.add_peer(peer, first=True)
-                    self._workspace_routes[route] = (workspace, peer, {session})
-                    bound.append((route, workspace, peer))
-            except BaseException:
-                for route, workspace, peer in reversed(bound):
-                    if peer is not None:
-                        workspace.remove_peer(peer)
-                    self._workspace_routes.pop(route, None)
-                raise

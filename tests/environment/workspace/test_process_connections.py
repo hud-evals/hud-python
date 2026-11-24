@@ -27,7 +27,7 @@ from hud import Environment, Task
 from hud.capabilities import Connection, SSHClient
 from hud.clients import HudClient, HudProtocolError, connect
 from hud.environment import process_guard
-from hud.environment.egress import ANY_HOST, BRIDGE_PORT, Peer, WorkspaceRoute
+from hud.environment.egress import ANY_HOST, BRIDGE_PORT, Peer
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.runtime import LocalRuntime
 
@@ -491,20 +491,6 @@ async def a_live_session_keeps_its_connection_name(env: Environment, root: Path)
                 await second.bind([inference("b")])
 
 
-async def a_finished_session_takes_its_route_with_it(env: Environment, root: Path) -> None:
-    env.workspace(root, network=False)
-    route = WorkspaceRoute("ssh", "inference.hud.so", 443)
-    async with LocalRuntime(env)(ECHO) as runtime:
-        async with connect(runtime, workspace_routes=[route, route]) as first:
-            await first.start_task("echo", {"tag": "a"})
-            assert (await resolved_names(first)).count("inference.hud.so") == 1
-            await first.grade({"answer": "x"})
-        async with connect(runtime) as later:
-            await later.start_task("echo", {"tag": "later"})
-            assert "inference.hud.so" not in await resolved_names(later)
-            await later.grade({"answer": "x"})
-
-
 @pytest.mark.e2e
 @pytest.mark.sandbox
 @pytest.mark.parametrize(
@@ -512,7 +498,6 @@ async def a_finished_session_takes_its_route_with_it(env: Environment, root: Pat
     [
         a_finished_session_releases_its_connection,
         a_live_session_keeps_its_connection_name,
-        a_finished_session_takes_its_route_with_it,
     ],
 )
 async def test_a_sessions_workspace_bindings_end_with_the_session(

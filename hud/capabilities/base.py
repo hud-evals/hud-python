@@ -10,10 +10,10 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Self
 from urllib.parse import urlsplit, urlunsplit
 
-SCHEME_RE: re.Pattern[str] = re.compile(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):")
+from hud.utils.deprecation import warn_deprecated
 
 
-def normalize_url(url: str, *, default_scheme: str, default_port: int | None) -> str:
+def _normalize_url(url: str, *, default_scheme: str, default_port: int | None) -> str:
     """Coerce shorthand ``host[:port]`` into a full ``scheme://host:port[/path]`` URL."""
     s = url if "://" in url else f"{default_scheme}://{url}"
     parts = urlsplit(s)
@@ -96,7 +96,7 @@ class Capability:
         platform's. ``cwd`` is where sessions start, a path in the session's own
         namespace. ``isolation`` records the sandbox actually granted to the workspace.
         """
-        normalized = normalize_url(url, default_scheme="ssh", default_port=22)
+        normalized = _normalize_url(url, default_scheme="ssh", default_port=22)
         if shell is None:
             shell = "cmd" if sys.platform == "win32" else "bash"
         params: dict[str, Any] = {"user": user, "host_pubkey": host_pubkey, "shell": shell}
@@ -121,7 +121,11 @@ class Capability:
         target_id: str | None = None,
     ) -> Capability:
         """``cdp/1.3`` — Chromium DevTools over WebSocket."""
-        normalized = normalize_url(url, default_scheme="ws", default_port=9222)
+        warn_deprecated(
+            "`Capability.cdp`",
+            'use `Capability(name="browser", protocol="cdp/1.3", url="ws://host:port")`',
+        )
+        normalized = _normalize_url(url, default_scheme="ws", default_port=9222)
         params: dict[str, Any] = {}
         if target_id is not None:
             params["target_id"] = target_id
@@ -141,7 +145,7 @@ class Capability:
         A URL without a port gets ``5900 + display``. Envs with several screens publish
         one capability per display.
         """
-        normalized = normalize_url(url, default_scheme="rfb", default_port=5900 + display)
+        normalized = _normalize_url(url, default_scheme="rfb", default_port=5900 + display)
         params: dict[str, Any] = {"display": display}
         if password is not None:
             params["password"] = password
@@ -157,12 +161,12 @@ class Capability:
         transport: Literal["sse", "streamable-http", "websocket"] | None = None,
     ) -> Capability:
         """``mcp/2025-11-25`` — MCP server (ws/wss/http/https; no stdio)."""
-        m = SCHEME_RE.match(url)
+        m = re.match(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):", url)
         if m and "://" not in url:
             raise ValueError(
                 f"mcp/2025-11-25: only ws/wss/http/https URLs are supported, got {m.group(1)!r}",
             )
-        normalized = normalize_url(url, default_scheme="ws", default_port=None)
+        normalized = _normalize_url(url, default_scheme="ws", default_port=None)
         scheme = urlsplit(normalized).scheme
         if scheme not in {"ws", "wss", "http", "https"}:
             raise ValueError(
@@ -174,7 +178,7 @@ class Capability:
             raise ValueError(f"mcp {transport} transport requires an http:// or https:// URL")
         if transport is None:
             transport = "websocket" if scheme in {"ws", "wss"} else "streamable-http"
-        normalized = normalize_url(
+        normalized = _normalize_url(
             normalized,
             default_scheme="ws",
             default_port=443 if scheme in {"https", "wss"} else 80,

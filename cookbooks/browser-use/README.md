@@ -16,4 +16,4 @@ uv run run.py path/to/tasks.py
 ```
 
 The tasks' environment must publish a browser, e.g.
-`Capability.cdp(url="ws://127.0.0.1:9222/devtools/browser/...")`.
+`Capability(name="browser", protocol="cdp/1.3", url="ws://127.0.0.1:9222/devtools/browser/...")`.
