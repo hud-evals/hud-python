@@ -21,7 +21,6 @@ from typing_extensions import TypeVar
 
 from hud.graders.base import Grade
 from hud.telemetry.context import get_current_trace_id
-from hud.telemetry.exporter import export_step
 from hud.utils.deprecation import moved_to, resolve_retired, warn_deprecated
 from hud.utils.serialization import JsonObject
 from hud.utils.time import now_iso
@@ -301,7 +300,10 @@ class Step(BaseModel, Generic[SourceT_co]):
 
     def emit(self, *, trace_id: str | None = None) -> None:
         """Export this step under ``trace_id``, else the current trace; deprecated."""
-        warn_deprecated("`Step.emit`", "use `hud.telemetry.export_step(trace_id, step)`")
+        # hud.eval.run imports this module, so the deprecated path imports it late.
+        from hud.eval.run import export_step
+
+        warn_deprecated("`Step.emit`", "use `hud.eval.run.export_step(trace_id, step)`")
         trace_id = trace_id or get_current_trace_id()
         if trace_id:
             export_step(trace_id, self)

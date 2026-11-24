@@ -9,7 +9,7 @@ import queue
 import threading
 import time
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import httpx2
 
@@ -28,7 +28,6 @@ from hud.utils.time import now_iso
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from hud.types import Step
     from hud.utils.serialization import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -89,19 +88,6 @@ def export(
                 PAYLOAD_ATTRIBUTE: payload,
             },
         )
-    )
-
-
-def export_step(trace_id: str, step: Step[Any]) -> None:
-    """Export ``step`` as one span of the trace ``trace_id``."""
-    export(
-        trace_id,
-        name=f"step.{step.source}",
-        schema=step.schema_tag,
-        payload=cast("JsonObject", step.model_dump(mode="json", exclude_none=True)),
-        started_at=step.started_at,
-        ended_at=step.ended_at,
-        error=step.error,
     )
 
 

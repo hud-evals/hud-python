@@ -24,7 +24,7 @@ from hud.telemetry.context import (
     get_trace_headers,
     set_trace_context,
 )
-from hud.telemetry.exporter import export_step
+from hud.telemetry.exporter import export
 from hud.telemetry.span import normalize_trace_id
 from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
 from hud.utils.gateway import routes_to_gateway
@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from hud.clients.client import HudClient
     from hud.environment.egress import WorkspaceRoute
     from hud.runtime.core import Provider, RuntimeConfig
+    from hud.utils.serialization import JsonObject
 
     from .task import Task
 
@@ -165,6 +166,19 @@ def parse_grade(frame: dict[str, Any]) -> Grade:
         return Grade.model_validate(frame, by_name=False)
     except ValidationError as exc:
         raise HudProtocolError(-32603, f"tasks.grade: {grade_problems(exc)}") from exc
+
+
+def export_step(trace_id: str, step: Step[Any]) -> None:
+    """Export ``step`` as a span of the trace ``trace_id``, for steps recorded outside a run."""
+    export(
+        trace_id,
+        name=f"step.{step.source}",
+        schema=step.schema_tag,
+        payload=cast("JsonObject", step.model_dump(mode="json", exclude_none=True)),
+        started_at=step.started_at,
+        ended_at=step.ended_at,
+        error=step.error,
+    )
 
 
 class Run:
