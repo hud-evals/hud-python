@@ -85,6 +85,22 @@ The generated task data is independent from the environment build. Editing an
 instruction, verifier timeout, or inline `tests/` content updates `tasks.json`
 or the mounted test tree without changing the environment image identity.
 
+### Oracle and nop
+
+A task's `solution/` folder ships with its environment, out of the agent's sight, so the
+[reference agents](/v6/reference/agents#reference-agents) check an adapted task the way Harbor's
+`oracle` and `nop` agents do:
+
+```bash
+hud eval .hud-adapt/<environment>/tasks.json oracle --full   # should score 1
+hud eval .hud-adapt/<environment>/tasks.json nop --full      # should score 0
+```
+
+The oracle copies `solution/` to `/solution` and runs `solve.sh` as the agent user, from the task's
+workdir, with the agent's network and the task's `[solution].env`. Its stdout is the answer, and a
+non-zero exit fails the run. `/solution` is removed before the verifier runs, since the environment's
+filesystem outlives the rollout. A task without `solution/solve.sh` fails the oracle's run.
+
 ### Deploy and sync
 
 Save the Compose configuration as `runtime.json` in the generated project root:

@@ -307,6 +307,16 @@ class PiConfig(AgentConfig):
         return body
 
 
+class OracleConfig(AgentConfig):
+    model_name: str = "Oracle"
+    model: str = "oracle"
+
+
+class NopConfig(AgentConfig):
+    model_name: str = "Nop"
+    model: str = "nop"
+
+
 class Citation(BaseModel):
     """A span of agent output linked to its source, normalized across providers."""
 

@@ -99,9 +99,11 @@ def assert_stock_compose_complete(compose_path: Path) -> None:
     for name, service in services.items():
         assert service.get("image"), name
         for volume in service.get("volumes", []):
-            if isinstance(volume, str) and volume.endswith(":/controller/tests:ro"):
-                tests = (project_root / volume.partition(":")[0]).resolve()
-                assert tests.is_relative_to(project_root) and tests.is_dir(), (name, tests)
+            if isinstance(volume, str) and volume.endswith(
+                (":/controller/tests:ro", ":/controller/solutions:ro")
+            ):
+                shipped = (project_root / volume.partition(":")[0]).resolve()
+                assert shipped.is_relative_to(project_root) and shipped.is_dir(), (name, shipped)
         build = service.get("build")
         if build is None:
             continue

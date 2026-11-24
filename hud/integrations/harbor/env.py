@@ -30,6 +30,8 @@ if TYPE_CHECKING:
 
 CONTROLLER_ROOT = Path("/controller")
 TESTS = Path("/tests")
+SOLUTIONS = CONTROLLER_ROOT / "solutions"
+SOLUTION = Path("/solution")
 LOGS = Path("/logs")
 VERIFIER_LOGS = LOGS / "verifier"
 AGENT_ANSWER = LOGS / "agent_answer.txt"
@@ -480,6 +482,38 @@ async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
         if entrypoint is not None:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(entrypoint.wait(), 10.0)
+
+
+@run.solution
+async def solve(instruction: str, task: TaskSpec) -> str:
+    """Run the task's ``solution/solve.sh`` in the agent's place, as Harbor's oracle agent does.
+
+    ``/solution/solve.sh`` runs as the agent, from the workdir, through the agent's
+    egress and with the task's ``[solution].env``; its stdout is the answer.
+    ``/solution`` is removed afterwards, since the image's filesystem outlives the rollout.
+    """
+    if task.solution is None:
+        raise ValueError(f"Harbor task {task.id!r} has no solution/solve.sh to run")
+    staged = task_path(SOLUTION.as_posix())
+    try:
+        await asyncio.to_thread(clear, staged)
+        await asyncio.to_thread(
+            shutil.copytree, SOLUTIONS / task.id, staged, symlinks=True, dirs_exist_ok=True
+        )
+        execution = await workspace.run(
+            verifier_command(staged / "solve.sh", (SOLUTION / "solve.sh").as_posix()),
+            env={"DEBIAN_FRONTEND": "noninteractive", **resolve_env_templates(task.solution.env)},
+            allowed_hosts=None,
+        )
+    finally:
+        await asyncio.to_thread(remove_path, staged)
+    if execution.returncode != 0:
+        detail = execution.stderr.decode("utf-8", "replace").strip()
+        raise RuntimeError(
+            f"Harbor solution for {task.id!r} exited with status {execution.returncode}"
+            + (f": {detail}" if detail else "")
+        )
+    return execution.stdout.decode("utf-8", "replace")
 
 
 if CONFIG.verifier_root is not None:

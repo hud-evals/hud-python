@@ -1,0 +1,8 @@
+[agent]
+user = "solver"
+
+[verifier]
+timeout_sec = 30
+
+[solution.env]
+WORD = "solved"

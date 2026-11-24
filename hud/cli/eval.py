@@ -17,6 +17,7 @@ from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, UrlCons
 from rich import box
 from rich.table import Table
 
+from hud.agents.types import ToolAgentConfig
 from hud.cli import CLI, CliError, Result, parse_key_value
 from hud.eval.taskset import Taskset
 from hud.runtime.core import Runtime
@@ -74,6 +75,11 @@ def _substitute_env(value: Any, mapping: dict[str, Any]) -> Any:
         return Template(value).substitute(mapping)
     except KeyError as exc:
         raise ValueError(f"{_CONFIG_PATH}: ${{{exc.args[0]}}} is not set") from None
+
+
+def _steps_capped(agent_type: AgentType) -> bool:
+    """Whether ``--max-steps`` and ``--auto-respond`` configure the agent: the provider agents."""
+    return issubclass(agent_type.config_cls, ToolAgentConfig)
 
 
 class EvalConfig(BaseModel):
@@ -307,9 +313,9 @@ def eval_command(
             "runtime": planned,
             "remote": planned is Placement.HOSTED,
             "all": cfg.all,
-            "max_steps": cfg.agent_config.get(agent_type.value, {}).get("max_steps")
-            if agent_type.is_cli
-            else cfg.max_steps,
+            "max_steps": cfg.max_steps
+            if _steps_capped(agent_type)
+            else cfg.agent_config.get(agent_type.value, {}).get("max_steps"),
             "max_concurrent": cfg.max_concurrent,
             "group_size": cfg.group_size,
             "task_ids": cfg.task_ids,
@@ -335,7 +341,7 @@ def eval_command(
             )
         )
         picked: dict[str, Any] = {"agent_type": picked_type}
-        if settings.api_key:
+        if picked_type.calls_model and settings.api_key:
             models = sorted(
                 (
                     catalog_model
@@ -363,7 +369,7 @@ def eval_command(
             picked["model"] = picked_model.model_name
             if picked_model.name:
                 picked["agent_config"] = {picked_type.value: {"model_name": picked_model.name}}
-        else:
+        elif picked_type.calls_model:
             hud_console.info(
                 f"Using the {picked_type.value} agent's default model "
                 f"({picked_type.config_cls().model}); set HUD_API_KEY to pick from the catalog."
@@ -466,7 +472,7 @@ def eval_command(
     agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
     if cfg.model:
         agent_kwargs["model"] = cfg.model
-    if not agent_type.is_cli:
+    if _steps_capped(agent_type):
         agent_kwargs["max_steps"] = cfg.max_steps
         if cfg.auto_respond:
             agent_kwargs["auto_respond"] = True

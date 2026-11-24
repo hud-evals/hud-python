@@ -65,8 +65,9 @@ A control session speaks JSON-RPC 2.0 for the connection's lifetime:
 | `hello` | Session id, environment name/version, and capability `bindings`. An optional `session_id` resumes a parked session. |
 | `tasks.list` | Registered task metadata for introspection and validation. |
 | `tasks.start` | The selected task's first yield, normalized to a prompt frame. |
+| `tasks.solve` | Runs the started task's reference solution with its arguments; the result's `answer` is what it returned. |
 | `tasks.grade` | The selected task's evaluation, including numeric `score`. |
-| `tasks.cancel` | Interrupts a running `tasks.start` or `tasks.grade`, then cancels and removes the session's task. |
+| `tasks.cancel` | Interrupts a running `tasks.start`, `tasks.solve` or `tasks.grade`, then cancels and removes the session's task. |
 | `bye` | Cancels the task and ends the session. |
 
 Each request and response is one newline-delimited JSON frame. Calls on a

@@ -42,6 +42,13 @@ class AgentType(StrEnum):
     GEMINI = "gemini"
     OPENAI_COMPATIBLE = "openai_compatible"
     PI = "pi"
+    ORACLE = "oracle"
+    NOP = "nop"
+
+    @property
+    def calls_model(self) -> bool:
+        """Whether the agent calls a model; the reference agents ``oracle`` and ``nop`` do not."""
+        return self not in (AgentType.ORACLE, AgentType.NOP)
 
     @property
     def is_cli(self) -> bool:
@@ -80,6 +87,14 @@ class AgentType(StrEnum):
                 from hud.agents.pi.agent import PiAgent
 
                 return PiAgent
+            case AgentType.ORACLE:
+                from hud.agents.reference import OracleAgent
+
+                return OracleAgent
+            case AgentType.NOP:
+                from hud.agents.reference import NopAgent
+
+                return NopAgent
 
     @property
     def config_cls(self) -> type[AgentConfig]:
@@ -89,8 +104,10 @@ class AgentType(StrEnum):
             ClaudeConfig,
             CodexCLIConfig,
             GeminiConfig,
+            NopConfig,
             OpenAIChatConfig,
             OpenAIConfig,
+            OracleConfig,
             PiConfig,
         )
 
@@ -109,6 +126,10 @@ class AgentType(StrEnum):
                 return OpenAIChatConfig
             case AgentType.PI:
                 return PiConfig
+            case AgentType.ORACLE:
+                return OracleConfig
+            case AgentType.NOP:
+                return NopConfig
 
     @classmethod
     def of(cls, agent: object) -> AgentType | None:

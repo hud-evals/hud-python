@@ -143,6 +143,14 @@ class TaskRunner:
         frame = prompt if isinstance(prompt, dict) and "prompt" in prompt else {"prompt": prompt}
         return cast("dict[str, Any]", _jsonable(frame))
 
+    async def solve(self) -> dict[str, Any]:
+        if self._gen is None:
+            raise RuntimeError("task not started")
+        if self.task.solve is None:
+            raise LookupError(f"task {self.task.id!r} has no reference solution")
+        answer = await self.task.solve(**_coerce_args(self.task.sig, self._args))
+        return {"answer": _jsonable(answer)}
+
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self._gen is None:
             raise RuntimeError("task not started")
@@ -229,6 +237,12 @@ class _ControlChannel:
             current_session_id.reset(token)
             self.release_if_idle(claim_sid)
 
+    async def solve(self, session_id: str) -> dict[str, Any]:
+        runner = self.runners.get(session_id)
+        if runner is None:
+            raise _NoTaskInProgress("no task in progress")
+        return await runner.solve()
+
     def _adopt_parked(self) -> tuple[str, TaskRunner]:
         """Claim the parked session iff unambiguous — the blind-reconnect grade path."""
         parked = sorted(sid for sid in self.runners if sid not in self.live)
@@ -280,10 +294,10 @@ class _ControlChannel:
 class _Session:
     """One control connection: the session it speaks for, and the task call it runs.
 
-    tasks.start and tasks.grade run the task's own code, which can take as long as it
-    likes; they run beside the read loop so a cancel or a bye still reaches them. A
-    hang-up lets a start finish and park for resume, and ends a grade, whose result
-    nobody is left to receive.
+    tasks.start, tasks.solve and tasks.grade run the task's own code, which can take as
+    long as it likes; they run beside the read loop so a cancel or a bye still reaches
+    them. A hang-up lets a start finish and park for resume, and ends a solve or a grade,
+    whose result nobody is left to receive.
     """
 
     def __init__(self, channel: _ControlChannel, writer: asyncio.StreamWriter) -> None:
@@ -347,7 +361,7 @@ class _Session:
             await self._reply(msg_id, {"cancelled": True})
         elif self._work is not None:
             await self._error(msg_id, -32600, f"{method}: a task call is still running")
-        elif method in ("tasks.start", "tasks.grade"):
+        elif method in ("tasks.start", "tasks.solve", "tasks.grade"):
             self._work = asyncio.create_task(self._handle(msg))
             self._work_id, self._work_method = msg_id, method
         else:
@@ -386,6 +400,13 @@ class _Session:
                     )
                 case "tasks.start":
                     await self._start(msg_id, params)
+                case "tasks.solve":
+                    try:
+                        solved = await self.channel.solve(self.id)
+                    except _NoTaskInProgress as exc:
+                        await self._error(msg_id, -32600, str(exc))
+                        return
+                    await self._reply(msg_id, solved)
                 case "tasks.grade":
                     try:
                         evaluation = await self.channel.grade(self.id, params)

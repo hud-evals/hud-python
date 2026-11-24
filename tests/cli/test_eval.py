@@ -134,6 +134,79 @@ def test_eval_runs_the_tasks_it_selects(
     assert sorted(request.prompt for request in gateway.requests()) == prompts
 
 
+REFERENCE_TASKS_PY = """\
+from pydantic import BaseModel
+
+from hud import Environment
+
+env = Environment("demo")
+
+
+class Pair(BaseModel):
+    left: int
+    right: int
+
+
+@env.template(id="guess")
+async def guess(secret: str):
+    answer = yield "Guess the secret."
+    yield 1.0 if answer == secret else 0.0
+
+
+@guess.solution
+async def reveal(secret: str) -> str:
+    return secret
+
+
+@env.template(id="split", returns=Pair)
+async def split(total: int):
+    answer = yield f"Split {total} into two halves."
+    yield 1.0 if answer.content == Pair(left=total // 2, right=total - total // 2) else 0.0
+
+
+@split.solution
+async def halve(total: int) -> Pair:
+    return Pair(left=total // 2, right=total - total // 2)
+
+
+@env.template(id="greet")
+async def greet():
+    answer = yield "Say hello."
+    yield 1.0 if answer else 0.0
+
+
+tasks = [guess(secret="hunter2"), split(total=7), greet()]
+"""
+
+
+@pytest.mark.parametrize(
+    ("agent", "task_ids", "rewards"),
+    [
+        pytest.param("oracle", "0,1", [1.0, 1.0], id="the-oracle-passes-with-the-solution"),
+        pytest.param("nop", "0,1", [0.0, 0.0], id="nop-fails-without-an-answer"),
+    ],
+)
+def test_reference_agents_grade_a_task_without_a_model(
+    hud: Hud, agent: str, task_ids: str, rewards: list[float]
+) -> None:
+    (hud.cwd / "tasks.py").write_text(REFERENCE_TASKS_PY)
+
+    document = run(hud, "tasks.py", agent, "--task-ids", task_ids)
+
+    assert [run["reward"] for run in document["runs"]] == rewards
+    assert document["error_count"] == 0
+
+
+def test_the_oracle_reports_a_task_without_a_reference_solution(hud: Hud) -> None:
+    (hud.cwd / "tasks.py").write_text(REFERENCE_TASKS_PY)
+
+    document = run(hud, "tasks.py", "oracle", "--task-ids", "2")
+
+    (failed,) = document["runs"]
+    assert (failed["reward"], failed["is_error"]) == (0.0, False)
+    assert "task 'greet' has no reference solution" in failed["trace_error"]
+
+
 GLM = {
     "id": "z-ai/glm-5.2",
     "model_name": "z-ai/glm-5.2",

@@ -299,6 +299,11 @@ class HudClient:
         """Start a task; returns the first yield (``{"prompt": ...}``)."""
         return await self._call("tasks.start", {"id": task_id, "args": args or {}})
 
+    async def solve(self) -> Any:
+        """Send ``tasks.solve``: run the started task's reference solution; returns its answer."""
+        result = await self._call("tasks.solve", {})
+        return result.get("answer")
+
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send ``tasks.grade``; returns the evaluation dict (``{"score": ...}``)."""
         return await self._call("tasks.grade", payload)

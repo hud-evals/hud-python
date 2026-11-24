@@ -180,6 +180,21 @@ An agent type names an agent in `hud eval`, in `create_agent`, and in what `Host
 | `openai` | `OpenAIAgent` | `CodexCLIAgent` |
 | `gemini` | `GeminiAgent` | a Gemini CLI agent |
 | `openai_compatible` | `OpenAIChatAgent` | removed; use `pi` |
+| `oracle` | `OracleAgent` | `OracleAgent` |
+| `nop` | `NopAgent` | `NopAgent` |
+
+### Reference agents
+
+`OracleAgent` and `NopAgent` (`hud.agents`) call no model; they check a task's grading. The oracle
+has the environment run the task's [reference solution](/v6/reference/environment#reference-solutions)
+and submits its answer, so a sound task passes it. Nop submits nothing and touches nothing, so a sound
+task fails it. A task without a reference solution fails the oracle's run with an error naming the
+task.
+
+```bash
+hud eval tasks.py oracle --full   # every task should pass
+hud eval tasks.py nop --full      # every task should fail
+```
 
 ## Provider agents
 

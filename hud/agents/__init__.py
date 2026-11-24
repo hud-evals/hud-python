@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from hud.agents.openai.agent import OpenAIAgent
     from hud.agents.openai_compatible.agent import OpenAIChatAgent
     from hud.agents.pi.agent import PiAgent
+    from hud.agents.reference import NopAgent, OracleAgent
 
     GatewayAgent: TypeAlias = (
         ClaudeAgent
@@ -51,6 +52,11 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
     if model in {member.value for member in AgentType}:
         agent_type = AgentType(model)
+        if not agent_type.calls_model:
+            raise ValueError(
+                f"the {model} agent calls no model, so nothing routes through the gateway; "
+                f"instantiate {agent_type.cls.__name__}() directly"
+            )
     else:
         entry = resolve_gateway_model(model)
         agent_type = AgentType(entry.sdk_agent_type)
@@ -64,8 +70,10 @@ _LAZY_EXPORTS = {
     "ClaudeCLIAgent": "hud.agents.claude.cli.agent",
     "CodexCLIAgent": "hud.agents.codex.agent",
     "GeminiAgent": "hud.agents.gemini.agent",
+    "NopAgent": "hud.agents.reference",
     "OpenAIAgent": "hud.agents.openai.agent",
     "OpenAIChatAgent": "hud.agents.openai_compatible.agent",
+    "OracleAgent": "hud.agents.reference",
     "PiAgent": "hud.agents.pi.agent",
 }
 
@@ -75,8 +83,10 @@ __all__ = [
     "ClaudeCLIAgent",
     "CodexCLIAgent",
     "GeminiAgent",
+    "NopAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
+    "OracleAgent",
     "PiAgent",
     "create_agent",
 ]

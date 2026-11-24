@@ -53,12 +53,14 @@ from .config import (
     HealthcheckConfig,
     Network,
     PhasePolicy,
+    Solution,
     VerifierImage,
 )
 
 LOGGER = logging.getLogger(__name__)
 ASSETS = Path(__file__).parent
 COMPOSE_FILENAME = "docker-compose.yaml"
+SOLVE_SCRIPT = Path("solution/solve.sh")
 CONTROLLER_ROOT = Path("/controller")
 CONTROLLER_MODULE = "hud.integrations.harbor.env:env"
 MOUNTS_ROOT = Path("/mounts")
@@ -179,6 +181,12 @@ class PackageInfo(BaseModel):
     keywords: list[str] = Field(default_factory=list)
 
 
+class SolutionConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    env: dict[str, str] = Field(default_factory=dict)
+
+
 class TaskConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -189,6 +197,7 @@ class TaskConfig(BaseModel):
     environment: EnvironmentConfig = Field(default_factory=EnvironmentConfig)
     agent: Phase = Field(default_factory=Phase)
     verifier: Phase = Field(default_factory=Phase)
+    solution: SolutionConfig = Field(default_factory=SolutionConfig)
     steps: list[dict[str, Any]] | None = None
 
 
@@ -466,6 +475,7 @@ def adapt(
                 "metadata": True,
                 "steps": True,
                 "artifacts": True,
+                "solution": True,
                 "agent": {"timeout_sec"},
                 "verifier": {"timeout_sec", "collect"},
             },
@@ -784,6 +794,22 @@ def adapt(
             compose_project.services["main"] = main.model_copy(
                 update={"volumes": [*main.volumes, "./tests:/controller/tests:ro"]}
             )
+        # Beside the tests, out of the agent's sight: the controller runs a task's
+        # solution for ``OracleAgent`` (``env.py`` ``solve``).
+        solved = {task.path.name for task in group if (task.path / SOLVE_SCRIPT).is_file()}
+        if solved:
+            for task in group:
+                if task.path.name in solved:
+                    shutil.copytree(
+                        task.path / SOLVE_SCRIPT.parent,
+                        project / "solutions" / task.path.name,
+                        symlinks=True,
+                        ignore=IGNORED,
+                    )
+            main = compose_project.services["main"]
+            compose_project.services["main"] = main.model_copy(
+                update={"volumes": [*main.volumes, "./solutions:/controller/solutions:ro"]}
+            )
         recipe = compose_project.with_project_directory("./compose-project")
         compose_document = context / "compose.yaml"
         compose_document.write_text(
@@ -812,6 +838,11 @@ def adapt(
                     )
                     for artifact in config.artifacts
                 ],
+                "solution": (
+                    Solution(env=config.solution.env).model_dump()
+                    if task.path.name in solved
+                    else None
+                ),
             }
             verifier_environment = config.verifier.environment
             verifier_resources = (

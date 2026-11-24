@@ -129,7 +129,25 @@ class TaskTemplate(Generic[P]):
         # deserialization into ``Answer[T]``.
         self.return_type = returns
         self.sig = _parameter_signature(cast("types.FunctionType", func))
+        # The reference solution ``@template.solution`` registers; ``None`` when the task has none.
+        self.solve: Callable[..., Awaitable[Any]] | None = None
         functools.update_wrapper(self, func)
+
+    def solution(self, func: Callable[P, Awaitable[Any]]) -> Callable[P, Awaitable[Any]]:
+        """Register the task's reference solution, which ``OracleAgent`` runs in an agent's place.
+
+        It takes the template's arguments, does the task in the environment between
+        setup and grading, and returns the answer to grade.
+        """
+        if not inspect.iscoroutinefunction(func):
+            raise TypeError(
+                f"template {self.id!r}: the solution {getattr(func, '__qualname__', func)} must "
+                "be an async function (`async def ...:`)"
+            )
+        if self.solve is not None:
+            raise ValueError(f"template {self.id!r} already has a reference solution")
+        self.solve = func
+        return func
 
     def manifest_entry(self) -> dict[str, Any]:
         entry: dict[str, Any] = {
