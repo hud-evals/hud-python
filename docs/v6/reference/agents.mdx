@@ -232,8 +232,7 @@ everything comes from `run` - so one instance drives many concurrent rollouts.
 Every agent also carries an `AgentConfig` as `agent.config` (`timeout_seconds`, `model`, ...), typed by
 its parameter: `Agent[CodexCLIConfig]`. `agent.dump()` serializes that config to JSON and
 `AgentClass.load(data)` rebuilds the agent from it; [`HostedRuntime`](/v6/reference/runtime#hostedruntime)
-sends the registered agent type plus `dump()`. Unknown config keys are ignored with a deprecation
-warning. A subclass that overrides `__init__` calls
+sends the registered agent type plus `dump()`. A subclass that overrides `__init__` calls
 `super().__init__(config)`.
 
 ## Running an agent
