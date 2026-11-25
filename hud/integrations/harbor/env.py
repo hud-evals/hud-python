@@ -6,7 +6,6 @@ import fnmatch
 import json
 import math
 import os
-import re
 import shlex
 import shutil
 import socket
@@ -21,6 +20,7 @@ from hud.environment.env import Environment, current_session_id
 from hud.environment.workspace import Mount, Workspace
 from hud.graders.base import Grade
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
+from hud.utils.env_templates import resolve_env_templates
 from hud.utils.process import ProcessResult, create_process_group_exec
 
 if TYPE_CHECKING:
@@ -41,30 +41,6 @@ RUNTIME_ROOT = Path("/runtime")
 SESSIONS = RUNTIME_ROOT / "sessions"
 DOCKER_SOCKET = Path("/var/run/docker.sock")
 MANAGED_AGENTS = Path("/usr/local/lib/agents")
-
-ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
-
-
-def resolve_env_templates(env: dict[str, str]) -> dict[str, str]:
-    resolved: dict[str, str] = {}
-    for key, value in env.items():
-        match = ENV_TEMPLATE.fullmatch(value)
-        if match is None:
-            resolved[key] = value
-            continue
-        name, default = match.group(1), match.group(2)
-        runtime_value = os.environ.get(name)
-        if runtime_value is not None and (runtime_value or default is None):
-            resolved[key] = runtime_value
-        elif default is not None:
-            resolved[key] = default
-        else:
-            raise ValueError(
-                f"Harbor env template for {key!r} needs {name!r}; "
-                "the runtime environment must provide it"
-            )
-    return resolved
-
 
 for policy in (CONFIG.environment, CONFIG.agent):
     policy.env = resolve_env_templates(policy.env)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -15,6 +16,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from hud.agents.reference import Solution, SolutionFile
 from hud.capabilities.base import Capability
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT, VISITOR_PORT, Peer
 from hud.environment.server import DEFAULT_PORT
@@ -59,6 +61,8 @@ from .config import (
 LOGGER = logging.getLogger(__name__)
 ASSETS = Path(__file__).parent
 COMPOSE_FILENAME = "docker-compose.yaml"
+SOLUTION_DIR = "solution"
+SOLVE_SCRIPT = "solve.sh"
 CONTROLLER_ROOT = Path("/controller")
 CONTROLLER_MODULE = "hud.integrations.harbor.env:env"
 MOUNTS_ROOT = Path("/mounts")
@@ -179,6 +183,12 @@ class PackageInfo(BaseModel):
     keywords: list[str] = Field(default_factory=list)
 
 
+class SolutionConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    env: dict[str, str] = Field(default_factory=dict)
+
+
 class TaskConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -189,6 +199,7 @@ class TaskConfig(BaseModel):
     environment: EnvironmentConfig = Field(default_factory=EnvironmentConfig)
     agent: Phase = Field(default_factory=Phase)
     verifier: Phase = Field(default_factory=Phase)
+    solution: SolutionConfig = Field(default_factory=SolutionConfig)
     steps: list[dict[str, Any]] | None = None
 
 
@@ -226,6 +237,8 @@ class HarborTask:
     dockerfile: Path
     base_image: str
     resources: RuntimeResources | None
+    # ``solution/``, carried in the task's ``validation`` for ``OracleAgent``.
+    solution: Solution | None
 
 
 def _tree_hash(root: Path) -> str:
@@ -398,6 +411,11 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
             "harbor.invalid.missing_instruction",
             f"{task_dir.name} has no instruction.md",
         )
+    solution: Solution | None = None
+    try:
+        solution = _solution(task_dir, config)
+    except (OSError, ValueError) as error:
+        add("harbor.invalid.solution", str(error))
     if findings:
         return None, tuple(findings)
 
@@ -413,8 +431,50 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
             dockerfile=dockerfile,
             base_image=base_image,
             resources=resources,
+            solution=solution,
         ),
         (),
+    )
+
+
+def _solution(task_dir: Path, config: TaskConfig) -> Solution | None:
+    """``solution/`` as the reference solution Harbor's oracle runs, or None without ``solve.sh``.
+
+    The files travel inline in the task row; ``solve.sh`` runs from ``/solution`` with
+    ``[solution].env``, through its shebang or else ``/bin/sh``.
+    """
+    root = task_dir / SOLUTION_DIR
+    if not (root / SOLVE_SCRIPT).is_file():
+        return None
+    files: list[SolutionFile] = []
+    for directory, names, filenames in os.walk(root):
+        ignored = IGNORED(directory, [*names, *filenames])
+        names[:] = sorted(name for name in names if name not in ignored)
+        for filename in sorted(name for name in filenames if name not in ignored):
+            path = Path(directory) / filename
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                raise ValueError(
+                    f"{SOLUTION_DIR}/{relative} is a symlink; a solution carries files"
+                )
+            data = path.read_bytes()
+            try:
+                content, encoding = data.decode("utf-8"), "utf-8"
+            except UnicodeDecodeError:
+                content, encoding = base64.b64encode(data).decode("ascii"), "base64"
+            files.append(
+                SolutionFile(
+                    path=relative,
+                    content=content,
+                    encoding=encoding,
+                    executable=relative == SOLVE_SCRIPT or bool(path.stat().st_mode & 0o111),
+                )
+            )
+    return Solution(
+        name="reference",
+        files=files,
+        command=f"/solution/{SOLVE_SCRIPT}",
+        env=config.solution.env,
     )
 
 
@@ -466,6 +526,7 @@ def adapt(
                 "metadata": True,
                 "steps": True,
                 "artifacts": True,
+                "solution": True,
                 "agent": {"timeout_sec"},
                 "verifier": {"timeout_sec", "collect"},
             },
@@ -836,6 +897,11 @@ def adapt(
                     "task": task_config,
                 },
                 slug=task.path.name,
+                validation=(
+                    [task.solution.model_dump(mode="json", exclude_defaults=True)]
+                    if task.solution is not None
+                    else None
+                ),
                 agent_config=(
                     {"timeout_seconds": config.agent.timeout_sec}
                     if config.agent.timeout_sec is not None

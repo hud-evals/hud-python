@@ -3,8 +3,8 @@ the HUD gateway. A reward of 1 proves the prompt reached the model, its tool cal
 the environment, and the grade came from the right task.
 
 The families are ``AgentType``'s members; a fixture is any module in
-``tests/fixtures/envs`` that declares the ``tasks`` it runs. Each family runs its default
-model, so this lane is what proves the defaults work.
+``tests/fixtures/envs`` that declares the ``tasks`` it runs. Each family that calls a model runs
+its default model, so this lane is what proves the defaults work.
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ CELLS = [
         marks=GATEWAY_DOWN if kind is AgentType.GEMINI else (),
     )
     for kind in AgentType
+    if kind.calls_model
     for fixture in (["workspace"] if kind.is_cli else FIXTURES)
 ]
 

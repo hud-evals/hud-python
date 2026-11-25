@@ -180,6 +180,47 @@ An agent type names an agent in `hud eval`, in `create_agent`, and in what `Host
 | `openai` | `OpenAIAgent` | `CodexCLIAgent` |
 | `gemini` | `GeminiAgent` | a Gemini CLI agent |
 | `openai_compatible` | `OpenAIChatAgent` | removed; use `pi` |
+| `oracle` | `OracleAgent` | `OracleAgent` |
+| `nop` | `NopAgent` | `NopAgent` |
+
+### Reference agents
+
+`OracleAgent` and `NopAgent` (`hud.agents`) call no model; they check a task's grading. The oracle
+runs one of the task's [reference solutions](#reference-solutions) in an agent's place, so a sound
+task passes it. Nop submits nothing and touches nothing, so a sound task fails it. A task without a
+reference solution fails the oracle's run before its environment starts.
+
+```bash
+hud eval tasks.py oracle --full                        # every task should pass
+hud eval tasks.py oracle --config solution=alternate   # run each task's solution named "alternate"
+hud eval tasks.py nop --full                           # every task should fail
+```
+
+### Reference solutions
+
+A task's reference solutions are its `validation` rows. They travel with the task, locally, in
+Docker and on HUD, so an environment needs nothing of its own for the oracle to check it. Each row
+is a solution:
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Names the solution; `OracleAgent(OracleConfig(solution=...))` picks one, else the first runs. |
+| `answer` | The answer the oracle submits. |
+| `command` | A shell command the oracle runs in the environment's `ssh` workspace as the agent does: as the agent user, from its working directory. Its output and exit code go in the trace; a non-zero exit fails the run. |
+| `files` | Files staged under `root` before `command` runs: `path` (relative to `root`), `content`, `encoding` (`utf-8` or `base64`) and `executable`. Up to 1 MiB in all. |
+| `root` | Where `files` go: absolute, or relative to the working directory. Defaults to `/solution`; the agent user must be able to create it. |
+| `env` | Variables `command` runs with. A `${NAME}` or `${NAME:-default}` value resolves where the oracle runs. |
+
+A solution has a `command`, an `answer`, or both:
+
+```python
+task = guess(secret="hunter2")
+task.validation = [
+    {"name": "reveal", "answer": "hunter2"},
+    {"name": "script", "files": [{"path": "solve.sh", "content": SOLVE_SH, "executable": True}],
+     "command": "/solution/solve.sh"},
+]
+```
 
 ## Provider agents
 
