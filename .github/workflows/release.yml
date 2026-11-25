@@ -102,6 +102,7 @@ jobs:
     environment: pypi
     permissions:
       contents: write
+      id-token: write
     env:
       TAG: v${{ needs.version.outputs.version }}
     steps:
@@ -113,10 +114,9 @@ jobs:
       - name: Build and publish 'hud' to PyPI
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.version.outputs.version }}
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           uv build
-          uv publish --check-url https://pypi.org/simple/
+          uv publish --trusted-publishing always --check-url https://pypi.org/simple/
 
       - name: Tag the published commit
         run: |
