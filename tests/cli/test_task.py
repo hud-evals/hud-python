@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment, Task
-from hud.clients import connect
-from hud.runtime import LocalRuntime
+from hud import Environment
+from hud.environment.client import connect
+from tests.serving import serving
 
 if TYPE_CHECKING:
     from tests.conftest import Hud
@@ -75,28 +75,37 @@ def counting_env(starts: list[str]) -> Environment:
 
 
 @pytest.mark.parametrize(
-    ("parked", "starts", "outcome"),
+    "leased",
     [
-        pytest.param(0, 1, {"score": 1.0}, id="starts-when-nothing-is-parked"),
-        pytest.param(1, 1, {"score": 1.0}, id="resumes-a-parked-session"),
-        pytest.param(2, 2, {"error": "failure"}, id="ambiguous-parked-sessions"),
+        pytest.param(False, id="runs-the-task-itself-without-a-session"),
+        pytest.param(True, id="attaches-to-a-leased-session"),
     ],
 )
-async def test_grade_resumes_a_started_task_on_a_served_env(
-    hud: Hud, parked: int, starts: int, outcome: dict[str, Any]
+async def test_grade_attaches_to_a_started_session_or_runs_the_task_itself(
+    hud: Hud, leased: bool
 ) -> None:
     started: list[str] = []
-    async with LocalRuntime(counting_env(started))(Task(env="example", id="solve")) as runtime:
-        for _ in range(parked):
-            async with connect(runtime) as client:
+    async with serving(counting_env(started)) as runtime:
+        session: list[str] = []
+        if leased:
+            async with connect(runtime, lease=60) as client:
                 await client.start_task("solve", {})
+                session = ["--session", client.session_id]
         result = await asyncio.to_thread(
-            hud, "task", "grade", "solve", "--url", runtime.url, "--answer", "answer", "--json"
+            hud,
+            "task",
+            "grade",
+            "solve",
+            "--url",
+            runtime.url,
+            *session,
+            "--answer",
+            "answer",
+            "--json",
         )
 
-    assert result.exit_code == ("error" in outcome), result
-    assert len(started) == starts
-    assert {key: result.json[key] for key in outcome} == outcome
+    assert result.exit_code == 0, result
+    assert (len(started), result.json["score"]) == (1, 1.0)
 
 
 def test_a_task_starts_on_the_env_hud_serve_serves_until_interrupted(

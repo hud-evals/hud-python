@@ -8,13 +8,14 @@ import inspect
 import sys
 from collections import deque
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 from weakref import WeakValueDictionary
 
 from hud.environment import load_environment
 from hud.environment.env import Environment
-from hud.environment.server import PORT_ANNOUNCEMENT, bind, unbind
+from hud.environment.server import PORT_ANNOUNCEMENT
 from hud.utils.process import (
     OUTPUT_DRAIN_TIMEOUT,
     create_process_group_exec,
@@ -35,12 +36,21 @@ if TYPE_CHECKING:
 _ENVIRONMENT_LOCKS: WeakValueDictionary[Environment, asyncio.Lock] = WeakValueDictionary()
 
 
+@dataclass(frozen=True)
+class InProcessRuntime(Runtime):
+    """An environment started in this process; ``hud.environment.client.connect`` opens its
+    sessions directly, with no control channel."""
+
+    env: Environment = field(kw_only=True, repr=False, compare=False)
+
+
 class LocalRuntime:
-    """The local provider: serve an environment in this process.
+    """The local provider: run an environment in this process, with no control channel.
 
     ``source`` is a ``.py`` file or directory loaded per acquisition (``env`` picks
     one of several environments, defaulting to the task's), a live ``Environment``,
-    or a ``(task) -> Environment`` constructor called per acquisition.
+    or a ``(task) -> Environment`` constructor called per acquisition. The yielded
+    runtime's url, ``local://<env name>``, names the environment.
 
     ``ready_timeout`` bounds ``@env.initialize``. Acquisitions of one environment
     instance are serialized. Hooks share this event loop, so blocking env code stalls
@@ -99,19 +109,11 @@ class LocalRuntime:
                 ) from e
             if not isinstance(env, Environment):
                 raise TypeError(f"LocalRuntime: constructor returned {env!r}, not an Environment")
+
             async with _ENVIRONMENT_LOCKS.setdefault(env, asyncio.Lock()):
                 try:
                     await asyncio.wait_for(env.start(), self.ready_timeout)
-                    server = await bind(env, "127.0.0.1", 0)
-                    host, port = server.sockets[0].getsockname()[:2]
-                    serve_task = asyncio.create_task(server.serve_forever())
-                    try:
-                        yield Runtime(f"tcp://{host}:{port}")
-                    finally:
-                        serve_task.cancel()
-                        await unbind(server)
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await serve_task
+                    yield InProcessRuntime(f"local://{env.name}", env=env)
                 finally:
                     await env.stop()
         finally:

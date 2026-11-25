@@ -16,8 +16,8 @@ import asyncio
 import statistics
 import time
 
+from hud.environment.client import connect
 from daytona import AsyncDaytona, Image
-from hud.clients import connect
 
 import pool
 from env import fix_calc
@@ -30,8 +30,8 @@ async def one(provider) -> tuple[float | None, str]:
     try:
         async with provider(fix_calc(variant=0)) as rt:
             elapsed = time.perf_counter() - t0
-            async with connect(rt) as client:
-                assert client.manifest is not None
+            async with connect(rt):
+                pass
             return elapsed, ""
     except Exception as exc:
         return None, f"{type(exc).__name__}: {exc}"
@@ -76,7 +76,7 @@ async def main(n: int) -> None:
     # Match the pool's region to where the runtime actually creates sandboxes.
     provider = DaytonaRuntime(built, image=Image.from_dockerfile("Dockerfile.hud"))
     async with provider(fix_calc(variant=0)) as probe:
-        target = await pool.region_of(probe.params["instance_id"])
+        target = await pool.region_of(probe.sandbox.id)
     print(f"region: {target}")
 
     try:

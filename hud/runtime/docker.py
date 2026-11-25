@@ -16,13 +16,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
-from hud.clients.client import DEFAULT_READY_TIMEOUT
 from hud.environment.server import DEFAULT_PORT, PORT_ANNOUNCEMENT
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
 from .compose import SECCOMP_PROFILE, ComposeConfig, DockerBindMount
-from .core import Runtime, RuntimeConfig, validate_session_id
+from .core import (
+    READY_TIMEOUT_SECONDS,
+    SESSION_STATE_ROOT,
+    Runtime,
+    RuntimeConfig,
+    session_dir,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -31,7 +36,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.runtime")
 
-_SESSION_ROOT = "/runtime/sessions"
+# Images built before session state moved to SESSION_STATE_ROOT still write it here.
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
 
 _DOCKER_SECURITY_ARGS = (
@@ -46,7 +51,8 @@ _DOCKER_SECURITY_ARGS = (
 )
 
 
-def _require_free_disk(output: str, storage_mb: int) -> None:
+async def _require_free_disk(exec_in_main: Sequence[str], storage_mb: int) -> None:
+    output, _ = await _docker(*exec_in_main, "df", "-Pk", "/")
     try:
         available_kib = int(output.strip().splitlines()[-1].split()[-3])
     except (IndexError, ValueError):
@@ -57,6 +63,18 @@ def _require_free_disk(output: str, storage_mb: int) -> None:
             f"DockerRuntime requires {storage_mb} MB of free disk; "
             f"the environment has {available_mb} MB"
         )
+
+
+async def _published_port(docker: Sequence[str], owner: str, port: int, name: str) -> int:
+    """The host port ``owner`` publishes ``port`` on, failing with its last logs if it
+    exited first."""
+    mapping, _ = await _docker(*docker, "port", owner, str(port))
+    if not mapping.strip():
+        logs_out, logs_err = await _docker(*docker, "logs", "--tail", "40", owner, check=False)
+        raise RuntimeError(
+            f"{name} exited before serving port {port}:\n{(logs_err or logs_out).strip()}"
+        )
+    return int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
 
 
 @asynccontextmanager
@@ -170,12 +188,16 @@ class DockerRuntime:
             config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
         self.runtime_config = config if config.model_dump(exclude_none=True) else None
 
+    def config_for(self, task: Task) -> RuntimeConfig:
+        """This provider's runtime configuration, overridden by ``task``'s."""
+        return (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
-        config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+        config = self.config_for(task)
         startup_timeout = config.limits.startup_timeout_s if config.limits is not None else None
         run_timeout = config.limits.run_timeout_s if config.limits is not None else None
-        params = {"ready_timeout": startup_timeout} if startup_timeout is not None else {}
+        ready_timeout = startup_timeout or READY_TIMEOUT_SECONDS
         resources = config.resources
         if resources is not None:
             resources.require_support("DockerRuntime", {"cpu", "memory_mb", "storage_mb", "gpu"})
@@ -189,7 +211,6 @@ class DockerRuntime:
                 raise ValueError("DockerRuntime run_args apply only to image environments")
             compose_config = ComposeConfig.from_file(compose)
             port_service = compose_config.network_owner("main")
-            resources = config.resources
             if (
                 resources is not None
                 and resources.gpu is not None
@@ -278,21 +299,21 @@ class DockerRuntime:
                         await _wait_serving(
                             container,
                             "Compose main service",
-                            DEFAULT_READY_TIMEOUT
+                            ready_timeout
                             if startup_deadline is None
                             else startup_deadline - loop.time(),
                         )
                         if resources is not None and resources.storage_mb is not None:
-                            free_disk, _ = await _docker(
-                                *command, "exec", "-T", "main", "df", "-Pk", "/"
+                            await _require_free_disk(
+                                (*command, "exec", "-T", "main"), resources.storage_mb
                             )
-                            _require_free_disk(free_disk, resources.storage_mb)
-                        mapping, _ = await _docker(*command, "port", port_service, str(self.port))
-                        host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
+                        host_port = await _published_port(
+                            command, port_service, self.port, f"Compose {port_service} service"
+                        )
                         async with _docker_deadline(run_timeout, teardown):
                             yield DockerEndpoint(
                                 f"tcp://127.0.0.1:{host_port}",
-                                params=params,
+                                ready_timeout=ready_timeout,
                                 config=config if config.model_dump(exclude_none=True) else None,
                                 container=container,
                             )
@@ -305,7 +326,6 @@ class DockerRuntime:
             )
 
         resource_args: list[str] = []
-        resources = config.resources
         if resources is not None:
             if resources.cpu is not None:
                 cpu = (
@@ -340,7 +360,7 @@ class DockerRuntime:
                 *mount_args,
                 *_DOCKER_SECURITY_ARGS,
                 "--mount",
-                f"type=volume,source={session_volume},target={_SESSION_ROOT}",
+                f"type=volume,source={session_volume},target={SESSION_STATE_ROOT}",
                 "--mount",
                 f"type=volume,source={session_volume},target={_SESSION_ALIAS_ROOT}",
                 "--publish",
@@ -354,17 +374,17 @@ class DockerRuntime:
                 await _wait_serving(
                     container,
                     f"container for image {config.image!r}",
-                    DEFAULT_READY_TIMEOUT if startup_timeout is None else startup_timeout,
+                    ready_timeout,
                 )
                 if resources is not None and resources.storage_mb is not None:
-                    free_disk, _ = await _docker("exec", container, "df", "-Pk", "/")
-                    _require_free_disk(free_disk, resources.storage_mb)
-                mapping, _ = await _docker("port", container, str(self.port))
-                host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
+                    await _require_free_disk(("exec", container), resources.storage_mb)
+                host_port = await _published_port(
+                    (), container, self.port, f"container for image {config.image!r}"
+                )
                 async with _docker_deadline(run_timeout, teardown):
                     yield DockerEndpoint(
                         f"tcp://127.0.0.1:{host_port}",
-                        params=params,
+                        ready_timeout=ready_timeout,
                         config=config,
                         container=container,
                     )
@@ -386,10 +406,9 @@ class DockerEndpoint(Runtime):
 
     @asynccontextmanager
     async def snapshot_session(self, session_id: str) -> AsyncGenerator[Path | None]:
-        validate_session_id(session_id)
+        root = str(session_dir(session_id))
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"
-            root = f"{_SESSION_ROOT}/{session_id}"
             exists, _ = await _docker(
                 "exec",
                 self.container,
@@ -438,8 +457,7 @@ with tarfile.open(sys.argv[2], "w:gz") as output:
             yield destination
 
     async def restore_session(self, session_id: str, source: Path) -> None:
-        validate_session_id(session_id)
-        target = f"{_SESSION_ROOT}/{session_id}"
+        target = str(session_dir(session_id))
         with tempfile.TemporaryDirectory(prefix="hud-session-import-") as directory:
             root = Path(directory)
             _extract_session_archive(source, root)

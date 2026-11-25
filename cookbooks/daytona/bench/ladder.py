@@ -6,7 +6,7 @@
 
 Infra mode measures how sandbox spin-up and the one-SSH-connection-per-sandbox
 transport behave under fan-out. Each worker acquires a sandbox, opens a fresh
-control connection, reads ``client.manifest`` (one real handshake), and exits; no
+control connection with ``connect(rt)`` (one real handshake), and exits; no
 agent, no tokens.
 
 Writes ``ladder.csv`` and ``ladder.svg``.
@@ -22,9 +22,9 @@ import statistics
 import time
 from pathlib import Path
 
+from hud.environment.client import connect
 from daytona import Image
 from hud.agents import ClaudeAgent
-from hud.clients import connect
 
 from env import fix_calc
 from runtime import DaytonaRuntime
@@ -44,8 +44,7 @@ async def one_infra(provider, idx: int) -> dict:
         async with provider(fix_calc()) as rt:
             row["spin_up_s"] = time.perf_counter() - t0
             t1 = time.perf_counter()
-            async with connect(rt) as client:
-                assert client.manifest is not None
+            async with connect(rt):
                 row["connect_s"] = time.perf_counter() - t1
             row["ok"] = True
     except Exception as exc:

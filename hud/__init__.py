@@ -41,7 +41,6 @@ _RETIRED = {
         ),
     ),
     **moved_to("hud.capabilities", "Connection"),
-    **moved_to("hud.clients", "connect"),
     **moved_to("hud.cli.tasksets", "SyncPlan"),
     **moved_to("hud.telemetry", "instrument"),
     **served_from("hud.train.client", "TrainingClient", instead=TRAINING_REPLACEMENT),

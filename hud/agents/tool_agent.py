@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities.mcp import MCPClient
+from hud.capabilities.registry import open_client
 from hud.capabilities.ssh import SSHConnectionError
 from hud.types import PromptMessage, Step, StopCondition, TextContent, Tool, ToolCall, ToolResult
 from hud.utils.deprecation import warn_deprecated
@@ -97,19 +99,18 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
     async def __call__(self, run: Run) -> None:
         connections: dict[str, CapabilityClient] = {}
         opened_protocols: set[str] = set()
-        manifest = run.client.manifest
-        if manifest is not None:
-            wanted = {client.protocol for client in type(self).clients}
-            for cap in manifest.bindings:
+        wanted = {client.protocol for client in type(self).clients}
+        async with contextlib.AsyncExitStack() as opened:
+            for cap in run.capabilities:
                 if cap.protocol not in wanted:
                     continue
                 if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
                     continue
-                connections[cap.name] = await run.client.open(cap.name)
+                connections[cap.name] = await opened.enter_async_context(open_client(cap))
                 opened_protocols.add(cap.protocol)
-        state = await self._initialize_state(prompt=run.prompt_messages)
-        state.tools, state.params = await self._build_tools(connections)
-        await self._loop(run, state)
+            state = await self._initialize_state(prompt=run.prompt)
+            state.tools, state.params = await self._build_tools(connections)
+            await self._loop(run, state)
 
     async def _build_tools(
         self,

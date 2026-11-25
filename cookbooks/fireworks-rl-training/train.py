@@ -19,6 +19,7 @@ from hud import Run, Taskset, Trace
 from hud.agents import Agent
 from hud.agents.types import AgentStep, Sample, Usage
 from hud.runtime import HUDRuntime, LocalRuntime, Provider
+from hud.types import text_of
 from tinker_cookbook.renderers import get_renderer, get_text_content
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 
@@ -215,7 +216,7 @@ class FireworksAgent(Agent):
 
     async def __call__(self, run: Run) -> None:
         prompt = self.renderer.build_generation_prompt(
-            [{"role": "user", "content": run.prompt_text}]
+            [{"role": "user", "content": text_of(run.prompt)}]
         )
         if prompt.length + self.sampling_params.max_tokens > self.max_seq_len:
             raise ValueError(

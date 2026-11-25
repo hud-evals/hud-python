@@ -14,9 +14,7 @@ from importlib import import_module
 
 import pytest
 
-from hud import Environment, Task
-from hud.clients import connect
-from hud.runtime import LocalRuntime
+from hud import Environment
 from hud.utils.exceptions import HudDeprecationWarning
 
 RUNTIME_NAMES = [
@@ -41,7 +39,6 @@ ROOT_RUNTIME_NAMES = sorted(set(RUNTIME_NAMES) - {"ModalRuntime", "Provider", "S
 RETIRED = [
     *[("hud", name, "hud.runtime") for name in ROOT_RUNTIME_NAMES],
     ("hud", "Connection", "hud.capabilities"),
-    ("hud", "connect", "hud.clients"),
     ("hud", "SyncPlan", "hud.cli.tasksets"),
     ("hud", "instrument", "hud.telemetry"),
     *[("hud.eval", name, "hud") for name in ["Grade", "Job", "Run", "Task", "Taskset", "Trace"]],
@@ -156,11 +153,7 @@ async def test_a_template_written_with_the_retired_argument_helpers_keeps_its_hi
         yield prompt
         yield 1.0
 
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="review")) as runtime,
-        connect(runtime) as client,
-    ):
-        (template,) = await client.list_tasks()
+    (template,) = [task.manifest_entry() for task in env.tasks.values()]
 
     schema = template["args"]
     hints = {name: spec.get("x-hud-hint") for name, spec in schema["properties"].items()}

@@ -15,6 +15,7 @@ from hud import Environment, Task, Taskset
 from hud.agents.base import Agent
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime, SubprocessRuntime
+from hud.types import text_of
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.runtime.conftest import gone
@@ -87,7 +88,7 @@ async def test_one_source_serves_each_rows_env_unless_env_pins_one(
 
     class Reader(Agent):
         async def __call__(self, run: Run) -> None:
-            prompts.append(run.prompt_text.split(" serves")[0])
+            prompts.append(text_of(run.prompt).split(" serves")[0])
 
     await Taskset("mixed", rows).run(Reader(), runtime=serve(source), max_concurrent=1)
     await Taskset("mixed", rows).run(Reader(), runtime=serve(source, env="beta"), max_concurrent=1)
@@ -101,7 +102,7 @@ async def test_a_child_process_serves_from_its_sources_directory(tmp_path: Path)
 
     class Reader(Agent):
         async def __call__(self, run: Run) -> None:
-            prompts.append(run.prompt_text)
+            prompts.append(text_of(run.prompt))
 
     await Task(env="lab", id="where").run(Reader(), runtime=SubprocessRuntime(source))
 
@@ -145,29 +146,6 @@ def test_a_live_environment_serves_rollouts_from_one_event_loop_after_another() 
     rewards = [asyncio.run(solve().run(ScriptedAgent("x"), group=2)).reward for _ in range(2)]
 
     assert rewards == [1.0, 1.0]
-
-
-async def test_an_in_process_env_is_torn_down_while_a_peer_still_holds_a_connection() -> None:
-    env = Environment("lab")
-
-    @env.template()
-    async def solve():
-        yield "go"
-        yield 1.0
-
-    held = []
-
-    class HoldsAConnection(Agent):
-        async def __call__(self, run: Run) -> None:
-            assert run.trace.runtime is not None
-            host, port = run.trace.runtime.removeprefix("tcp://").rsplit(":", 1)
-            held.append(await asyncio.open_connection(host, int(port)))
-
-    job = await asyncio.wait_for(solve().run(HoldsAConnection()), timeout=10)
-
-    assert job.reward == 1.0
-    ((_, writer),) = held
-    writer.close()
 
 
 async def test_an_env_whose_initialize_raises_is_still_shut_down() -> None:

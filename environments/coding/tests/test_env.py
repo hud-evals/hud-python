@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 from hud import Task
-from hud.clients import HudProtocolError, connect
+from hud.environment import HudProtocolError
+from hud.environment.client import connect
 from hud.runtime import SubprocessRuntime
 
 import tasks

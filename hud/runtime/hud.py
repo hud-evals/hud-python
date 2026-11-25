@@ -89,12 +89,8 @@ class HUDRuntime:
         try:
             yield Runtime(
                 _runtime_tunnel_ws_url(runtime_url, session_id),
-                params={
-                    "headers": {"Authorization": f"Bearer {api_key}"},
-                    "session_id": session_id,
-                    "gateway_url": runtime_url,
-                    "ready_timeout": _RUNTIME_READY_TIMEOUT,
-                },
+                ready_timeout=_RUNTIME_READY_TIMEOUT,
+                headers={"Authorization": f"Bearer {api_key}"},
             )
         finally:
             await self._delete_runtime_session(runtime_url, api_key, session_id)
