@@ -4,7 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Stable version to release (X.Y.Z). Leave empty to publish this commit's dev build.
+        description: >-
+          Stable version to release (X.Y.Z). Leave empty to publish this commit's dev build; a
+          maintenance branch release/X.Y publishes X.Y.Z versions only.
         required: false
         type: string
 
@@ -13,10 +15,11 @@ permissions:
 
 jobs:
   version:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      newest: ${{ steps.version.outputs.newest }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -30,17 +33,37 @@ jobs:
         env:
           RELEASE: ${{ inputs.version }}
         run: |
+          stable() { git tag --list "$1" | grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n 1; }
+          newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]; }
+          # A maintenance branch release/X.Y publishes its own line's stable versions only.
+          tags='v*'
+          if [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
+            line=${GITHUB_REF#refs/heads/release/}
+            if ! [[ "$line" =~ ^[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Branch release/$line is not a maintenance branch; name it release/X.Y."
+              exit 1
+            fi
+            if [[ "$RELEASE" != "$line".* ]]; then
+              echo "::error::release/$line publishes stable $line.Z versions only; got '$RELEASE'."
+              exit 1
+            fi
+            tags="v$line.*"
+          fi
           if [ -n "$RELEASE" ]; then
-            latest=$(git tag --list 'v*' | grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n 1)
             if ! [[ "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "::error::Release version '$RELEASE' must be a stable X.Y.Z."
               exit 1
             fi
-            if [ "$(printf '%s\n' "$latest" "v$RELEASE" | sort -V | tail -n 1)" != "v$RELEASE" ] || [ "$latest" = "v$RELEASE" ]; then
+            latest=$(stable "$tags")
+            if ! newer "v$RELEASE" "$latest"; then
               echo "::error::Release version $RELEASE must be newer than $latest."
               exit 1
             fi
             echo "version=${RELEASE}" >> "$GITHUB_OUTPUT"
+            # The newest stable release of any line moves the docs and is GitHub's "Latest".
+            if newer "v$RELEASE" "$(stable 'v*')"; then
+              echo "newest=true" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
           version=$(uvx --from hatchling --with hatch-vcs hatchling version)
@@ -125,11 +148,15 @@ jobs:
 
       # docs.hud.ai builds the SDK tab from the docs branch.
       - name: Point docs at this release
-        if: inputs.version
+        if: needs.version.outputs.newest
         run: git push --force origin "${GITHUB_SHA}:refs/heads/docs"
 
       - name: Draft the GitHub release for its notes
         if: inputs.version
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$TAG" --verify-tag --draft --title "$TAG" --notes ""
+          NEWEST: ${{ needs.version.outputs.newest }}
+        run: |
+          flags=()
+          [ "$NEWEST" = true ] || flags=(--latest=false)
+          gh release create "$TAG" --verify-tag --draft --title "$TAG" --notes "" "${flags[@]}"
