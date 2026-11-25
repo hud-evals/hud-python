@@ -173,6 +173,8 @@ class DockerRuntime:
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+        if config.data is not None:
+            raise ValueError("DockerRuntime does not support runtime_config.data")
         startup_timeout = config.limits.startup_timeout_s if config.limits is not None else None
         run_timeout = config.limits.run_timeout_s if config.limits is not None else None
         params = {"ready_timeout": startup_timeout} if startup_timeout is not None else {}
