@@ -194,7 +194,9 @@ class Session:
             try:
                 evaluation = await gen.asend(_build_answer(task.return_type, payload))
             except StopAsyncIteration:
-                evaluation = 0.0
+                evaluation = Grade(
+                    content=f"task {task.id!r} ended without yielding a reward", is_error=True
+                )
             finally:
                 await self._teardown(gen)
         if isinstance(evaluation, (int, float)):

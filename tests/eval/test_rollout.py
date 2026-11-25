@@ -197,6 +197,20 @@ async def test_what_the_task_grades_with_is_the_runs_reward_or_its_error(
     assert (trace.error or "").startswith("[grading] ") is (status == "error")
 
 
+async def test_a_task_that_ends_without_a_reward_is_an_error_grade() -> None:
+    env = Environment("unrewarded")
+
+    @env.template()
+    async def forgets():
+        yield "go"
+
+    job = await forgets().run(ScriptedAgent("x"))
+
+    (trace,) = job.traces
+    assert trace in job.errors
+    assert trace.grade.content == "task 'forgets' ended without yielding a reward"
+
+
 async def test_an_agent_that_raises_before_answering_is_graded_on_no_answer() -> None:
     class Raises(Agent):
         async def __call__(self, run: Run) -> None:
