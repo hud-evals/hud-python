@@ -20,9 +20,12 @@ from typing import Any
 
 import pytest
 
+from hud import Environment, Task
 from hud.environment import Mount, Workspace
+from hud.environment.client import connect
 from hud.environment.egress import Peer
 from hud.environment.workspace import usable_bwrap
+from hud.runtime import LocalRuntime
 from tests.conftest import SANDBOX
 
 from .conftest import shell
@@ -162,6 +165,32 @@ async def test_the_shell_user_reads_and_writes_the_guest_workspace(
     assert (session.exit_status, session.stdout) == (0, "1000\nhello\n")
     assert (captured.returncode, captured.stdout) == (0, b"1000\nhello\n")
     assert (root / "output.txt").read_text() == "written\n"
+
+
+def sandboxes_over(root: Path) -> list[int]:
+    """Running bubblewrap processes whose command line binds ``root``."""
+    pids = []
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            argv = (proc / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if argv and Path(argv[0].decode()).name == "bwrap" and str(root).encode() in argv:
+            pids.append(int(proc.name))
+    return pids
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
+async def test_a_new_session_starts_the_sandbox_before_its_first_command(tmp_path: Path) -> None:
+    env = Environment("warm")
+    env.workspace(tmp_path, track_files=False, require_isolation=True)
+    async with LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime:
+        assert sandboxes_over(tmp_path) == []
+        async with connect(runtime):
+            assert sandboxes_over(tmp_path) != []
 
 
 @pytest.mark.e2e

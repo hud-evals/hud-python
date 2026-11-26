@@ -32,6 +32,8 @@ if TYPE_CHECKING:
     from hud.capabilities.connection import Connection
     from hud.eval.task import Task as EvalTask
 
+    from .file_tracker import FileTracker
+
 LOGGER = logging.getLogger("hud.environment")
 
 P = ParamSpec("P")
@@ -106,7 +108,7 @@ def _parameter_signature(func: types.FunctionType) -> inspect.Signature:
 class TaskTemplate(Generic[P]):
     """A registered ``@env.template``: calling it with args binds a runnable ``Task``.
 
-    ``TaskRunner`` drives its async-generator ``func`` when the env is served.
+    A ``Session`` drives its async-generator ``func`` when the env is served.
     """
 
     def __init__(
@@ -295,6 +297,14 @@ class Environment:
             raise KeyError(f"unknown capability: {name!r}")
         return cap
 
+    @property
+    def file_tracker(self) -> FileTracker | None:
+        """The started tracking workspace's tracker, served as the control channel's ``files.*``."""
+        return next(
+            (ws.file_tracker for ws in self._workspaces.values() if ws.file_tracker is not None),
+            None,
+        )
+
     def workspace(
         self,
         root: Path | str,
@@ -309,12 +319,15 @@ class Environment:
         nothing touches the filesystem until the env actually serves. Extra
         kwargs go to ``Workspace`` (``network=``, ``env=``, ...).
 
-        When ``track_files`` is set (defaulting to ``HUD_FILE_TRACKING_ENABLED``)
-        the workspace also publishes an observation-only ``filetracking/1``
-        capability the rollout streams setup and agent diffs from.
+        With ``track_files`` the rollout streams this workspace's setup and agent
+        file diffs over the control channel. One workspace per environment can track
+        files; the ``HUD_FILE_TRACKING_ENABLED`` default applies only to the first.
         """
+        tracked = any(ws.tracks_files for ws in self._workspaces.values())
         if track_files is None:
-            track_files = settings.file_tracking_enabled
+            track_files = settings.file_tracking_enabled and not tracked
+        elif track_files and tracked:
+            raise ValueError("another workspace already tracks files; pass track_files=False")
         if name in self._workspaces:
             raise ValueError(f"workspace capability {name!r} is already attached")
         ws = Workspace(root, track_files=track_files, **kwargs)
@@ -324,8 +337,6 @@ class Environment:
         async def _up() -> None:
             await ws.start()
             self.add_capability(ws.capability(name))
-            if ws.tracks_files:
-                self.add_capability(ws.file_tracking_capability())
 
         @self.shutdown
         async def _down() -> None:
@@ -379,8 +390,9 @@ class Environment:
         """Install one control session's controller connections into their workspaces.
 
         A connection belongs to the session that supplied it until
-        ``release_session``; a resumed session rebinds its own, replacing a
-        rotated credential, and no session can take a name another one holds.
+        ``release_session``; a later ``hello`` on the session rebinds its own,
+        replacing a rotated credential, and no session can take a name another
+        one holds.
         """
         async with self._binding:
             if not self._started:

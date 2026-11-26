@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from hud import Environment, Task
-from hud.capabilities import Connection, SSHClient
-from hud.clients import connect
+from hud.capabilities import Connection, SSHClient, find_capability, open_client
+from hud.environment.client import connect
 from hud.environment.process_guard import process_connections_supported
 from hud.runtime import LocalRuntime
 from tests.conftest import SANDBOX
@@ -80,10 +80,10 @@ async def bound_connection_session(root: Path) -> dict[str, str]:
     async with (
         LocalRuntime(env)(Task(env=env.name, id="bound")) as runtime,
         connect(runtime) as client,
+        open_client(find_capability(client.capabilities, "shell")) as ssh,
     ):
         await client.bind((connection,))
-        ssh = cast("SSHClient", await client.open("shell"))
-        process = await ssh.create_process(SHELL_ENV, connections=(connection,))
+        process = await cast("SSHClient", ssh).create_process(SHELL_ENV, connections=(connection,))
         return parsed((await process.wait(check=True)).stdout or b"")
 
 

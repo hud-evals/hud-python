@@ -9,11 +9,27 @@ import shlex
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.cli import WINDOWS_SHELLS, CLIAgent, model_endpoint, resolve_executable, run_jsonl
+from hud.agents.cli import (
+    WINDOWS_SHELLS,
+    CLIAgent,
+    ModelEndpoint,
+    model_endpoint,
+    resolve_executable,
+    run_jsonl,
+)
 from hud.agents.computer import mcp as computer_mcp
 from hud.agents.types import AgentStep, PiConfig, ToolStep, Usage
+from hud.capabilities import find_capability, open_client
 from hud.telemetry.context import get_trace_headers
-from hud.types import ContentBlock, ImageContent, Step, TextContent, ToolCall, ToolResult
+from hud.types import (
+    ContentBlock,
+    ImageContent,
+    Step,
+    TextContent,
+    ToolCall,
+    ToolResult,
+    text_of,
+)
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
@@ -172,12 +188,13 @@ class PiAgent(CLIAgent[PiConfig]):
                 "pi needs a model endpoint: set HUD_API_KEY to use the HUD gateway, or "
                 "OPENAI_API_KEY (with OPENAI_BASE_URL) for an OpenAI-compatible endpoint"
             )
-        ssh = cast("SSHClient", await run.client.open("ssh"))
+        async with open_client(find_capability(run.capabilities, "ssh")) as ssh:
+            await self._drive(cast("SSHClient", ssh), run, endpoint)
+
+    async def _drive(self, ssh: SSHClient, run: Run, endpoint: ModelEndpoint) -> None:
         if (shell := ssh.capability.params.get("shell", "bash")) in WINDOWS_SHELLS:
             raise RuntimeError(f"pi runs only in POSIX workspaces, not a {shell} shell")
-        executable = await resolve_executable(ssh, "pi", _MANAGED_PI_PATHS, run.runtime_config)
-        manifest = run.client.manifest
-        assert manifest is not None
+        executable = await resolve_executable(ssh, "pi", _MANAGED_PI_PATHS)
 
         env = {"INFERENCE_API_KEY": endpoint.key}
         model: dict[str, Any] = {**self.config.model_info, "id": self.config.model}
@@ -193,7 +210,7 @@ class PiAgent(CLIAgent[PiConfig]):
             provider["headers"] = endpoint.headers
         files = {"models.json": json.dumps({"providers": {"inference": provider}})}
 
-        screens = sum(cap.protocol.partition("/")[0] == "rfb" for cap in manifest.bindings)
+        screens = sum(cap.protocol.partition("/")[0] == "rfb" for cap in run.capabilities)
         if screens and "image" not in model.get("input", ["text"]):
             raise ValueError(
                 f"the environment has a screen, but pi takes model {self.config.model!r} as "
@@ -225,7 +242,7 @@ class PiAgent(CLIAgent[PiConfig]):
 
         async with AsyncExitStack() as bridges:
             mcp_servers: dict[str, dict[str, Any]] = {}
-            for cap in manifest.bindings:
+            for cap in run.capabilities:
                 family = cap.protocol.partition("/")[0]
                 if family == "mcp":
                     name = cap.name
@@ -240,13 +257,14 @@ class PiAgent(CLIAgent[PiConfig]):
                         variable = f"HUD_MCP_TOKEN_{len(mcp_servers)}"
                         env[variable] = token
                         headers["Authorization"] = f"Bearer ${{{variable}}}"
-                    server: dict[str, Any] = {"url": cap.url, "headers": headers}
+                    # Pi runs inside the environment, where the server lives.
+                    server: dict[str, Any] = {"url": cap.env_url, "headers": headers}
                 elif family == "rfb":
                     name = "computer-use" if screens == 1 else f"computer-use-{cap.name}"
                     server = await bridges.enter_async_context(
                         computer_mcp.bridge_computer_mcp(
                             ssh,
-                            run.client.binding(cap.name),
+                            cap,
                             self.config.screenshot_encoding,
                             shell=shell,
                         )
@@ -284,7 +302,7 @@ class PiAgent(CLIAgent[PiConfig]):
                 ssh,
                 command,
                 events.consume,
-                input_text=run.prompt_text,
+                input_text=text_of(run.prompt),
                 connections=(connection,) if connection is not None else (),
             )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))

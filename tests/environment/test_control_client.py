@@ -1,4 +1,4 @@
-"""The control channel's client side: ``hud.clients.connect`` and ``HudClient`` against a
+"""The control channel's client side: ``Runtime.connect`` and ``HudClient`` against a
 scripted peer that answers each connection and records every frame it receives.
 """
 
@@ -6,15 +6,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import ClassVar, Self
 from urllib.parse import urlsplit
 
 import pytest
 
-from hud.capabilities import Capability, CapabilityClient
-from hud.clients import connect, register_client
+from hud.capabilities import find_capability
+from hud.environment.client import connect
 from hud.runtime import Runtime
-from tests.clients.conftest import Action, control_peer
+from tests.fixtures.control_peer import Action, control_peer
 
 HELLO = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
 BINDINGS = [
@@ -25,24 +24,6 @@ BINDINGS = [
 ]
 
 
-@register_client
-class EchoClient(CapabilityClient):
-    """A client for a protocol the SDK does not know, registered the way a harness package would."""
-
-    protocol: ClassVar[str] = "echo/1"
-
-    def __init__(self, capability: Capability) -> None:
-        self.capability = capability
-        self.closed = False
-
-    @classmethod
-    async def connect(cls, cap: Capability) -> Self:
-        return cls(cap)
-
-    async def close(self) -> None:
-        self.closed = True
-
-
 @pytest.mark.parametrize("immediately", [True, False], ids=["on-accept", "during-hello"])
 async def test_connect_retries_an_env_that_hangs_up_until_it_answers_hello(
     immediately: bool,
@@ -51,9 +32,9 @@ async def test_connect_retries_an_env_that_hangs_up_until_it_answers_hello(
 
     async with (
         control_peer(not_ready, not_ready, [Action("answer", result=HELLO)]) as peer,
-        connect(Runtime(peer.url), ready_timeout=10) as client,
+        connect(Runtime(peer.url, ready_timeout=10)) as client,
     ):
-        assert client.manifest is not None
+        assert client.session_id == "s-1"
 
     assert peer.accepted == 3
 
@@ -77,12 +58,12 @@ async def test_connect_retries_a_port_that_refuses_until_the_env_starts_listenin
         return await asyncio.start_server(hello, "127.0.0.1", port)
 
     later = asyncio.create_task(listen_later())
-    async with connect(Runtime(f"tcp://127.0.0.1:{port}"), ready_timeout=10) as client:
-        manifest = client.manifest
+    async with connect(Runtime(f"tcp://127.0.0.1:{port}", ready_timeout=10)) as client:
+        session_id = client.session_id
     server = await later
     server.close()
 
-    assert manifest is not None and manifest.session_id == "s-1"
+    assert session_id == "s-1"
 
 
 async def test_an_env_that_keeps_hanging_up_is_given_up_on_at_the_runtimes_ready_timeout() -> None:
@@ -91,7 +72,7 @@ async def test_an_env_that_keeps_hanging_up_is_given_up_on_at_the_runtimes_ready
     async with control_peer([Action("hang_up")]) as peer:
         started = loop.time()
         with pytest.raises(EOFError, match="env closed connection during 'hello'"):
-            async with connect(Runtime(peer.url, params={"ready_timeout": 0.3}), ready_timeout=60):
+            async with connect(Runtime(peer.url, ready_timeout=0.3)):
                 pass
 
     assert loop.time() - started < 5
@@ -129,7 +110,7 @@ async def test_a_binding_resolves_to_a_local_tunnel_by_name_or_protocol(
             ) as peer,
             connect(Runtime(peer.url)) as client,
         ):
-            url = urlsplit(client.binding(ref).url)
+            url = urlsplit(find_capability(client.capabilities, ref).url)
             reader, writer = await asyncio.open_connection(url.hostname, url.port)
             received = await asyncio.wait_for(reader.read(), 10)
             writer.close()
@@ -145,30 +126,9 @@ async def test_a_stream_the_env_refuses_ends_the_local_connection() -> None:
         control_peer([Action("answer", result={**HELLO, "bindings": BINDINGS[:1]})]) as peer,
         connect(Runtime(peer.url)) as client,
     ):
-        local = urlsplit(client.binding("shell").url)
+        local = urlsplit(find_capability(client.capabilities, "shell").url)
         reader, writer = await asyncio.open_connection(local.hostname, local.port)
         received = await asyncio.wait_for(reader.read(), 10)
         writer.close()
 
     assert received == b""
-
-
-async def test_a_registered_client_class_opens_its_protocols_bindings() -> None:
-    echo = {"name": "echo", "protocol": "echo/1", "url": "tcp://environment:7100"}
-    async with (
-        control_peer([Action("answer", result={**HELLO, "bindings": [echo]})]) as peer,
-        connect(Runtime(peer.url)) as client,
-    ):
-        opened = await client.open("echo")
-
-    assert isinstance(opened, EchoClient)
-    assert (opened.capability.name, opened.closed) == ("echo", True)
-
-
-def test_a_second_client_class_for_a_registered_protocol_is_refused() -> None:
-    class OtherEchoClient(EchoClient):
-        pass
-
-    with pytest.raises(ValueError, match=r"'echo/1' is already registered to .*\.EchoClient"):
-        register_client(OtherEchoClient)
-    assert register_client(EchoClient) is EchoClient

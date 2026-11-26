@@ -17,7 +17,7 @@ from hud.utils.deprecation import moved_to, resolve_retired
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
-from .utils import error, read_frame, reply, send_frame
+from .utils import HudProtocolError, error, read_frame, reply, send_frame
 from .workspace import Mount, Workspace
 
 
@@ -93,6 +93,7 @@ def load_environment(
 
 __all__ = [
     "Answer",
+    "HudProtocolError",
     "Mount",
     "Workspace",
     "error",

@@ -28,6 +28,7 @@ import asyncio
 import logging
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -63,6 +64,14 @@ SERVE_COMMAND = f"cd /app && uv run hud serve env:env --host 0.0.0.0 --port {SER
 # this process is gone, a forgotten sandbox stops billing within the interval.
 AUTO_STOP_MINUTES = 10
 REFRESH_EVERY_S = 60
+
+
+@dataclass(frozen=True, kw_only=True)
+class DaytonaEndpoint(Runtime):
+    """The runtime ``DaytonaRuntime`` yields: the control channel and the ``sandbox`` behind it
+    (bench/warmpool.py reads its region)."""
+
+    sandbox: AsyncSandbox
 
 
 async def keep_alive(sandbox: AsyncSandbox) -> None:
@@ -150,7 +159,4 @@ class DaytonaRuntime:
                 asyncssh.connect(SSH_GATEWAY, username=access.token, known_hosts=None)
             )
             listener = await ssh.forward_local_port("127.0.0.1", 0, "127.0.0.1", SERVE_PORT)
-            # ``instance_id`` tells the caller which sandbox it got (bench/warmpool.py reads its region).
-            yield Runtime(
-                f"tcp://127.0.0.1:{listener.get_port()}", params={"instance_id": sandbox.id}
-            )
+            yield DaytonaEndpoint(f"tcp://127.0.0.1:{listener.get_port()}", sandbox=sandbox)

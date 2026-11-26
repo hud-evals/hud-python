@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from .base import Capability, CapabilityClient
+from .base import Capability, CapabilityClient, find_capability
 from .connection import Connection
 from .mcp import MCPClient
+from .registry import open_client, register_client
 from .rfb import RFBClient
 from .ssh import SSHClient
 
@@ -15,4 +16,7 @@ __all__ = [
     "MCPClient",
     "RFBClient",
     "SSHClient",
+    "find_capability",
+    "open_client",
+    "register_client",
 ]

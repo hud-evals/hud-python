@@ -26,7 +26,7 @@ from .run import rollout, validate_rollout_timeouts
 from .task import Task
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
     from contextlib import AbstractAsyncContextManager
 
     from hud.agents.base import Agent
@@ -52,9 +52,19 @@ def taskset_id_for(platform: PlatformClient, name_or_id: str) -> str | None:
     return items[0]["id"] if items else None
 
 
-def _is_container_row(task: Task) -> bool:
+def is_container_row(task: Task) -> bool:
     config = task.runtime_config
     return config is not None and (config.image is not None or config.compose is not None)
+
+
+def containers_or(run_env: Callable[[Task], AbstractAsyncContextManager[Runtime]]) -> Provider:
+    """Image and Compose rows start under Docker; ``run_env`` starts every other row."""
+    docker = DockerRuntime()
+
+    def place(task: Task) -> AbstractAsyncContextManager[Runtime]:
+        return docker(task) if is_container_row(task) else run_env(task)
+
+    return place
 
 
 def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
@@ -215,6 +225,17 @@ class Taskset:
             task.verifier.env for task in self if task.verifier is not None
         }
 
+    def placed_rows(self) -> list[Task]:
+        """Every row a placement starts: each task, and each verifier that runs apart from it."""
+        return [
+            *self,
+            *(
+                task.verifier
+                for task in self
+                if task.verifier is not None and not task.shares_verifier_runtime
+            ),
+        ]
+
     def _resolve_placement(self) -> Provider:
         """Pick the provider for this taskset's rows.
 
@@ -223,32 +244,21 @@ class Taskset:
         """
         if self.taskset_id is not None:
             return HUDRuntime()
-        rows = list(self)
-        # A verifier sharing its task's host is placed with that task, not on its own.
-        rows.extend(
-            task.verifier
-            for task in self
-            if task.verifier is not None and not task.shares_verifier_runtime
-        )
-        placeable = [_is_container_row(task) or task.environment is not None for task in rows]
-        if not rows or not all(placeable):
+        rows = self.placed_rows()
+        if not rows or not all(
+            is_container_row(task) or task.environment is not None for task in rows
+        ):
             raise ValueError(
                 "no placement: pass runtime= — "
                 'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
                 "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
                 "(a served host), or HUDRuntime() (your deployed env)"
             )
-        docker = DockerRuntime()
         live: dict[int, LocalRuntime] = {}
         for task in rows:
-            if not _is_container_row(task) and id(task.environment) not in live:
-                assert task.environment is not None
+            if task.environment is not None and id(task.environment) not in live:
                 live[id(task.environment)] = LocalRuntime(task.environment)
-
-        def place(task: Task) -> AbstractAsyncContextManager[Runtime]:
-            return docker(task) if _is_container_row(task) else live[id(task.environment)](task)
-
-        return place
+        return containers_or(lambda task: live[id(task.environment)](task))
 
     async def run(
         self,
