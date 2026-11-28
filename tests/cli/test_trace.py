@@ -44,7 +44,7 @@ def events(signed_in: FakeServices) -> None:
 
 
 def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: None) -> None:
-    result = hud("trace", COMPACT_TRACE_ID)
+    result = hud("trace", "get", COMPACT_TRACE_ID)
 
     assert result.exit_code == 0, result
     for shown in (EVENTS[0]["text"], EVENTS[0]["reasoning"], "exit status 1", "max steps reached"):
@@ -128,7 +128,7 @@ async def test_a_local_trace_renders_despite_a_record_cut_short(
     complete = spans.read_text()
     spans.write_text(complete + complete.splitlines()[-1][:40])
 
-    result = hud("trace", trace_id, cwd=tmp_path)
+    result = hud("trace", "get", trace_id, cwd=tmp_path)
 
     assert result.exit_code == 0, result
     assert "Wrote it." in result.stdout

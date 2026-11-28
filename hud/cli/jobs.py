@@ -14,11 +14,9 @@ from typing_extensions import TypedDict
 from hud.cli import (
     CLI,
     CliError,
-    CLIGroup,
     map_exception,
 )
 from hud.settings import settings
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import Page, PlatformClient
@@ -54,24 +52,12 @@ class _JobCancelled(TypedDict):
     cancelled: int
 
 
-class _JobsGroup(CLIGroup):
-    def resolve_command(self, ctx: Any, args: list[str]) -> tuple[Any, Any, list[str]]:
-        try:
-            UUID(args[0])
-        except ValueError:
-            return super().resolve_command(ctx, args)
-        warn_deprecated("`hud jobs <job-id>`", "use `hud jobs get <job-id>`")
-        ctx.default_map = {"get": ctx.params}
-        return "get", self.commands["get"], args
-
-
 jobs_app = CLI(
-    cls=_JobsGroup,
     name="jobs",
     help="List jobs, inspect their traces, and cancel rollouts.",
     add_completion=False,
     rich_markup_mode="rich",
-    no_args_is_help=False,
+    no_args_is_help=True,
 )
 
 
@@ -279,25 +265,3 @@ def cancel_job_command(
     except HudException as exc:
         raise map_exception(exc, input={"job_id": job_id, "trace_id": trace_id}) from exc
     return {"action": action, "job_id": job_id, "trace_id": trace_id, **result}
-
-
-@jobs_app.callback(invoke_without_command=True)
-def jobs_command(
-    ctx: typer.Context,
-    quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
-    ),
-    limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
-) -> Any:
-    """List jobs, inspect their traces, and cancel rollouts.
-
-    [not dim]Examples:
-        hud jobs list
-        hud jobs list --json
-        hud jobs get <job-id>
-        hud jobs cancel <job-id> --yes[/not dim]
-    """
-    if ctx.invoked_subcommand is not None:
-        return None
-    warn_deprecated("`hud jobs` without a subcommand", "use `hud jobs list`")
-    return list_command(quiet=quiet, limit=limit)

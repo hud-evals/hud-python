@@ -140,42 +140,27 @@ GLM = {
     "sdk_agent_type": "openai_compatible",
     "provider": {"name": "openai"},
 }
-KIMI_TOML = (
-    '[openai_compatible]\nmodel = "moonshotai/kimi-k2.6"\n'
-    "completion_kwargs = { temperature = 0.5 }\n"
-)
 
 
 @pytest.mark.parametrize(
-    ("argv", "config", "expected"),
+    ("argv", "expected"),
     [
+        pytest.param(list(SCRIPTED), {"key": API_KEY}, id="gateway-by-default"),
         pytest.param(
-            list(SCRIPTED),
-            "",
-            {"key": API_KEY},
-            id="gateway-by-default",
+            ["openai_compatible", "-m", "z-ai/glm-5.2", "-c", "model=moonshotai/kimi-k2.6"],
+            {"model": "z-ai/glm-5.2"},
+            id="model-flag-wins-over-config",
         ),
         pytest.param(
-            ["openai_compatible", "-m", "z-ai/glm-5.2"],
-            KIMI_TOML,
-            {"model": "z-ai/glm-5.2", "temperature": 0.5},
-            id="model-flag-wins-over-toml",
-        ),
-        pytest.param(
-            ["glm-5.2"],
-            "",
-            {"protocol": "chat", "model": "z-ai/glm-5.2"},
-            id="catalog-alias",
+            ["glm-5.2"], {"protocol": "chat", "model": "z-ai/glm-5.2"}, id="catalog-alias"
         ),
         pytest.param(
             ["openai_compatible", "-m", "custom", "-c", "api_key=custom-key", "-c", "base_url=URL"],
-            "",
             {"key": "custom-key"},
             id="custom-endpoint",
         ),
         pytest.param(
             [*SCRIPTED, "-c", 'completion_kwargs={"temperature": 0.5}'],
-            "",
             {"temperature": 0.5},
             id="json-config-value",
         ),
@@ -188,11 +173,9 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     hud_env: HudEnv,
     tasks: Path,
     argv: list[str],
-    config: str,
     expected: dict[str, Any],
 ) -> None:
     signed_in.route("api", "GET", "/v2/models", json={"items": [GLM], "total": 1})
-    (hud.cwd / ".hud_eval.toml").write_text(config)
     # Provider SDKs read their own ``*_BASE_URL``; point them at the scripted model.
     hud_env.set(OPENAI_BASE_URL=gateway.url, ANTHROPIC_BASE_URL=gateway.url)
 
@@ -302,13 +285,11 @@ def test_eval_runs_a_projects_rows_in_the_environments_they_name(
 
 
 @pytest.mark.parametrize(
-    ("config", "argv", "hosted"),
+    ("argv", "hosted"),
     [
-        pytest.param("", ["My Tasks"], True, id="a-platform-taskset-runs-hosted"),
-        pytest.param("[eval]\nremote = true\n", ["tasks.py"], True, id="the-toml-asks-for-hosted"),
-        pytest.param(
-            "[eval]\nremote = false\n", ["tasks.py", "--remote"], True, id="a-flag-beats-the-toml"
-        ),
+        pytest.param(["My Tasks"], True, id="a-platform-taskset-runs-hosted"),
+        pytest.param(["tasks.py"], False, id="a-tasks-file-runs-locally"),
+        pytest.param(["tasks.py", "--runtime", "hosted"], True, id="the-flag-asks-for-hosted"),
     ],
 )
 def test_eval_runs_each_row_where_its_placement_says(
@@ -316,7 +297,6 @@ def test_eval_runs_each_row_where_its_placement_says(
     gateway: Models,
     signed_in: FakeServices,
     tasks: Path,
-    config: str,
     argv: list[str],
     hosted: bool,
 ) -> None:
@@ -335,8 +315,6 @@ def test_eval_runs_each_row_where_its_placement_says(
     )
     signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
     signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "completed", "reward": 0.5})
-    (hud.cwd / ".hud_eval.toml").write_text(config)
-
     document = run(hud, argv[0], *SCRIPTED, *argv[1:])
 
     assert document["mean_reward"] == (0.5 if hosted else 1.0)
@@ -350,7 +328,9 @@ def test_interrupting_a_hosted_eval_cancels_every_rollout_on_the_platform(
     signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
     signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "running"})
     signed_in.route("api", "POST", "/v2/rollouts/cancel", json={"status": "accepted"})
-    process = hud.start("eval", "tasks.py", *SCRIPTED, "--remote", "--group-size", "3", "--yes")
+    process = hud.start(
+        "eval", "tasks.py", *SCRIPTED, "--runtime", "hosted", "--group", "3", "--yes"
+    )
 
     deadline = time.monotonic() + 60
     while len(signed_in.requests("api", "GET", "/v2/trace/{id}")) < 3:
@@ -389,7 +369,7 @@ def test_terminating_eval_tears_down_the_environments_it_spawned(
         "        out.write(f'{os.getpid()}\\n')\n"
     )
     models.script([Turn(fail=Reply(json={}, delay=600))])
-    process = hud.start("eval", "tasks.py", *SCRIPTED, "--group-size", "2", "--yes")
+    process = hud.start("eval", "tasks.py", *SCRIPTED, "--group", "2", "--yes")
 
     try:
         deadline = time.monotonic() + 60
@@ -432,7 +412,9 @@ def test_eval_prints_its_job_link_once_before_hosted_execution_finishes(
     signed_in.route("api", "POST", "/v2/trace/job/{id}/enter", json={})
     signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
     signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "running"})
-    process = hud.start("eval", "tasks.py", *SCRIPTED, "--remote", "--yes", "--json", *verbosity)
+    process = hud.start(
+        "eval", "tasks.py", *SCRIPTED, "--runtime", "hosted", "--yes", "--json", *verbosity
+    )
     assert process.stderr is not None
     assert process.stdout is not None
     stderr: list[str] = []

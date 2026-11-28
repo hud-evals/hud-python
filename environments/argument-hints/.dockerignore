@@ -1,7 +1,6 @@
 .env
 .git
 .hud
-.hud_eval.toml
 .venv
 __pycache__
 .pytest_cache

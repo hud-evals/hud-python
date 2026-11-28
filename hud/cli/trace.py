@@ -16,7 +16,6 @@ from hud.agents.types import AgentStep, ToolStep
 from hud.cli import (
     CLI,
     CliError,
-    CLIGroup,
 )
 from hud.settings import settings
 from hud.telemetry.span import (
@@ -26,7 +25,6 @@ from hud.telemetry.span import (
     normalize_trace_id,
 )
 from hud.types import STEP_SCHEMA, Step, TextContent
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -43,18 +41,7 @@ class _Events(BaseModel):
     reward: float | None = None
 
 
-class _TraceGroup(CLIGroup):
-    def resolve_command(self, ctx: Any, args: list[str]) -> tuple[Any, Any, list[str]]:
-        try:
-            UUID(args[0])
-        except ValueError:
-            return super().resolve_command(ctx, args)
-        warn_deprecated("`hud trace <trace-id>`", "use `hud trace get <trace-id>`")
-        return "get", self.commands["get"], args
-
-
 trace_app = CLI(
-    cls=_TraceGroup,
     name="trace",
     help="Inspect a rollout trace.",
     add_completion=False,

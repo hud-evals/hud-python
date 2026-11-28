@@ -1,19 +1,16 @@
-"""``hud eval`` — run an agent over a taskset; CLI arguments override ``.hud_eval.toml``."""
+"""``hud eval`` — run an agent over a taskset."""
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import time
-import tomllib
 from enum import StrEnum
 from pathlib import Path
-from string import Template
 from typing import TYPE_CHECKING, Annotated, Any, assert_never, cast
 
 import typer
-from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, UrlConstraints
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, UrlConstraints
 from rich import box
 from rich.table import Table
 
@@ -42,8 +39,6 @@ if TYPE_CHECKING:
 
 hud_console = HUDConsole()
 
-_CONFIG_PATH = Path(".hud_eval.toml")
-
 
 class Placement(StrEnum):
     """Named ``--runtime`` choices; a ``tcp://`` url attaches to a served env instead.
@@ -62,29 +57,13 @@ class Placement(StrEnum):
 TcpUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["tcp"])]
 
 
-def _substitute_env(value: Any, mapping: dict[str, Any]) -> Any:
-    """Expand ``${VAR}`` placeholders; an unset variable is a config error."""
-    if isinstance(value, dict):
-        return {key: _substitute_env(item, mapping) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_substitute_env(item, mapping) for item in value]
-    if not isinstance(value, str):
-        return value
-    try:
-        return Template(value).substitute(mapping)
-    except KeyError as exc:
-        raise ValueError(f"{_CONFIG_PATH}: ${{{exc.args[0]}}} is not set") from None
-
-
 class EvalConfig(BaseModel):
-    """``[eval]`` settings plus the per-agent ``[claude]``/``[openai]``/... sections."""
+    """The run settings, plus per-agent config sections keyed by agent type."""
 
     model_config = ConfigDict(extra="forbid")
 
     source: str | None = None
-    agent_type: AgentType | None = Field(
-        default=None, validation_alias=AliasChoices("agent_type", "agent")
-    )
+    agent_type: AgentType | None = None
     model: str | None = None
     task_ids: list[str] | None = None
     all: bool = False
@@ -97,32 +76,6 @@ class EvalConfig(BaseModel):
     gateway: bool = False
     runtime: Placement | TcpUrl | None = None
     agent_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
-
-    @classmethod
-    def load(cls, path: Path = _CONFIG_PATH) -> EvalConfig:
-        if not path.exists():
-            return cls()
-        warn_deprecated(
-            f"`{path}`",
-            "pass run settings as `hud eval` flags and agent settings as `--config key=<json>`",
-        )
-        fields = {key: value for key, value in settings.model_dump().items() if value is not None}
-        mapping: dict[str, Any] = {**os.environ, **fields}
-        mapping.update({key.upper(): value for key, value in fields.items()})
-        if settings.api_key:
-            mapping["HUD_API_KEY"] = settings.api_key
-        with path.open("rb") as stream:
-            data = _substitute_env(tomllib.load(stream), mapping)
-        agent_config = {agent.value: data.pop(agent.value) for agent in AgentType if agent in data}
-        eval_section = data.pop("eval", {})
-        if data:
-            raise ValueError(f"{path}: unknown sections: {', '.join(sorted(data))}")
-        remote = eval_section.pop("remote", False)
-        if not isinstance(remote, bool):
-            raise ValueError(f"{path}: remote must be a boolean")
-        if remote:
-            eval_section.setdefault("runtime", Placement.HOSTED)
-        return cls.model_validate({**eval_section, "agent_config": agent_config})
 
     def merge(self, overrides: dict[str, Any]) -> EvalConfig:
         """Layer ``overrides`` on this config; agent sections merge one level deep."""
@@ -141,7 +94,6 @@ def eval_command(
         help=f"Model name (e.g. claude-sonnet-4-6) or agent type ({', '.join(AgentType)})",
     ),
     all: bool = typer.Option(False, "--all", help="Run every task instead of only the first."),
-    full: bool = typer.Option(False, "--full", hidden=True),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
     config: list[str] | None = typer.Option(
         None,
@@ -166,7 +118,6 @@ def eval_command(
         help="Automatically prompt the agent to continue if it does not respond with a tool call",
     ),
     group_size: int | None = typer.Option(None, "--group", help="Runs per task"),
-    deprecated_group_size: int | None = typer.Option(None, "--group-size", hidden=True),
     task_ids: str | None = typer.Option(
         None,
         "--task-ids",
@@ -191,7 +142,6 @@ def eval_command(
         "rollout on the platform), docker, modal, or a tcp:// url. "
         "Default: local for a tasks file; hosted for a platform taskset.",
     ),
-    remote: bool = typer.Option(False, "--remote", hidden=True),
 ) -> dict[str, Any] | Result:
     """Run an agent over a tasks file or a platform taskset.
 
@@ -210,25 +160,14 @@ def eval_command(
         hud eval tasks.py claude --dry-run --json
     """
     hud_console.info("Initializing evaluation...")
-    cfg = EvalConfig.load()
-    if max_steps is not None or "max_steps" in cfg.model_fields_set:
+    cfg = EvalConfig()
+    if max_steps is not None:
         warn_deprecated(
             "`max_steps` in `hud eval`",
             "CLI agents ignore it and run until done or `timeout_seconds` "
             "(`--config timeout_seconds=...`)",
         )
 
-    for used, spelling, instead in (
-        (remote, "--remote", "`--runtime hosted`"),
-        (deprecated_group_size is not None, "--group-size", "`--group`"),
-        (full, "--full", "`--all`"),
-    ):
-        if used:
-            warn_deprecated(f"`hud eval {spelling}`", f"use {instead}")
-    if group_size is None:
-        group_size = deprecated_group_size
-    if runtime is not None and remote:
-        raise ValueError("--runtime and --remote are mutually exclusive placement options")
     overrides: dict[str, Any] = {
         key: value
         for key, value in {
@@ -237,7 +176,7 @@ def eval_command(
             "max_concurrent": max_concurrent,
             "max_steps": max_steps,
             "group_size": group_size,
-            "runtime": Placement.HOSTED if remote else runtime,
+            "runtime": runtime,
         }.items()
         if value is not None
     }
@@ -245,17 +184,15 @@ def eval_command(
         {
             key: True
             for key, value in {
-                "all": all or full,
+                "all": all,
                 "verbose": verbose,
                 "very_verbose": very_verbose,
-                "auto_respond": auto_respond or full,
+                "auto_respond": auto_respond,
                 "gateway": gateway,
             }.items()
             if value
         }
     )
-    if full:
-        overrides.setdefault("max_steps", 100)
     if agent in {member.value for member in AgentType}:
         overrides["agent_type"] = AgentType(agent)
     elif agent is not None:

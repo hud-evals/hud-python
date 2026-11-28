@@ -18,7 +18,6 @@ from hud.cli import (
     DirectoryState,
 )
 from hud.settings import settings
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
@@ -163,7 +162,6 @@ def create_command(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name for the new Project"),
     description: str | None = typer.Option(None, "--description"),
-    directory: str | None = typer.Option(None, "--directory", "-C", hidden=True),
     no_use: bool = typer.Option(False, "--no-use", help="Create without linking this directory"),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
@@ -176,10 +174,6 @@ def create_command(
     ),
 ) -> Any:
     """Create a Project and link this directory unless --no-use is passed."""
-    if directory is not None:
-        warn_deprecated(
-            "`hud project create --directory`/`-C`", "use `hud project -C <dir> create`"
-        )
     platform = PlatformClient.from_settings()
     payload = {"name": name}
     if description:
@@ -190,9 +184,7 @@ def create_command(
     state = (
         None
         if no_use
-        else DirectoryState(
-            AuthScope.resolve(platform), ctx.meta["hud_project_directory"] or directory or "."
-        )
+        else DirectoryState(AuthScope.resolve(platform), ctx.meta["hud_project_directory"] or ".")
     )
     if state is not None:
         state.load()  # a config written under other credentials fails before we create anything
@@ -208,18 +200,13 @@ def create_command(
 def use_command(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help="Project name or ID (see hud project list)"),
-    directory: str | None = typer.Option(None, "--directory", "-C", hidden=True),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
 ) -> Any:
     """Link a directory to a Project in .hud/config.json for this account and team."""
-    if directory is not None:
-        warn_deprecated("`hud project use --directory`/`-C`", "use `hud project -C <dir> use`")
     platform = PlatformClient.from_settings()
-    state = DirectoryState(
-        AuthScope.resolve(platform), ctx.meta["hud_project_directory"] or directory or "."
-    )
+    state = DirectoryState(AuthScope.resolve(platform), ctx.meta["hud_project_directory"] or ".")
     state.load()
     placement = Placement(Project.resolve(platform, ref), "--project")
     placement.require_writable()
