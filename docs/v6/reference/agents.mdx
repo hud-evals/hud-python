@@ -1,6 +1,6 @@
 ---
 title: "Agents"
-description: "Agents in HUD: the Claude Code, Codex and Pi CLI agents, create_agent and the HUD gateway, the deprecated provider agents, and how to wire your own agent into a task run."
+description: "Agents in HUD: the Claude Code, Codex and Pi CLI agents, create_agent and the HUD gateway, and how to wire your own agent into a task run."
 icon: "robot"
 mode: "wide"
 ---
@@ -73,8 +73,6 @@ agent = PiAgent(PiConfig(extensions={"bash-timeout.ts": BASH_TIMEOUT}))
 A hook that changes a tool's input changes what runs, while the trace keeps the arguments the model
 sent.
 
-The SDK also ships HUD's older [provider agents](#provider-agents), which are deprecated.
-
 ### What a CLI agent needs
 
 - **A workspace.** The agent runs its CLI over the environment's `ssh` capability, against the
@@ -90,53 +88,6 @@ The SDK also ships HUD's older [provider agents](#provider-agents), which are de
   than rerouted. Only an unsandboxed workspace (its `ssh` capability declares `isolation="none"`, as
   one without `bwrap` does) gives the CLI its key directly.
 
-### Moving from `openai_compatible` to `pi`
-
-`PiAgent` replaces `OpenAIChatAgent`. The endpoint moves from the config to the environment, and the
-request settings keep their names:
-
-| `OpenAIChatConfig` | `PiConfig` |
-|--------------------|------------|
-| `model` | `model` |
-| `base_url`, `api_key` | `OPENAI_BASE_URL`, `OPENAI_API_KEY` in the environment |
-| `gateway`, `checkpoint` | `gateway`, `checkpoint` |
-| `completion_kwargs` (including `extra_body`) | `completion_kwargs`, merged over Pi's own request fields |
-| `system_prompt` | `system_prompt`, appended to Pi's system prompt |
-| `max_steps` | `timeout_seconds`, which bounds the whole run; Pi has no step limit |
-| `tool_timeout_seconds` | An extension that sets `bash`'s `timeout` (above) |
-| none | `extensions`: your own Pi extensions, which add tools and hook Pi's events |
-| none | `model_info`: Pi's metadata for the model, such as `contextWindow`, `input: ["text", "image"]` for a vision model, and `compat` for a server's request quirks (for example `{"maxTokensField": "max_tokens"}`) |
-
-Before:
-
-```python
-agent = OpenAIChatAgent(OpenAIChatConfig(
-    model="my-model",
-    base_url="http://localhost:8000/v1",
-    api_key="local",
-    completion_kwargs={"temperature": 0.2, "extra_body": {"top_k": 20}},
-    max_steps=30,
-))
-```
-
-After, with `OPENAI_BASE_URL=http://localhost:8000/v1` and `OPENAI_API_KEY=local` set:
-
-```python
-agent = PiAgent(PiConfig(
-    model="my-model",
-    completion_kwargs={"temperature": 0.2, "extra_body": {"top_k": 20}},
-    timeout_seconds=1800,
-))
-```
-
-On the command line, `hud eval ... openai_compatible` becomes `hud eval ... pi`, with `base_url` and
-`api_key` moved into those variables. Pi runs its own tools (`read`, `bash`, `edit`, `write`) in the
-workspace, so it needs an `ssh` workspace; an environment with only MCP tools still needs
-`openai_compatible`. Pi reaches only streamable-HTTP MCP servers, where `OpenAIChatAgent` also
-reached SSE and websocket ones. Pi records no token ids or logprobs, so training rollouts stay on
-`OpenAIChatAgent` (`completion_kwargs` with `return_token_ids` is refused). `stop_on` and
-`auto_respond` have no Pi equivalent.
-
 ## Create agent
 
 ```python
@@ -147,13 +98,13 @@ create_agent(model: str, **kwargs) -> GatewayAgent
 gateway**, an OpenAI-compatible endpoint (`settings.hud_gateway_url`, default
 `https://inference.hud.ai`) that fronts every provider behind your `HUD_API_KEY`. `model` is either an
 agent type (`create_agent("claude_cli")` runs that agent on its config's default model) or any model id
-the gateway knows (`claude-...`, `gpt-...`, `gemini-...`; `hud models list` shows them all), which
+the gateway knows (`claude-...`, `gpt-...`; `hud models list` shows them all), which
 selects that model's default agent type. To run an agent type on another model, construct the agent
 directly with `gateway=True` on its config.
 
 Extra `kwargs` go to the agent's config, with `model` filled in and `gateway=True` set, so the config
 stays serializable for [`HostedRuntime`](/v6/reference/runtime#hostedruntime).
-`api_key` and `base_url` are rejected.
+A key the agent's config does not define, such as `api_key`, is rejected.
 
 To call a provider with your own key, construct the agent directly:
 
@@ -171,56 +122,14 @@ Constructed directly, an agent uses the provider key when one is set and the gat
 
 An agent type names an agent in `hud eval`, in `create_agent`, and in what `HostedRuntime` sends:
 
-| `AgentType` | Agent now | From hud v0.7.0 |
-|-------------|-----------|-----------------|
-| `claude_cli` | `ClaudeCLIAgent` | `ClaudeCLIAgent` (alias of `claude`) |
-| `codex_cli` | `CodexCLIAgent` | `CodexCLIAgent` (alias of `openai`) |
-| `pi` | `PiAgent` | `PiAgent` |
-| `claude` | `ClaudeAgent` | `ClaudeCLIAgent` |
-| `openai` | `OpenAIAgent` | `CodexCLIAgent` |
-| `gemini` | `GeminiAgent` | a Gemini CLI agent |
-| `openai_compatible` | `OpenAIChatAgent` | removed; use `pi` |
+| `AgentType` | Agent |
+|-------------|-------|
+| `claude`, `claude_cli` | `ClaudeCLIAgent` |
+| `openai`, `codex_cli` | `CodexCLIAgent` |
+| `openai_compatible`, `pi` | `PiAgent` |
+| `gemini` | None yet; naming it is an error |
 
-## Provider agents
-
-<Warning>
-The provider agents are deprecated and hud v0.7.0 removes them. Each one warns when it is constructed.
-Use `ClaudeCLIAgent` in place of `ClaudeAgent`, `CodexCLIAgent` in place of `OpenAIAgent`, and
-`PiAgent` in place of `OpenAIChatAgent`.
-</Warning>
-
-A provider agent is HUD's own tool-call loop over one provider's API. Each run it reads the
-environment's manifest, opens the capabilities it supports, builds the matching provider tools, and
-loops against `run.prompt_messages`.
-
-| Agent | API | Config | Default model |
-|-------|-----|--------|---------------|
-| `ClaudeAgent` | Anthropic Messages | `ClaudeConfig` | `claude-haiku-5-5` |
-| `OpenAIAgent` | OpenAI Responses | `OpenAIConfig` | `gpt-6-luna` |
-| `GeminiAgent` | Gemini | `GeminiConfig` | `gemini-3.8-flash` |
-| `OpenAIChatAgent` | OpenAI Chat Completions, any compatible server via `base_url` | `OpenAIChatConfig` | `deepseek/deepseek-v4.1-flash` |
-
-Settings specific to these agents:
-
-- **`tool_timeout_seconds`** bounds each SSH-backed tool call, including multi-operation editor calls,
-  and returns a timeout to the model as a tool error. Unset by default except on `ClaudeConfig`
-  (120 seconds).
-- **`ClaudeConfig.reasoning_effort`**: `low`, `medium`, `high`, `xhigh` or `max`, subject to the
-  model; sent as `output_config.effort`.
-- **`OpenAIConfig.max_output_tokens`** and **`GeminiConfig.max_output_tokens`** are unset by default,
-  so each request gets the model's own limit. Gemini counts thinking tokens toward the cap.
-- **`OpenAIConfig.prompt_cache_key`** is generated per agent and sent with every request; pass your own
-  to share a cached prompt prefix across agent instances.
-- **`GeminiConfig.temperature`, `top_p`, `top_k`** are unset by default; Gemini 4 models ignore them.
-  **`thinking_level`** accepts `minimal`, `low`, `medium` or `high`, subject to the model (Gemini 4
-  Argon rejects `minimal`).
-- **`OpenAIChatConfig.completion_kwargs`** pass through to the Chat Completions request.
-
-`GeminiAgent` streams each turn. For Gemini 4 long decode, set `max_output_tokens` above 65,536 and
-install `google-genai` 2.30.1 or later; the turn then runs past the per-request output cap and is
-recorded as one turn. Otherwise a turn that reaches the cap ends the run with `stop_reason="length"`.
-Keep `include_thoughts` on for long-thinking runs: without it the model sends nothing while it thinks,
-and a long think can hit the stream's first-chunk deadline.
+`HostedRuntime` sends `claude_cli`, `codex_cli` or `pi`.
 
 ## Agent
 

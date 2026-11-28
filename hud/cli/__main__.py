@@ -23,7 +23,7 @@ from hud.cli.deploy import deploy_command
 from hud.cli.eval import eval_command
 from hud.cli.harbor import harbor_app
 from hud.cli.init import init_command
-from hud.cli.jobs import cancel_job_command, jobs_app
+from hud.cli.jobs import jobs_app
 from hud.cli.models import models_app
 from hud.cli.project import project_app
 from hud.cli.qa import qa_app
@@ -32,7 +32,6 @@ from hud.cli.sync import sync_app
 from hud.cli.task import task_app
 from hud.cli.trace import trace_app
 from hud.settings import Settings
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudDeprecationWarning
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -130,16 +129,9 @@ def version() -> dict[str, str]:
 def root_command(
     ctx: typer.Context,
     show_help: bool = typer.Option(False, "--help", help="Show help."),
-    show_version: bool = typer.Option(
-        False, "--version", help="Show version (deprecated; use `hud version`)."
-    ),
 ) -> None:
     if show_help:
         typer.echo(ctx.get_help())
-        raise typer.Exit
-    if show_version:
-        warn_deprecated("`hud --version`", "use `hud version`")
-        version()
         raise typer.Exit
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
@@ -184,10 +176,7 @@ def recorded_invocation(argv: list[str], cli: typer.Typer) -> Generator[None]:
             if settings.cli_analytics_enabled:
                 words = [arg for arg in argv[1:] if not arg.startswith("-")]
                 if not words:
-                    flags = {arg.split("=", 1)[0] for arg in argv[1:] if arg.startswith("-")}
-                    tokens: tuple[str, str | None] | None = (
-                        None if "--version" in flags else ("help", None)
-                    )
+                    tokens: tuple[str, str | None] = ("help", None)
                 else:
                     registry = {
                         name: frozenset(getattr(command, "commands", {}))
@@ -201,45 +190,44 @@ def recorded_invocation(argv: list[str], cli: typer.Typer) -> Generator[None]:
                             words[1] if len(words) > 1 and words[1] in registry[command] else None
                         )
                         tokens = (command, subcommand)
-                if tokens is not None:
-                    existing = (
-                        dotenv_values(Path.home() / ".hud" / ".env", interpolate=False).get(
-                            _INSTALL_ID_KEY
-                        )
-                        or ""
+                existing = (
+                    dotenv_values(Path.home() / ".hud" / ".env", interpolate=False).get(
+                        _INSTALL_ID_KEY
                     )
-                    try:
-                        install_id = str(uuid.UUID(existing))
-                    except ValueError:
-                        install_id = str(uuid.uuid4())
-                        set_env_values({_INSTALL_ID_KEY: install_id})
-                        sys.stderr.write(_FIRST_RUN_NOTICE + "\n")
-                    command, subcommand = tokens
-                    payload = {
-                        "events": [
-                            {
-                                "command": command,
-                                "subcommand": subcommand,
-                                "exit_code": exit_code,
-                                "error_class": error_class,
-                                "duration_ms": int((time.monotonic() - started) * 1000),
-                                "cli_version": __version__,
-                                "python_version": ".".join(map(str, sys.version_info[:3])),
-                                "os": (
-                                    sys.platform
-                                    if sys.platform in ("linux", "darwin", "win32")
-                                    else "other"
-                                ),
-                                "is_ci": "CI" in os.environ,
-                                "install_id": install_id,
-                            }
-                        ]
-                    }
-                    httpx2.post(
-                        f"{settings.hud_telemetry_url.rstrip('/')}/sdk-events/cli",
-                        json=payload,
-                        timeout=httpx2.Timeout(1.0, connect=0.5),
-                    )
+                    or ""
+                )
+                try:
+                    install_id = str(uuid.UUID(existing))
+                except ValueError:
+                    install_id = str(uuid.uuid4())
+                    set_env_values({_INSTALL_ID_KEY: install_id})
+                    sys.stderr.write(_FIRST_RUN_NOTICE + "\n")
+                command, subcommand = tokens
+                payload = {
+                    "events": [
+                        {
+                            "command": command,
+                            "subcommand": subcommand,
+                            "exit_code": exit_code,
+                            "error_class": error_class,
+                            "duration_ms": int((time.monotonic() - started) * 1000),
+                            "cli_version": __version__,
+                            "python_version": ".".join(map(str, sys.version_info[:3])),
+                            "os": (
+                                sys.platform
+                                if sys.platform in ("linux", "darwin", "win32")
+                                else "other"
+                            ),
+                            "is_ci": "CI" in os.environ,
+                            "install_id": install_id,
+                        }
+                    ]
+                }
+                httpx2.post(
+                    f"{settings.hud_telemetry_url.rstrip('/')}/sdk-events/cli",
+                    json=payload,
+                    timeout=httpx2.Timeout(1.0, connect=0.5),
+                )
 
 
 def notify_if_outdated(argv: list[str]) -> None:
@@ -321,7 +309,6 @@ app.add_typer(sync_app, name="sync")
 app.add_typer(harbor_app, name="harbor")
 app.add_typer(qa_app, name="qa")
 app.add_typer(jobs_app, name="jobs")
-app.command(name="cancel", hidden=True, deprecated=True)(cancel_job_command)
 app.add_typer(trace_app, name="trace")
 app.add_typer(models_app, name="models")
 app.command(name="set")(set_command)

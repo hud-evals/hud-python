@@ -24,7 +24,6 @@ from hud.cli import (
     map_exception,
 )
 from hud.settings import settings
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudException, HudTimeoutError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -296,7 +295,7 @@ qa_app = CLI(
     help="List, run, and inspect HUD's QA checks on evaluation traces and tasks.",
     add_completion=False,
     rich_markup_mode="rich",
-    no_args_is_help=False,
+    no_args_is_help=True,
 )
 
 
@@ -343,30 +342,6 @@ def list_command(
         "\n[dim]Tip: hud qa run <check>[,<check>...] <trace-or-task-id>... to run checks[/dim]"
     )
     return response
-
-
-@qa_app.callback(invoke_without_command=True)
-def qa_command(
-    ctx: typer.Context,
-    quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Print one check key per line, with no headers (for piping)."
-    ),
-    level: Level | None = typer.Option(
-        None, "--level", case_sensitive=False, help="Only the checks that run at this level."
-    ),
-) -> Any:
-    """List, run, and inspect QA checks.
-
-    [not dim]Examples:
-        hud qa list
-        hud qa list --json
-        hud qa run failure_analysis <trace-id>
-        hud qa run task_reward_exploit <task-id>[/not dim]
-    """
-    if ctx.invoked_subcommand is not None:
-        return None
-    warn_deprecated("`hud qa` without a subcommand", "use `hud qa list`")
-    return list_command(quiet=quiet, level=level)
 
 
 @qa_app.command("run")

@@ -2,26 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, NotRequired, Self, cast
-from uuid import uuid4
+from typing import Annotated, Any, Literal, Self
 
-from openai.types.responses import ResponseTextConfigParam
-from openai.types.responses.response_create_params import ToolChoice
-from openai.types.shared_params.reasoning import Reasoning
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     StringConstraints,
-    ValidatorFunctionWrapHandler,
     field_serializer,
-    field_validator,
     model_validator,
-    with_config,
 )
-from typing_extensions import TypedDict
 
-from hud.agents.tools.hosted import HostedTool
 from hud.capabilities.rfb import (
     PngScreenshotEncoding,
     ScreenshotEncoding,
@@ -35,7 +26,6 @@ from hud.types import (
     ToolResult,
     Trace,
 )
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.serialization import json_safe_value
 
 ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
@@ -46,184 +36,19 @@ PiExtensionFile = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]+\.(t
 
 
 class AgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     model_name: str = "Agent"
     model: str = "unknown"
     gateway: bool = False
 
-    @model_validator(mode="before")
-    @classmethod
-    def _warn_deprecated_keys(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        if "checkpoint_name" in data:
-            warn_deprecated(f"`{cls.__name__}.checkpoint_name`", "use `model`", stacklevel=3)
-            data = dict(data)
-            checkpoint_name = data.pop("checkpoint_name")
-            data.setdefault("model", checkpoint_name)
-        if cls.model_config.get("extra", "ignore") != "ignore":
-            return data
-        unknown = sorted(set(data) - set(cls.model_fields))
-        if unknown:
-            keys = ", ".join(f"`{key}`" for key in unknown)
-            warn_deprecated(
-                f"`{cls.__name__}` with unknown keys {keys} (ignored)",
-                f"use the fields `{cls.__name__}` defines",
-                change="will be an error",
-                stacklevel=3,
-            )
-        return data
-
-
-class ToolAgentConfig(AgentConfig):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    auto_respond: bool = False
-    max_steps: int = 10
-    tool_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
-    system_prompt: str | None = None
-    citations_enabled: bool = False
-    # Turn conditions that end the rollout rather than leaving the model to recover.
-    stop_on: set[StopCondition] = Field(default_factory=set[StopCondition])
-    hosted_tools: list[HostedTool[object]] = Field(
-        default_factory=list[HostedTool[object]], exclude=True
-    )
-    screenshot_encoding: ScreenshotEncoding = Field(default_factory=PngScreenshotEncoding)
-    model_client: Any = Field(default=None, exclude=True)
-
-
-@with_config(ConfigDict(extra="forbid"))
-class ClaudeAdaptiveThinkingConfig(TypedDict):
-    type: Literal["adaptive"]
-    display: NotRequired[Literal["summarized", "omitted"]]
-
-
-@with_config(ConfigDict(extra="forbid"))
-class ClaudeEnabledThinkingConfig(TypedDict):
-    type: Literal["enabled"]
-    budget_tokens: Annotated[int, Field(ge=1024)]
-    display: NotRequired[Literal["summarized", "omitted"]]
-
-
-@with_config(ConfigDict(extra="forbid"))
-class ClaudeDisabledThinkingConfig(TypedDict):
-    type: Literal["disabled"]
-
-
-ClaudeThinkingConfig = (
-    ClaudeAdaptiveThinkingConfig | ClaudeEnabledThinkingConfig | ClaudeDisabledThinkingConfig
-)
-
-
-class ClaudeConfig(ToolAgentConfig):
-    model_name: str = "Claude"
-    model: str = "claude-haiku-5-5"
-    tool_timeout_seconds: float | None = Field(default=120, gt=0, allow_inf_nan=False)
-    max_tokens: int = 16384
-    use_computer_beta: bool = True
-    screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
-    thinking: ClaudeThinkingConfig | None = None
-    # Sent as ``output_config.effort``; unset leaves the model's own default.
-    reasoning_effort: ClaudeEffort | None = None
-    max_tool_result_images: int | None = Field(default=None, gt=0)
-
-    @model_validator(mode="after")
-    def validate_thinking(self) -> Self:
-        if (
-            self.thinking is not None
-            and self.thinking["type"] == "enabled"
-            and self.thinking["budget_tokens"] >= self.max_tokens
-        ):
-            raise ValueError("enabled thinking budget_tokens must be less than max_tokens")
-        if self.max_tool_result_images is not None and (
-            self.thinking is None or self.thinking["type"] == "disabled"
-        ):
-            raise ValueError(
-                "max_tool_result_images requires explicit adaptive or enabled thinking"
-            )
-        return self
-
-
-class GeminiConfig(ToolAgentConfig):
-    model_name: str = "Gemini"
-    model: str = "gemini-3.8-flash"
-    temperature: float | None = None
-    top_p: float | None = None
-    top_k: int | None = None
-    max_output_tokens: int | None = None
-    excluded_predefined_functions: list[str] = Field(default_factory=list)
-    thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
-    include_thoughts: bool = True
-    max_tool_result_chars: int = 64 * 1024
-
-
-class OpenAIConfig(ToolAgentConfig):
-    model_name: str = "OpenAI"
-    model: str = "gpt-6-luna"
-    max_output_tokens: int | None = None
-    temperature: float | None = None
-    reasoning: Reasoning | None = None
-    tool_choice: ToolChoice | None = None
-    text: ResponseTextConfigParam | None = None
-    truncation: Literal["auto", "disabled"] | None = None
-    parallel_tool_calls: bool | None = None
-    prompt_cache_key: str = Field(
-        default_factory=lambda: uuid4().hex,
-        min_length=1,
-        max_length=64,
-    )
-
-    @field_validator("reasoning", "tool_choice", "text", mode="wrap")
-    @classmethod
-    def _declared_keys_only(cls, value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
-        """Raise on a key the OpenAI SDK's type does not declare, which validation would drop."""
-        validated = handler(value)
-        if dropped := _dropped_keys(value, validated):
-            raise ValueError(f"unknown keys for the installed openai SDK: {', '.join(dropped)}")
-        return validated
-
-
-def _dropped_keys(raw: Any, kept: Any, path: str = "") -> list[str]:
-    if not isinstance(raw, dict) or not isinstance(kept, dict):
-        return []
-    raw_dict, kept_dict = cast("dict[str, Any]", raw), cast("dict[str, Any]", kept)
-    return [
-        dropped
-        for key, value in raw_dict.items()
-        for dropped in (
-            [f"{path}{key}"]
-            if key not in kept_dict
-            else _dropped_keys(value, kept_dict[key], f"{path}{key}.")
-        )
-    ]
-
-
-class OpenAIChatConfig(ToolAgentConfig):
-    model_name: str = "OpenAI Chat"
-    model: str = "deepseek/deepseek-v4.1-flash"
-    checkpoint: str | None = Field(
-        default=None,
-        description="Specific checkpoint name for inference routing. "
-        "When set, the HUD gateway routes to this exact checkpoint rather than "
-        "the model's current active checkpoint. Passed as 'checkpoint' in the "
-        "request body's extra_body.",
-    )
-    api_key: str | None = Field(default=None, exclude=True)
-    base_url: str | None = Field(default=None, exclude=True)
-    completion_kwargs: dict[str, Any] = Field(default_factory=dict)
-
 
 class ClaudeCLIConfig(AgentConfig):
-    """``max_steps`` (deprecated; ``timeout_seconds`` bounds the run) is the CLI's ``--max-turns``.
-
-    Values <= 0 leave it unlimited.
-    """
-
     system_prompt: str | None = None
     model_name: str = "Claude CLI"
     model: str = "claude-haiku-5-5"
     permission_mode: str = "bypassPermissions"
-    max_steps: int = -1
     # Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
     reasoning_effort: ClaudeEffort | None = None
     # Extra variables for the CLI's environment, such as its model tiers. They reach
@@ -244,14 +69,6 @@ class ClaudeCLIConfig(AgentConfig):
         ],
     )
     disallowed_tools: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _warn_max_steps(self) -> Self:
-        if "max_steps" in self.model_fields_set:
-            warn_deprecated(
-                "`ClaudeCLIConfig.max_steps`", "bound the run with `timeout_seconds`", stacklevel=3
-            )
-        return self
 
 
 class CodexCLIConfig(AgentConfig):
@@ -292,9 +109,7 @@ class PiConfig(AgentConfig):
     @model_validator(mode="after")
     def _check_token_ids(self) -> Self:
         if "return_token_ids" in self.request_body:
-            raise ValueError(
-                "pi does not record token ids or logprobs; training rollouts need OpenAIChatAgent"
-            )
+            raise ValueError("pi does not record token ids or logprobs")
         return self
 
     @property
@@ -356,7 +171,7 @@ class Usage(BaseModel):
 
 
 class AgentStep(Step[StepSource]):
-    """One model output: a ``ToolAgent``'s LLM call, or one streamed item from a CLI agent."""
+    """One model output: one LLM call, or one streamed item from a CLI agent."""
 
     source: StepSource = "agent"
 

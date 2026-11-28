@@ -18,7 +18,6 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from hud.capabilities.connection import Connection
 from hud.environment import load_environment
-from hud.graders import EvaluationResult
 from hud.graders.base import Grade, grade_problems
 from hud.utils.process import run_until_terminated
 
@@ -154,8 +153,6 @@ class TaskRunner:
             await self.cancel()
         if isinstance(evaluation, (int, float)):
             evaluation = {"score": float(evaluation)}
-        elif isinstance(evaluation, EvaluationResult):
-            evaluation = {**evaluation.model_dump(exclude={"reward"}), "score": evaluation.reward}
         if isinstance(evaluation, dict) and not isinstance(evaluation.get("score"), (int, float)):
             raise TypeError(
                 f"task {self.task.id!r} graded with a dict missing a numeric "

@@ -2,13 +2,16 @@
 
 Each case generates a project from a template, installs the SDK from this
 checkout into it, lists its tasks, passes the template's own lint and tests,
-and runs one capped rollout of its first task with ``hud eval``. Three lanes run
-that lifecycle:
+and runs one rollout of its first task with ``hud eval`` and Claude Code. Three
+lanes run that lifecycle:
 
-- a scripted model behind the fake gateway, on every PR;
+- every PR, up to the rollout;
 - a cheap real model through the HUD gateway, in the ``live`` lane;
 - ``hosted``: deployed to HUD and run on its runtime, with the trace read back
   from the platform. The release workflow runs it one template per job.
+
+Temporarily, the rollout runs only for templates with a workspace, in the live
+and hosted lanes; ``NO_AGENT`` and ``NO_SCRIPTED_CLI`` say why the others skip it.
 
 A template that serves an isolated workspace (coding) needs the sandbox lane
 locally; its environment is installed under /usr, where its image puts it.
@@ -28,24 +31,31 @@ import pytest
 
 from tests.conftest import REAL_ENVIRONMENT, steps
 from tests.fixtures.screen import fake_screen
-from tests.fixtures.services import Reply
 
-from .lifecycle import evaluated, scripted
-from .projects import ROWS, TEMPLATES, assert_lifecycle, generate
+from .lifecycle import evaluated
+from .projects import ROWS, TEMPLATES, Project, assert_lifecycle, generate
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from tests.conftest import Hud, HudEnv, Result, Uv
-    from tests.fixtures.models import Models
-    from tests.fixtures.services import FakeServices
 
 SANDBOXED = {"coding"}
 TAKES_DATA_FILES = {"argument-hints"}
-EVAL = ("eval", ROWS, "claude", "--max-steps", "10", "-y", "--json")
+# Templates with an ``ssh`` workspace, the only ones a built-in agent runs.
+AGENT_READY = {"argument-hints", "coding"}
+NO_AGENT = (
+    "temporary: no built-in agent runs an environment without a workspace until hud gives "
+    "such environments an agent box"
+)
+NO_SCRIPTED_CLI = (
+    "temporary: this lane has no stand-in agent CLI inside a generated template's workspace; "
+    "the live and hosted lanes run the rollout until agent-ready templates ship one"
+)
+EVAL = ("eval", ROWS, "claude", "-y", "--json")
 LIVE_MODEL = "claude-haiku-5-5"
 HOSTED_MODEL = "claude-sonnet-5-5"
-REAL_MODEL = ("--gateway", "--config", "max_tokens=2048")
+REAL_MODEL = ("--gateway",)
 
 
 # Every template; one serving an isolated workspace joins the sandbox lane.
@@ -68,24 +78,23 @@ def environment(request: pytest.FixtureRequest) -> Iterator[Path | None]:
     shutil.rmtree(location, ignore_errors=True)
 
 
-async def init_and_evaluate(
-    hud: Hud,
-    template: str,
-    directory: Path,
-    *model_args: str,
-    data_file: str | None,
-    environment: Path | None,
-    hud_env: HudEnv,
-    uv: Uv,
-    wheel: Path,
-) -> dict[str, Any]:
-    """Generate ``template``, list its tasks, pass its own checks, and evaluate its first task."""
+def init_and_check(
+    hud: Hud, template: str, directory: Path, *, environment: Path | None, uv: Uv, wheel: Path
+) -> Project:
+    """Generate ``template``, list its tasks, and pass its own checks."""
     project = generate(hud, template, directory, wheel=wheel, uv=uv, environment=environment)
     listed = project.hud("task", "list", "--json")
     assert listed.exit_code == 0, listed
     assert listed.json, "the template lists no tasks"
     if (project.root / "tests").is_dir():
         project.check()
+    return project
+
+
+async def evaluate(
+    project: Project, *model_args: str, data_file: str | None, hud_env: HudEnv
+) -> dict[str, Any]:
+    """Evaluate the project's first task."""
     project.write_rows(data_file)
     async with fake_screen() as screen:
         hud_env.set(VNC_PORT=str(screen.port))
@@ -94,41 +103,14 @@ async def init_and_evaluate(
 
 @pytest.mark.timeout(1800)
 @pytest.mark.parametrize("template", ROWS_BY_TEMPLATE)
-async def test_a_template_runs_from_init_to_a_graded_rollout(
-    template: str,
-    environment: Path | None,
-    services: FakeServices,
-    models: Models,
-    hud_env: HudEnv,
-    hud: Hud,
-    uv: Uv,
-    sdk_wheel: Path,
-    tmp_path: Path,
+def test_a_template_runs_from_init_through_its_own_checks(
+    template: str, environment: Path | None, hud: Hud, uv: Uv, sdk_wheel: Path, tmp_path: Path
 ) -> None:
-    models.respond(scripted)
-    hud_env.set(HUD_API_KEY="k")
-    services.route("api", "GET", "/v2/data/ci-notes", json={"filename": "notes.txt"})
-    services.route(
-        "api",
-        "GET",
-        "/v2/data/ci-notes/download",
-        json={"url": f"{services.url('api')}/files/notes"},
-    )
-    services.route("api", "GET", "/files/notes", Reply(body=b"2, 3 and 5 are prime."))
-    data_file = "ci-notes" if template in TAKES_DATA_FILES else None
-
-    run = await init_and_evaluate(
-        hud,
-        template,
-        tmp_path / f"ci-{template}",
-        data_file=data_file,
-        environment=environment,
-        hud_env=hud_env,
-        uv=uv,
-        wheel=sdk_wheel,
+    init_and_check(
+        hud, template, tmp_path / f"ci-{template}", environment=environment, uv=uv, wheel=sdk_wheel
     )
 
-    assert_lifecycle(steps(run["trace_id"]), data_file)
+    pytest.skip(NO_SCRIPTED_CLI)
 
 
 def ci_data_file(template: str) -> str | None:
@@ -153,19 +135,14 @@ async def test_a_template_runs_against_a_real_model_through_the_gateway(
     tmp_path: Path,
 ) -> None:
     data_file = ci_data_file(template)
+    project = init_and_check(
+        hud, template, tmp_path / f"ci-{template}", environment=environment, uv=uv, wheel=sdk_wheel
+    )
+    if template not in AGENT_READY:
+        pytest.skip(NO_AGENT)
 
-    run = await init_and_evaluate(
-        hud,
-        template,
-        tmp_path / f"ci-{template}",
-        *REAL_MODEL,
-        "--model",
-        LIVE_MODEL,
-        data_file=data_file,
-        environment=environment,
-        hud_env=live,
-        uv=uv,
-        wheel=sdk_wheel,
+    run = await evaluate(
+        project, *REAL_MODEL, "--model", LIVE_MODEL, data_file=data_file, hud_env=live
     )
 
     assert_lifecycle(steps(run["trace_id"]), data_file)
@@ -186,6 +163,8 @@ def test_a_deployed_template_runs_on_hud_and_its_trace_reads_back(
     project.bundle_sdk_into_image()
     deployed = project.hud("deploy", "--no-env", "--yes", timeout=1800)
     assert deployed.exit_code == 0, deployed
+    if template not in AGENT_READY:
+        pytest.skip(NO_AGENT)
     project.write_rows(data_file)
     live.set(HUD_TELEMETRY_ENABLED="1", HUD_TRACE_DIR=str(traces))
 

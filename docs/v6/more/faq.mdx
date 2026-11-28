@@ -30,7 +30,7 @@ Not for the quickstart. `hud eval`, `hud serve`, and gateway runs need **no Dock
 <Accordion title="Do I need an API key?">
 You need **one** of:
 - A **`HUD_API_KEY`** ([hud.ai/project/api-keys](https://hud.ai/project/api-keys)) - routes models through the HUD gateway (the default when no provider key is set) and traces every rollout. One key for everything.
-- A **provider key** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) - to call that provider directly instead of the gateway.
+- A **provider key** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) - to call that provider directly instead of the gateway.
 
 See [Agents](/v6/reference/agents).
 </Accordion>
@@ -92,7 +92,7 @@ Pass the file that **lists runnable tasks**. In the split layout (`hud init`) th
 </Accordion>
 
 <Accordion title="Can I use my own model or a local endpoint?">
-Yes: the `pi` agent ([`PiAgent`](/v6/reference/agents#built-in-agents)) speaks the OpenAI Chat Completions API, so any compatible server (vLLM, a local model, a hosted checkpoint) works - set `OPENAI_BASE_URL` and `OPENAI_API_KEY` for it. The deprecated `OpenAIChatAgent` (`openai_compatible`) also does, through `base_url`, until hud v0.7.0 removes it. See [Extending HUD](/v6/advanced/extending) for a custom harness.
+Yes: the `pi` agent ([`PiAgent`](/v6/reference/agents#built-in-agents)) speaks the OpenAI Chat Completions API, so any compatible server (vLLM, a local model, a hosted checkpoint) works - set `OPENAI_BASE_URL` and `OPENAI_API_KEY` for it. See [Extending HUD](/v6/advanced/extending) for a custom harness.
 </Accordion>
 
 <Accordion title="Do I have to train, or can I just run evals?">

@@ -27,7 +27,7 @@ MODEL = "claude-haiku-4-5"
 
 
 async def main(*, variants: int, group: int, max_concurrent: int, start: int, model: str) -> None:
-    agent = create_agent(model, completion_kwargs={"max_tokens": 2048})
+    agent = create_agent(model)
     variant_ids = list(range(start, start + variants))
     taskset = Taskset("calc", [fix_calc(variant=v) for v in variant_ids])
     runtime = DaytonaRuntime(snapshot_name(), image=Image.from_dockerfile("Dockerfile.hud"))
@@ -35,7 +35,7 @@ async def main(*, variants: int, group: int, max_concurrent: int, start: int, mo
     print(
         f"model={model} variants={variant_ids} group={group} rollouts={len(variant_ids) * group} tests={bugs.test_count()}"
     )
-    session = await Job.start(f"calc-baseline-{start}-{start + variants - 1}", group=group)
+    session = Job(name=f"calc-baseline-{start}-{start + variants - 1}", group=group)
     t0 = time.perf_counter()
     await taskset.run(agent, runtime=runtime, job=session, max_concurrent=max_concurrent)
     wall = time.perf_counter() - t0

@@ -1,4 +1,5 @@
-"""``hud eval``: real rollouts of a taskset with a scripted model, placed where each row says."""
+"""``hud eval``: real rollouts of a taskset, placed where each row says. Local rows run Pi
+in a workspace, where a stand-in plays the ``pi`` executable."""
 
 from __future__ import annotations
 
@@ -13,8 +14,7 @@ from uuid import UUID
 import pytest
 
 from tests.conftest import write_files
-from tests.fixtures.models import Turn
-from tests.fixtures.services import Reply
+from tests.fixtures import clis
 
 from .conftest import API_KEY
 
@@ -22,37 +22,45 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.conftest import Hud, HudEnv
-    from tests.fixtures.models import Models
     from tests.fixtures.services import FakeServices
 
-TASKS_PY = """\
-from hud import Environment
-
-env = Environment("demo")
-
-
-@env.template(id="solve")
-async def solve(n: int = 0):
-    answer = yield f"solve {n}"
-    yield 1.0 if answer == "ok" else 0.0
-
-
-tasks = [solve(n=0), solve(n=1)]
+# Gives the environment named ``{env}`` the workspace the ``pi`` fixture's stand-in runs in.
+WORKSPACE = """
+import json as _json, os as _os
+_workspace = _json.loads(_os.environ["TEST_WORKSPACE"])
+{env}.workspace(_workspace["root"], guest_path=_workspace["root"], env=_workspace["env"])
 """
-SCRIPTED = ("openai_compatible", "-m", "scripted")
+
+
+def workspace(env: str = "env") -> str:
+    return WORKSPACE.format(env=env)
+
+
+def tasks_source(grade: str = '1.0 if answer == "ok" else 0.0') -> str:
+    return (
+        'from hud import Environment\nenv = Environment("demo")\n'
+        + workspace()
+        + '@env.template(id="solve")\nasync def solve(n: int = 0):\n'
+        + '    answer = yield f"solve {n}"\n'
+        + f"    yield {grade}\n"
+        + "tasks = [solve(n=0), solve(n=1)]\n"
+    )
 
 
 @pytest.fixture
-def gateway(models: Models, signed_in: FakeServices) -> Models:
-    """A signed-in user whose agents reach a scripted model that always answers "ok"."""
-    models.script([Turn(text="ok")])
-    return models
+def pi(hud: Hud, hud_env: HudEnv, signed_in: FakeServices) -> clis.Stub:
+    """A signed-in user whose workspace's ``pi`` always answers "ok"."""
+    root = hud.cwd / "ws"
+    stub = clis.Stub(root / ".stub", "pi", stdout=clis.answer("pi", "ok"))
+    stub.install()
+    hud_env.set(TEST_WORKSPACE=json.dumps({"root": str(root), "env": stub.shell_env()}))
+    return stub
 
 
 @pytest.fixture
-def tasks(hud: Hud) -> Path:
+def tasks(hud: Hud, pi: clis.Stub) -> Path:
     path = hud.cwd / "tasks.py"
-    path.write_text(TASKS_PY)
+    path.write_text(tasks_source())
     return path
 
 
@@ -61,6 +69,10 @@ def run(hud: Hud, *argv: str) -> Any:
     result = hud("eval", *argv, "--yes", "--json")
     assert result.exit_code == 0, result
     return result.json
+
+
+def prompts(stub: clis.Stub) -> list[str]:
+    return sorted(clis.prompt("pi", capture["stdin"]) for capture in stub.captures())
 
 
 @pytest.mark.parametrize(
@@ -83,22 +95,16 @@ def run(hud: Hud, *argv: str) -> Any:
 )
 def test_eval_reports_every_run_and_fails_when_none_was_graded(
     hud: Hud,
-    gateway: Models,
+    pi: clis.Stub,
     grade: str,
     selection: list[str],
     exit_code: int,
     rewards: list[float],
     errors: list[bool],
 ) -> None:
-    (hud.cwd / "tasks.py").write_text(
-        'from hud import Environment\nenv = Environment("demo")\n'
-        '@env.template(id="solve")\nasync def solve(n: int = 0):\n'
-        '    answer = yield f"solve {n}"\n'
-        f"    yield 1.0 if n == 0 else {grade}\n"
-        "tasks = [solve(n=0), solve(n=1)]\n"
-    )
+    (hud.cwd / "tasks.py").write_text(tasks_source(f"1.0 if n == 0 else {grade}"))
 
-    result = hud("eval", "tasks.py", *SCRIPTED, *selection, "--yes", "--json")
+    result = hud("eval", "tasks.py", "pi", *selection, "--yes", "--json")
 
     assert result.exit_code == exit_code, result
     runs = sorted(result.json["runs"], key=lambda run: run["is_error"])
@@ -108,11 +114,16 @@ def test_eval_reports_every_run_and_fails_when_none_was_graded(
 
 
 def test_eval_grades_a_run_whose_model_failed_and_reports_the_failure(
-    hud: Hud, models: Models, signed_in: FakeServices, tasks: Path
+    hud: Hud, pi: clis.Stub, tasks: Path
 ) -> None:
-    models.script([Turn(fail=Reply(status=400, json={"error": {"message": "model unavailable"}}))])
+    pi.stdout = clis.jsonl(
+        clis.PI_STARTED,
+        clis.pi_assistant(stop="error", error="400: model unavailable"),
+        clis.PI_SETTLED,
+    )
+    pi.install()
 
-    document = run(hud, "tasks.py", *SCRIPTED)
+    document = run(hud, "tasks.py", "pi")
 
     (failed,) = document["runs"]
     assert (failed["reward"], failed["is_error"], document["error_count"]) == (0.0, False, 0)
@@ -120,18 +131,18 @@ def test_eval_grades_a_run_whose_model_failed_and_reports_the_failure(
 
 
 @pytest.mark.parametrize(
-    ("argv", "prompts"),
+    ("argv", "expected"),
     [
         pytest.param([], ["solve 0"], id="the-first-by-default"),
         pytest.param(["--task-ids", "1"], ["solve 1"], id="by-index"),
     ],
 )
 def test_eval_runs_the_tasks_it_selects(
-    hud: Hud, gateway: Models, tasks: Path, argv: list[str], prompts: list[str]
+    hud: Hud, pi: clis.Stub, tasks: Path, argv: list[str], expected: list[str]
 ) -> None:
-    run(hud, "tasks.py", *SCRIPTED, *argv)
+    run(hud, "tasks.py", "pi", *argv)
 
-    assert sorted(request.prompt for request in gateway.requests()) == prompts
+    assert prompts(pi) == expected
 
 
 GLM = {
@@ -140,42 +151,28 @@ GLM = {
     "sdk_agent_type": "openai_compatible",
     "provider": {"name": "openai"},
 }
-KIMI_TOML = (
-    '[openai_compatible]\nmodel = "moonshotai/kimi-k2.6"\n'
-    "completion_kwargs = { temperature = 0.5 }\n"
-)
 
 
 @pytest.mark.parametrize(
-    ("argv", "config", "expected"),
+    ("argv", "env", "expected"),
     [
+        pytest.param(["pi"], {}, {"key": API_KEY}, id="gateway-by-default"),
         pytest.param(
-            list(SCRIPTED),
-            "",
-            {"key": API_KEY},
-            id="gateway-by-default",
+            ["pi", "-m", "z-ai/glm-5.2", "-c", "model=moonshotai/kimi-k2.6"],
+            {},
+            {"model": "z-ai/glm-5.2"},
+            id="model-flag-wins-over-config",
         ),
+        pytest.param(["glm-5.2"], {}, {"model": "z-ai/glm-5.2"}, id="catalog-alias"),
         pytest.param(
-            ["openai_compatible", "-m", "z-ai/glm-5.2"],
-            KIMI_TOML,
-            {"model": "z-ai/glm-5.2", "temperature": 0.5},
-            id="model-flag-wins-over-toml",
-        ),
-        pytest.param(
-            ["glm-5.2"],
-            "",
-            {"protocol": "chat", "model": "z-ai/glm-5.2"},
-            id="catalog-alias",
-        ),
-        pytest.param(
-            ["openai_compatible", "-m", "custom", "-c", "api_key=custom-key", "-c", "base_url=URL"],
-            "",
-            {"key": "custom-key"},
+            ["openai_compatible", "-m", "custom"],
+            {"OPENAI_API_KEY": "custom-key", "OPENAI_BASE_URL": "http://localhost:9/v1"},
+            {"key": "custom-key", "url": "http://localhost:9/v1"},
             id="custom-endpoint",
         ),
         pytest.param(
-            [*SCRIPTED, "-c", 'completion_kwargs={"temperature": 0.5}'],
-            "",
+            ["pi", "-c", 'completion_kwargs={"temperature": 0.5}'],
+            {},
             {"temperature": 0.5},
             id="json-config-value",
         ),
@@ -183,39 +180,32 @@ KIMI_TOML = (
 )
 def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     hud: Hud,
+    pi: clis.Stub,
     signed_in: FakeServices,
-    gateway: Models,
     hud_env: HudEnv,
     tasks: Path,
     argv: list[str],
-    config: str,
+    env: dict[str, str],
     expected: dict[str, Any],
 ) -> None:
     signed_in.route("api", "GET", "/v2/models", json={"items": [GLM], "total": 1})
-    (hud.cwd / ".hud_eval.toml").write_text(config)
-    # Provider SDKs read their own ``*_BASE_URL``; point them at the scripted model.
-    hud_env.set(OPENAI_BASE_URL=gateway.url, ANTHROPIC_BASE_URL=gateway.url)
+    hud_env.set(**env)
 
-    # The same scripted model under another host name, so it is not the HUD gateway.
-    custom = gateway.url.replace("127.0.0.1", "localhost")
-    run(hud, "tasks.py", *[arg.replace("URL", custom) for arg in argv])
+    run(hud, "tasks.py", *argv)
 
-    (request,) = gateway.requests()
-    credential = (
-        request.headers.get("x-api-key")
-        or request.headers.get("x-goog-api-key")
-        or request.headers.get("authorization", "").removeprefix("Bearer ")
-    )
+    (capture,) = pi.captures()
+    (provider,) = capture["pi_models"]["providers"].values()
+    (model,) = provider["models"]
     observed = {
-        "protocol": request.protocol,
-        "model": request.model,
-        "key": credential,
-        "temperature": request.body.get("temperature"),
+        "model": capture["argv"][capture["argv"].index("--model") + 1],
+        "key": capture["env"]["INFERENCE_API_KEY"],
+        "url": provider["baseUrl"],
+        "temperature": model.get("samplingParams", {}).get("temperature"),
     }
     assert {name: observed[name] for name in expected} == expected
 
 
-ENV = 'from hud import Environment\nenv = Environment("local-test")\n'
+ENV = 'from hud import Environment\nenv = Environment("local-test")\n' + workspace()
 SOLVE = (
     '@env.template(id="solve")\nasync def solve():\n'
     '    answer = yield "answer ok"\n'
@@ -227,7 +217,8 @@ def named(name: str, reward: str) -> str:
     """An env ``name`` whose ``solve`` pays ``reward``."""
     return (
         f"from hud import Environment\nenv = Environment({name!r})\n"
-        '@env.template(id="solve")\nasync def solve():\n'
+        + workspace()
+        + '@env.template(id="solve")\nasync def solve():\n'
         f'    answer = yield "answer ok"\n    yield {reward}\n'
     )
 
@@ -264,7 +255,8 @@ LAYOUTS: dict[str, tuple[dict[str, str], str, tuple[int, float, int]]] = {
     "a verifier in another env of the project": (
         {
             "core.py": 'from hud import Environment\nactor = Environment("actor")\n'
-            + 'judge = Environment("judge")\n',
+            + 'judge = Environment("judge")\n'
+            + workspace("actor"),
             "actor.py": "from core import actor\n"
             '@actor.template(id="solve")\nasync def solve():\n'
             '    answer = yield "answer ok"\n    yield {"score": 0.0, "answer": answer}\n',
@@ -285,7 +277,7 @@ LAYOUTS: dict[str, tuple[dict[str, str], str, tuple[int, float, int]]] = {
 @pytest.mark.parametrize(("files", "source", "outcome"), LAYOUTS.values(), ids=LAYOUTS.keys())
 def test_eval_runs_a_projects_rows_in_the_environments_they_name(
     hud: Hud,
-    gateway: Models,
+    pi: clis.Stub,
     tmp_path: Path,
     files: dict[str, str],
     source: str,
@@ -294,7 +286,7 @@ def test_eval_runs_a_projects_rows_in_the_environments_they_name(
     project = tmp_path / "project"
     write_files(project, files)
 
-    result = hud("eval", str(project / source), *SCRIPTED, "--all", "--yes", "--json")
+    result = hud("eval", str(project / source), "pi", "--all", "--yes", "--json")
 
     assert result.exit_code == (outcome[2] > 0), result
     document = result.json
@@ -302,21 +294,18 @@ def test_eval_runs_a_projects_rows_in_the_environments_they_name(
 
 
 @pytest.mark.parametrize(
-    ("config", "argv", "hosted"),
+    ("argv", "hosted"),
     [
-        pytest.param("", ["My Tasks"], True, id="a-platform-taskset-runs-hosted"),
-        pytest.param("[eval]\nremote = true\n", ["tasks.py"], True, id="the-toml-asks-for-hosted"),
-        pytest.param(
-            "[eval]\nremote = false\n", ["tasks.py", "--remote"], True, id="a-flag-beats-the-toml"
-        ),
+        pytest.param(["My Tasks"], True, id="a-platform-taskset-runs-hosted"),
+        pytest.param(["tasks.py"], False, id="a-tasks-file-runs-locally"),
+        pytest.param(["tasks.py", "--runtime", "hosted"], True, id="the-flag-asks-for-hosted"),
     ],
 )
 def test_eval_runs_each_row_where_its_placement_says(
     hud: Hud,
-    gateway: Models,
+    pi: clis.Stub,
     signed_in: FakeServices,
     tasks: Path,
-    config: str,
     argv: list[str],
     hosted: bool,
 ) -> None:
@@ -335,13 +324,11 @@ def test_eval_runs_each_row_where_its_placement_says(
     )
     signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
     signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "completed", "reward": 0.5})
-    (hud.cwd / ".hud_eval.toml").write_text(config)
-
-    document = run(hud, argv[0], *SCRIPTED, *argv[1:])
+    document = run(hud, argv[0], "pi", *argv[1:])
 
     assert document["mean_reward"] == (0.5 if hosted else 1.0)
     assert len(signed_in.requests("api", "POST", "/v2/rollouts/submit")) == hosted
-    assert [request.prompt for request in gateway.requests()] == ([] if hosted else ["solve 0"])
+    assert prompts(pi) == ([] if hosted else ["solve 0"])
 
 
 def test_interrupting_a_hosted_eval_cancels_every_rollout_on_the_platform(
@@ -350,7 +337,7 @@ def test_interrupting_a_hosted_eval_cancels_every_rollout_on_the_platform(
     signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
     signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "running"})
     signed_in.route("api", "POST", "/v2/rollouts/cancel", json={"status": "accepted"})
-    process = hud.start("eval", "tasks.py", *SCRIPTED, "--remote", "--group-size", "3", "--yes")
+    process = hud.start("eval", "tasks.py", "pi", "--runtime", "hosted", "--group", "3", "--yes")
 
     deadline = time.monotonic() + 60
     while len(signed_in.requests("api", "GET", "/v2/trace/{id}")) < 3:
@@ -379,23 +366,22 @@ def alive(pid: int) -> bool:
     return True
 
 
-def test_terminating_eval_tears_down_the_environments_it_spawned(
-    hud: Hud, models: Models, signed_in: FakeServices
-) -> None:
+def test_terminating_eval_tears_down_the_environments_it_spawned(hud: Hud, pi: clis.Stub) -> None:
+    pi.hang = True
+    pi.install()
     pids = hud.cwd / "env.pids"
     (hud.cwd / "tasks.py").write_text(
-        f"import os\n{TASKS_PY}\n\n@env.initialize\nasync def record_pid() -> None:\n"
+        f"import os\n{tasks_source()}\n\n@env.initialize\nasync def record_pid() -> None:\n"
         f"    with open({str(pids)!r}, 'a') as out:\n"
         "        out.write(f'{os.getpid()}\\n')\n"
     )
-    models.script([Turn(fail=Reply(json={}, delay=600))])
-    process = hud.start("eval", "tasks.py", *SCRIPTED, "--group-size", "2", "--yes")
+    process = hud.start("eval", "tasks.py", "pi", "--group", "2", "--yes")
 
     try:
         deadline = time.monotonic() + 60
-        while len(models.requests()) < 2:
+        while len(pi.captures()) < 2:
             assert process.poll() is None, process.communicate()
-            assert time.monotonic() < deadline, "hud eval never reached the model"
+            assert time.monotonic() < deadline, "hud eval never started pi"
             time.sleep(0.05)
         process.send_signal(signal.SIGTERM)
         process.communicate(timeout=30)
@@ -432,7 +418,9 @@ def test_eval_prints_its_job_link_once_before_hosted_execution_finishes(
     signed_in.route("api", "POST", "/v2/trace/job/{id}/enter", json={})
     signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
     signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "running"})
-    process = hud.start("eval", "tasks.py", *SCRIPTED, "--remote", "--yes", "--json", *verbosity)
+    process = hud.start(
+        "eval", "tasks.py", "pi", "--runtime", "hosted", "--yes", "--json", *verbosity
+    )
     assert process.stderr is not None
     assert process.stdout is not None
     stderr: list[str] = []
@@ -476,3 +464,13 @@ def test_eval_prints_its_job_link_once_before_hosted_execution_finishes(
         assert "".join(stderr).count(f"https://hud.test/jobs/{job_id}") == 1
     else:
         assert "https://hud.test/jobs/" not in "".join(stderr)
+
+
+def test_the_gemini_agent_type_is_refused_until_it_has_an_agent(
+    hud: Hud, pi: clis.Stub, tasks: Path
+) -> None:
+    result = hud("eval", "tasks.py", "gemini", "--yes", "--json")
+
+    assert result.exit_code != 0, result
+    assert "agent type 'gemini' has no agent" in result.json["message"], result
+    assert pi.captures() == []

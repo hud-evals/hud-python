@@ -1,8 +1,7 @@
-"""The grading contract: ``SubScore``, ``Grade``, ``EvaluationResult`` and ``Grader``."""
+"""The grading contract: ``SubScore``, ``Grade`` and ``Grader``."""
 
 from __future__ import annotations
 
-import warnings
 from typing import Any, cast
 
 from pydantic import (
@@ -17,7 +16,6 @@ from pydantic import (
     model_validator,
 )
 
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.serialization import json_safe_dict
 
 _SUMMARY_SERIALIZATION_CONTEXT = "hud_summary"
@@ -92,11 +90,10 @@ class Grade(BaseModel):
             return self
         weighted = sum(subscore.value * subscore.weight for subscore in self.subscores)
         if abs(weighted - self.reward) > 0.01:
-            warn_deprecated(
-                f"A grade whose subscores don't explain its reward (value x weight sums to "
-                f"{weighted:.4f}, the reward is {self.reward:.4f})",
-                "set the reward to the weighted sum, or the weights to what the reward used",
-                change="will raise",
+            raise ValueError(
+                f"subscores don't explain the reward: value x weight sums to {weighted:.4f}, "
+                f"the reward is {self.reward:.4f}; set the reward to the weighted sum, or the "
+                "weights to what the reward used"
             )
         return self
 
@@ -106,12 +103,6 @@ class Grade(BaseModel):
         if self.subscores is not None:
             frame["subscores"] = [subscore.to_summary() for subscore in self.subscores]
         return frame
-
-    @property
-    def evaluation(self) -> dict[str, Any]:
-        """``to_summary()``; deprecated."""
-        warn_deprecated("`Grade.evaluation`", "use `Grade.to_summary()`")
-        return self.to_summary()
 
     @classmethod
     def ungraded(cls) -> Grade:
@@ -125,49 +116,6 @@ def grade_problems(error: ValidationError) -> str:
         f"{'.'.join(map(str, item['loc']))!r}: {item['msg']}, got {item['input']!r}"
         for item in error.errors()
     )
-
-
-class EvaluationResult(BaseModel):
-    """Deprecated: a task's grade, now ``hud.Grade``. Construction warns until hud v0.7.0."""
-
-    reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
-    done: bool = Field(default=True, description="Whether the task/episode is complete")
-    content: str | None = Field(default=None, description="Human-readable explanation")
-    info: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
-    isError: bool = Field(default=False, description="Whether the evaluation itself failed")
-    subscores: list[SubScore] | None = Field(
-        default=None,
-        description="Optional breakdown of score components for debugging",
-    )
-
-    model_config = ConfigDict(extra="allow")
-
-    def __init__(self, **data: Any) -> None:
-        warn_deprecated(
-            "`EvaluationResult`", "yield a `hud.Grade` (`is_error=` in place of `isError=`)"
-        )
-        super().__init__(**data)
-
-    @model_validator(mode="after")
-    def _check_subscores(self) -> EvaluationResult:
-        if not self.subscores:
-            return self
-        names = [s.name for s in self.subscores]
-        dupes = [n for n in names if names.count(n) > 1]
-        if dupes:
-            warnings.warn(f"Duplicate subscore names: {set(dupes)}", stacklevel=2)
-        pos_weight_sum = sum(s.weight for s in self.subscores if s.weight > 0)
-        if abs(pos_weight_sum - 1.0) > 0.01:
-            warnings.warn(
-                f"Positive subscore weights should sum to ~1.0 (got {pos_weight_sum:.4f}). "
-                f"Weights represent proportional contributions to the reward.",
-                stacklevel=2,
-            )
-        return self
-
-    @classmethod
-    def from_float(cls, value: float) -> EvaluationResult:
-        return cls(reward=value, done=True)
 
 
 class Grader:

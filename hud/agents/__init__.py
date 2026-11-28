@@ -14,23 +14,11 @@ from hud.utils.gateway import resolve_gateway_model
 if TYPE_CHECKING:
     from typing import TypeAlias
 
-    from hud.agents.claude.agent import ClaudeAgent
     from hud.agents.claude.cli.agent import ClaudeCLIAgent
     from hud.agents.codex.agent import CodexCLIAgent
-    from hud.agents.gemini.agent import GeminiAgent
-    from hud.agents.openai.agent import OpenAIAgent
-    from hud.agents.openai_compatible.agent import OpenAIChatAgent
     from hud.agents.pi.agent import PiAgent
 
-    GatewayAgent: TypeAlias = (
-        ClaudeAgent
-        | ClaudeCLIAgent
-        | CodexCLIAgent
-        | GeminiAgent
-        | OpenAIAgent
-        | OpenAIChatAgent
-        | PiAgent
-    )
+    GatewayAgent: TypeAlias = ClaudeCLIAgent | CodexCLIAgent | PiAgent
 
 
 def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
@@ -39,13 +27,6 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     The agent stays serializable, so ``HostedRuntime`` can rebuild it remotely. For your own
     provider keys, instantiate the agent class directly.
     """
-    direct_credentials = [name for name in ("api_key", "base_url") if name in kwargs]
-    if direct_credentials:
-        names = ", ".join(direct_credentials)
-        raise ValueError(
-            f"create_agent routes through the HUD gateway and does not accept {names}; "
-            "instantiate the provider agent directly for custom/BYOK credentials"
-        )
     if not settings.api_key:
         raise HudAuthenticationError("HUD_API_KEY is required to create a gateway agent")
 
@@ -60,23 +41,15 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
 
 _LAZY_EXPORTS = {
-    "ClaudeAgent": "hud.agents.claude.agent",
     "ClaudeCLIAgent": "hud.agents.claude.cli.agent",
     "CodexCLIAgent": "hud.agents.codex.agent",
-    "GeminiAgent": "hud.agents.gemini.agent",
-    "OpenAIAgent": "hud.agents.openai.agent",
-    "OpenAIChatAgent": "hud.agents.openai_compatible.agent",
     "PiAgent": "hud.agents.pi.agent",
 }
 
 __all__ = [
     "Agent",
-    "ClaudeAgent",
     "ClaudeCLIAgent",
     "CodexCLIAgent",
-    "GeminiAgent",
-    "OpenAIAgent",
-    "OpenAIChatAgent",
     "PiAgent",
     "create_agent",
 ]

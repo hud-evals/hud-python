@@ -10,7 +10,6 @@ from typing import Any, cast
 from uuid import UUID
 
 import typer
-from typer.core import TyperGroup
 
 from hud.cli import (
     CLI,
@@ -25,7 +24,6 @@ from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.cli.tasksets import diff, find_taskset, upload_taskset
 from hud.eval.taskset import Taskset
 from hud.settings import settings
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import Page, PlatformClient
@@ -35,6 +33,7 @@ sync_app = CLI(
     help="Sync tasks and environments to the HUD platform",
     add_completion=False,
     rich_markup_mode="rich",
+    no_args_is_help=True,
 )
 
 
@@ -357,45 +356,6 @@ def sync_env_command(
         "short_id": str(selected.id)[:8],
         "changed": changed,
     }
-
-
-@sync_app.callback(invoke_without_command=True)
-def sync_callback(
-    ctx: typer.Context,
-    yes: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Skip confirmation prompts (required in non-interactive terminals).",
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Print the planned action without making changes."
-    ),
-) -> Any:
-    """Sync tasks and environments to the HUD platform.
-
-    [not dim]Examples:
-        hud sync tasks                   # sync tasks using .hud/config.json
-        hud sync tasks --yes             # without the confirmation prompt
-        hud sync tasks my-taskset        # sync tasks to specific taskset
-        hud sync env my-env              # link to a deployed environment[/not dim]
-    """
-    if ctx.invoked_subcommand is not None:
-        if yes or dry_run:
-            raise CliError(
-                error="usage",
-                message="Pass --yes and --dry-run after the subcommand.",
-                suggestion=f"hud sync {ctx.invoked_subcommand} --yes",
-            )
-        return
-
-    warn_deprecated("`hud sync` without a subcommand", "use `hud sync tasks`")
-    assert isinstance(ctx.command, TyperGroup)
-    command = ctx.command.get_command(ctx, "tasks")
-    assert command is not None
-    forwarded = [flag for flag, on in (("--yes", yes), ("--dry-run", dry_run)) if on]
-    with command.make_context("tasks", forwarded, parent=ctx) as task_context:
-        return command.invoke(task_context)
 
 
 def _is_id(ref: str) -> bool:

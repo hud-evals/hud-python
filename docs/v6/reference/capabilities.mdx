@@ -242,7 +242,7 @@ Spinning up a capability is the environment side. The harness side is the mirror
 | `MCPClient` | `mcp/2025-11-25` |
 | `RFBClient` | `rfb/3.8` |
 
-The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
+The built-in CLI agents reach these through their own CLI (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
 
 To open a protocol the SDK has no client for, register your own; see [a client for a new protocol](/v6/advanced/extending#a-client-for-a-new-protocol).
 

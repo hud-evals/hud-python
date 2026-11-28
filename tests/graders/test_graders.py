@@ -11,17 +11,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud import Environment, Grade
-from hud.graders import (
-    BashGrader,
-    EvaluationResult,
-    Grader,
-    LLMJudgeGrader,
-    SubScore,
-    combine,
-    combine_all,
-    combine_any,
-)
-from hud.utils.exceptions import HudDeprecationWarning
+from hud.graders import BashGrader, Grader, LLMJudgeGrader, SubScore, combine
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.models import Turn
 
@@ -80,9 +70,7 @@ async def test_a_negative_weight_is_a_penalty_taken_off_the_reward(
     assert [s["weight"] for s in trace.grade.to_summary()["subscores"]] == [1.0, -0.2]
 
 
-async def test_weights_not_summing_to_one_are_normalized_with_a_warning_and_penalties_kept() -> (
-    None
-):
+async def test_positive_weights_not_summing_to_one_are_a_grading_error() -> None:
     env = Environment("graders")
 
     @env.template()
@@ -92,40 +80,13 @@ async def test_weights_not_summing_to_one_are_normalized_with_a_warning_and_pena
             SubScore(name="a", value=1.0, weight=0.5),
             SubScore(name="b", value=1.0, weight=0.3),
             SubScore(name="c", value=0.0, weight=0.3),
-            SubScore(name="penalty", value=1.0, weight=-0.1),
         )
 
-    with pytest.warns(HudDeprecationWarning, match="positive weights summing to 1.1000"):
-        (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
+    job = await check().run(ScriptedAgent(ANSWER))
 
-    assert trace.reward == pytest.approx(0.8 / 1.1 - 0.1)
-    assert [s["weight"] for s in trace.grade.to_summary()["subscores"]] == pytest.approx(
-        [0.5 / 1.1, 0.3 / 1.1, 0.3 / 1.1, -0.1]
-    )
-
-
-@pytest.mark.parametrize(("helper", "value"), [(combine_any, 1.0), (combine_all, 0.0)])
-async def test_the_any_and_all_helpers_still_build_a_node_over_their_inputs_with_a_warning(
-    helper: Any, value: float
-) -> None:
-    env = Environment("graders")
-
-    @env.template()
-    async def check():
-        yield "go"
-        passed = SubScore(name="tests", value=1.0)
-        failed = SubScore(name="tests", value=0.0)
-        with pytest.warns(HudDeprecationWarning, match="build the subscore directly"):
-            either = helper(0.5, [passed, failed], name="tests")
-        yield await combine(either, SubScore(name="style", value=1.0, weight=0.5))
-
-    (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
-
-    assert trace.reward == pytest.approx(0.5 * value + 0.5)
-    assert trace.grade.subscores is not None
-    node = trace.grade.subscores[0]
-    assert (node.name, node.value) == ("tests", value)
-    assert [(c.name, c.value) for c in node.children or []] == [("tests-1", 1.0), ("tests-2", 0.0)]
+    (trace,) = job.traces
+    assert trace in job.errors
+    assert "must sum to 1.0, got 1.1000" in (trace.error or "")
 
 
 async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore() -> None:
@@ -235,26 +196,20 @@ VERDICTS = {
     ("criteria", "verdicts", "reward", "children"),
     [
         (
-            [["names Paris", 1.0], ["cites a source", 2.0], ["invents facts", -1.0]],
-            {"names Paris": "json", "cites a source": "fenced", "invents facts": "prose"},
-            1 / 3,
+            [["names Paris", 1.0], ["cites a source", 2.0], ["stays brief", 1.0]],
+            {"names Paris": "json", "cites a source": "fenced", "stays brief": "prose"},
+            1 / 4,
             [
                 ("names Paris", 1.0, 1.0, "plainly stated"),
                 ("cites a source", 2.0, 0.0, "no source"),
-                ("invents facts", -1.0, 0.0, VERDICTS["prose"]),
+                ("stays brief", 1.0, 0.0, VERDICTS["prose"]),
             ],
         ),
         (
-            [["invents facts", -1.0]],
-            {"invents facts": "prose-met"},
-            0.0,
-            [("invents facts", -1.0, 1.0, "The criterion is MET.")],
-        ),
-        (
-            [["invents facts", -1.0]],
-            {"invents facts": "prose"},
+            [["names Paris", 1.0]],
+            {"names Paris": "prose-met"},
             1.0,
-            [("invents facts", -1.0, 0.0, VERDICTS["prose"])],
+            [("names Paris", 1.0, 1.0, "The criterion is MET.")],
         ),
         (
             [["names Paris", 1.0]],
@@ -268,8 +223,7 @@ VERDICTS = {
     ],
     ids=[
         "json-fenced-and-prose-verdicts",
-        "a-penalty-that-is-met",
-        "a-penalty-that-is-not-met",
+        "met-in-prose",
         "not-met-in-prose",
         "a-reply-without-a-verdict-is-a-grading-error",
         "an-unknown-status-is-a-grading-error",
@@ -317,10 +271,28 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
     assert [request.credential for request in models.requests()] == ["k"] * len(criteria)
 
 
-@pytest.mark.parametrize("form", ["grade", "evaluation-result"])
-async def test_a_grade_reads_the_same_whether_the_task_yields_a_grade_or_an_evaluation_result(
-    form: str,
+async def test_a_negative_criterion_is_a_grading_error_without_asking_the_judge(
+    models: Models, hud_env: HudEnv
 ) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    env = Environment("graders")
+
+    @env.template()
+    async def check():
+        answer = yield "Name the capital of France."
+        yield await combine(
+            LLMJudgeGrader.grade(weight=1.0, answer=answer, criteria=[("invents facts", -1.0)])
+        )
+
+    job = await check().run(ScriptedAgent(ANSWER))
+
+    (trace,) = job.traces
+    assert trace in job.errors
+    assert "weights of 0 or more" in (trace.error or "")
+    assert models.requests() == []
+
+
+async def test_a_grade_a_task_yields_is_the_trace_grade() -> None:
     subscores = [
         SubScore(name="tests", value=1.0, weight=0.75),
         SubScore(name="style", value=0.0, weight=0.25),
@@ -330,14 +302,7 @@ async def test_a_grade_reads_the_same_whether_the_task_yields_a_grade_or_an_eval
     @env.template()
     async def check():
         yield "go"
-        if form == "grade":
-            yield Grade(reward=0.75, content="tests pass", info={"run": 1}, subscores=subscores)
-        else:
-            with pytest.warns(HudDeprecationWarning, match="`hud.Grade`"):
-                result = EvaluationResult(
-                    reward=0.75, content="tests pass", info={"run": 1}, subscores=subscores
-                )
-            yield result
+        yield Grade(reward=0.75, content="tests pass", info={"run": 1}, subscores=subscores)
 
     (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
 

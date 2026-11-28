@@ -10,6 +10,8 @@ import pytest
 
 from hud import Task
 
+from .conftest import TEAM_ID, USER_ID
+
 if TYPE_CHECKING:
     from tests.conftest import Hud
     from tests.fixtures.services import FakeServices
@@ -86,9 +88,11 @@ def linked(hud: Hud) -> dict[str, Any]:
     return json.loads(path.read_text()) if path.exists() else {}
 
 
-def link(hud: Hud, **ids: str) -> None:
+def link(hud: Hud, platform: FakeServices, **ids: str) -> None:
+    origin = platform.url("api").removesuffix("/api")
+    scope = {"origin": origin, "user_id": USER_ID, "team_id": TEAM_ID}
     (hud.cwd / ".hud").mkdir(exist_ok=True)
-    (hud.cwd / ".hud" / "config.json").write_text(json.dumps(ids))
+    (hud.cwd / ".hud" / "config.json").write_text(json.dumps({"scope": scope, **ids}))
 
 
 def uploads(services: FakeServices) -> list[dict[str, Any]]:
@@ -155,7 +159,7 @@ def test_syncing_tasks_without_a_taskset_uses_the_linked_one_by_its_remote_name(
     platform: FakeServices, hud: Hud
 ) -> None:
     holding(platform, TASKSET_ID, "renamed", exported(1, 2))
-    link(hud, taskset_id=TASKSET_ID)
+    link(hud, platform, taskset_id=TASKSET_ID)
 
     result = hud("sync", "tasks", "--json")
 
@@ -179,7 +183,7 @@ def test_syncing_another_taskset_moves_the_link_only_when_asked(
         "/v2/tasks/upload",
         json={"taskset_id": OTHER_ID, "tasks_created": 2, "tasks_updated": 0},
     )
-    link(hud, taskset_id=TASKSET_ID)
+    link(hud, platform, taskset_id=TASKSET_ID)
 
     result = hud("sync", "tasks", "other", "tasks.py", *options, "--yes", "--json")
 
@@ -203,7 +207,7 @@ def test_a_taskset_name_matching_two_tasksets_is_a_usage_error_that_uploads_noth
 def test_a_taskset_id_that_was_deleted_is_not_found(
     given: list[str], platform: FakeServices, hud: Hud
 ) -> None:
-    link(hud, taskset_id=TASKSET_ID)
+    link(hud, platform, taskset_id=TASKSET_ID)
     platform.route("api", "GET", f"/v2/tasksets/{TASKSET_ID}", status=404, json={"detail": "No"})
 
     result = hud("sync", "tasks", *given, "--force", "--yes", "--json")

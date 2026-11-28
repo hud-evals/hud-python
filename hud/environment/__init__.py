@@ -13,7 +13,6 @@ import importlib
 from pathlib import Path
 from typing import Any
 
-from hud.utils.deprecation import moved_to, resolve_retired
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
@@ -101,17 +100,3 @@ __all__ = [
     "reply",
     "send_frame",
 ]
-
-_RETIRED = {
-    **moved_to("hud.capabilities", "Capability"),
-    **moved_to("hud.environment.egress", "Peer"),
-    **moved_to("hud.environment.workspace", "DEFAULT_SYSTEM_MOUNTS", "MountKind"),
-}
-
-
-def __getattr__(name: str) -> Any:
-    # The argument-hint helpers load on first use, so ``import hud`` never builds them.
-    retired = (
-        _RETIRED if name in _RETIRED else importlib.import_module(".arguments", __name__).RETIRED
-    )
-    return resolve_retired(__name__, name, retired)

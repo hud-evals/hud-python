@@ -15,7 +15,6 @@ SpanStatusCode: TypeAlias = Literal["UNSET", "OK", "ERROR"]
 # Attribute carrying the schema tag a backend serializer dispatches on.
 SCHEMA_ATTRIBUTE = "hud.schema"
 # Attribute carrying the schema-tagged domain object — one payload per span.
-# Also the payload key on ``@instrument`` request/result span events.
 PAYLOAD_ATTRIBUTE = "hud.payload"
 # Attribute carrying the task-run id the exporter groups uploads by.
 TASK_RUN_ID_ATTRIBUTE = "hud.task_run_id"

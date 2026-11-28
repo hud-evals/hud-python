@@ -1,7 +1,7 @@
 """What every ``hud`` command does alike: anonymous analytics, an interrupt, asking before it
 changes anything, the error document a failure prints, the error kind a platform status
-maps to, retrying a transient failure, one id per line under ``--quiet``, never echoing a
-secret it was given, and running a deprecated spelling as the kept one with a warning.
+maps to, retrying a transient failure, one id per line under ``--quiet``, and never echoing a
+secret it was given.
 
 The CLI owns these contracts once, so each table holds one row per distinct way a command
 reaches them, not one row per command.
@@ -43,15 +43,6 @@ ENVIRONMENT = {
     "env.py": 'from hud import Environment\nenv = Environment("example")\n',
     "Dockerfile.hud": "FROM python:3.12\n",
 }
-MODEL = {
-    "id": "cccccccc-0000-4000-8000-000000000102",
-    "name": "My Sonnet",
-    "model_name": "team/my-sonnet",
-    "sdk_agent_type": "claude",
-    "is_trainable": True,
-    "provider": {"name": "anthropic"},
-}
-
 # name -> (an invocation that fails when signed out, the files it needs)
 FAILING: dict[str, tuple[list[str], dict[str, str]]] = {
     "version": (["version", "--no-such-option"], {}),  # rejected while parsing
@@ -64,7 +55,7 @@ FAILING: dict[str, tuple[list[str], dict[str, str]]] = {
 MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
     "deploy": (["deploy", "--no-env"], ENVIRONMENT, {}),
     "eval": (
-        ["eval", "Demo", "openai_compatible", "-m", "scripted"],
+        ["eval", "Demo", "pi"],
         {},
         {
             "GET /v2/tasksets": {"items": [{"id": TASKSET_ID, "name": "Demo"}], "total": 1},
@@ -75,8 +66,8 @@ MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
         },
     ),
     "sync tasks": (
-        ["sync", "tasks"],
-        {"tasks.py": TASKS_PY, ".hud/config.json": json.dumps({"taskset_id": TASKSET_ID})},
+        ["sync", "tasks", TASKSET_ID],
+        {"tasks.py": TASKS_PY},
         {
             f"GET /v2/tasksets/{TASKSET_ID}": {"id": TASKSET_ID, "name": "demo"},
             f"GET /v2/tasksets/{TASKSET_ID}/export": {"name": "demo", "tasks": []},
@@ -95,12 +86,6 @@ MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
     ),
     # Answers --dry-run before it reaches the platform.
     "jobs cancel": (["jobs", "cancel", JOB_ID], {}, {}),
-    # Asks only when --set changes the head.
-    "models head": (
-        ["models", "head", "team/my-sonnet", "--set", "ckpt-1"],
-        {},
-        {"GET /v2/models": {"items": [MODEL], "total": 1}},
-    ),
 }
 # name -> (invocation, files, platform replies, the ids it prints under ``--quiet``)
 LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = {
@@ -115,32 +100,6 @@ LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = 
         {},
         {"GET /v2/jobs": {"items": [{"id": "job-1"}, {"id": "job-2"}], "total": 2}},
         ["job-1", "job-2"],
-    ),
-}
-
-PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000001"
-# the spelling the warning names -> (the deprecated invocation, the kept one it matches)
-EVAL = ["eval", "tasks.py", "claude", "--dry-run"]
-DEPRECATED: dict[str, tuple[list[str], list[str]]] = {
-    "hud eval --remote": ([*EVAL, "--remote"], [*EVAL, "--runtime", "hosted"]),
-    "hud eval --full": (
-        [*EVAL, "--full"],
-        [*EVAL, "--all", "--auto-respond", "--max-steps", "100"],
-    ),
-    "hud eval --group-size": ([*EVAL, "--group-size", "3"], [*EVAL, "--group", "3"]),
-    "hud init --preset": (
-        ["init", "demo", "-p", "blank", "--dry-run"],
-        ["init", "demo", "-t", "blank", "--dry-run"],
-    ),
-    "hud jobs <job-id>": (["jobs", JOB_ID], ["jobs", "get", JOB_ID]),
-    "hud trace <trace-id>": (["trace", TRACE_ID], ["trace", "get", TRACE_ID]),
-    "hud project create --directory": (
-        ["project", "create", "demo", "-C", "sub", "--dry-run"],
-        ["project", "-C", "sub", "create", "demo", "--dry-run"],
-    ),
-    "hud project use --directory": (
-        ["project", "use", "demo", "-C", "sub", "--dry-run"],
-        ["project", "-C", "sub", "use", "demo", "--dry-run"],
     ),
 }
 
@@ -215,9 +174,8 @@ def event(name: str, exit_code: int, error: Any) -> dict[str, Any]:
     [
         (["version"], [event("version", 0, None)]),
         (["secret-name", "arg"], [event("other", 2, "UsageError")]),
-        (["--version"], []),
     ],
-    ids=["a-command", "an-unknown-command-is-not-named", "the-version-flag"],
+    ids=["a-command", "an-unknown-command-is-not-named"],
 )
 def test_what_is_not_a_command_posts_nothing_that_names_it(
     argv: list[str], expected: list[dict[str, Any]], analytics: FakeServices, hud: Hud
@@ -322,36 +280,6 @@ def test_a_mistyped_option_names_its_command(argv: list[str], command: str, hud:
         assert "Possible options: --template" in result.json["message"], result
 
 
-@pytest.mark.parametrize("spelling", sorted(DEPRECATED))
-def test_a_deprecated_spelling_warns_and_does_what_the_kept_one_does(
-    spelling: str, signed_in: FakeServices, hud: Hud
-) -> None:
-    deprecated, kept = DEPRECATED[spelling]
-    write_files(hud.cwd, {"tasks.py": TASKS_PY, "sub/": ""})
-    project = {"id": PROJECT_ID, "name": "demo", "capabilities": {"create": True}}
-    serve(
-        signed_in,
-        {
-            f"GET /v2/jobs/{JOB_ID}/traces": {"items": [{"id": TRACE_ID}], "total": 1},
-            f"GET /v2/trace/{TRACE_ID}/events": {
-                "events": [{"kind": "agent_message"}],
-                "status": "completed",
-            },
-            "GET /v2/projects": {"items": [project], "total": 1},
-            f"GET /v2/projects/{PROJECT_ID}": project,
-        },
-    )
-
-    old = hud(*deprecated, "--json")
-    new = hud(*kept, "--json")
-
-    assert (old.exit_code, old.json) == (0, new.json), old
-    warned = " ".join(old.stderr.split())
-    assert f"`{spelling}" in warned, old
-    assert "is deprecated and will be removed in hud v0.7.0" in warned, old
-    assert f"`{spelling}" not in new.stderr, new
-
-
 @pytest.mark.parametrize("name", sorted(FAILING))
 def test_a_failure_is_one_error_document_under_json_and_stays_off_stdout_in_text(
     name: str, services: FakeServices, hud_env: HudEnv, hud: Hud
@@ -428,8 +356,8 @@ SECRET = "s3cr3t-c0d3"
         ),
         (
             [
-                *("eval", "tasks.py", "openai_compatible", "-m", "custom"),
-                *("-c", f"api_key={SECRET}", "-c", "base_url=http://127.0.0.1:9", "--dry-run"),
+                *("eval", "tasks.py", "claude_cli"),
+                *("-c", f'env={{"TOKEN": "{SECRET}"}}', "--dry-run"),
             ],
             {"tasks.py": TASKS_PY},
             {},

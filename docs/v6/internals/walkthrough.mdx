@@ -658,7 +658,7 @@ when `returns=` was declared), which advances past the first yield, evaluates, a
 ```python hud/environment/server.py · TaskRunner.grade
 async def grade(self, payload):
     evaluation = await self._gen.asend(_build_answer(self.task.return_type, payload))  # 2nd yield
-    # ... a number, a dict or an EvaluationResult becomes a Grade ...
+    # ... a number, a dict or a Grade becomes a Grade ...
     return grade.model_dump(mode="json")  # the grade frame
 ```
 

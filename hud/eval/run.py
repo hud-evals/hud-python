@@ -27,7 +27,6 @@ from hud.telemetry.context import (
 from hud.telemetry.exporter import export
 from hud.telemetry.span import normalize_trace_id
 from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -149,38 +148,34 @@ def _episode_bindings(started: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 # Released env servers forward a dict yield with only the score checked; per field, how
-# to spot a mistyped value and how those servers read it.
-_LOOSE_GRADE_FIELDS: dict[str, tuple[Callable[[Any], bool], Callable[[Any], Any]]] = {
-    "score": (lambda v: isinstance(v, bool), float),
-    "done": (lambda v: not isinstance(v, bool), bool),
-    "isError": (lambda v: not isinstance(v, bool), bool),
-    "content": (lambda v: not isinstance(v, str | None), lambda _: None),
-    "info": (lambda v: not isinstance(v, dict), lambda _: {}),
-    "subscores": (lambda v: not isinstance(v, list | None), lambda _: None),
+# to spot a mistyped value that ``Grade`` validation would otherwise coerce.
+_MISTYPED_GRADE_FIELDS: dict[str, Callable[[Any], bool]] = {
+    "score": lambda v: isinstance(v, bool),
+    "done": lambda v: not isinstance(v, bool),
+    "isError": lambda v: not isinstance(v, bool),
+    "content": lambda v: not isinstance(v, str | None),
+    "info": lambda v: not isinstance(v, dict),
+    "subscores": lambda v: not isinstance(v, list | None),
 }
 
 
 def parse_grade(frame: dict[str, Any]) -> Grade:
-    """A ``tasks.grade`` frame as a ``Grade``.
-
-    A boolean ``score``, or a mistyped ``done``, ``isError``, ``content``, ``info`` or
-    ``subscores``, is read as released SDKs read it, with a warning; hud v0.7.0 rejects it.
-    """
+    """A ``tasks.grade`` frame as a ``Grade``; a mistyped field is a protocol error."""
     if "score" not in frame:
         raise HudProtocolError(
             -32603, f"tasks.grade: a grade frame needs a 'score', got keys {sorted(frame)}"
         )
-    frame = dict(frame)
-    for field, (mistyped, read_as) in _LOOSE_GRADE_FIELDS.items():
-        if field in frame and mistyped(frame[field]):
-            value = frame[field]
-            frame[field] = read_as(value)
-            warn_deprecated(
-                f"A `tasks.grade` frame whose field {field!r} is {value!r} (read as "
-                f"{frame[field]!r})",
-                "yield a `hud.Grade` from the task so the frame is typed",
-                change="will be an error",
-            )
+    mistyped = [
+        f"{field!r} is {frame[field]!r}"
+        for field, is_mistyped in _MISTYPED_GRADE_FIELDS.items()
+        if field in frame and is_mistyped(frame[field])
+    ]
+    if mistyped:
+        raise HudProtocolError(
+            -32603,
+            f"tasks.grade: mistyped fields: {'; '.join(mistyped)}; yield a `hud.Grade` from "
+            "the task so the frame is typed",
+        )
     try:
         return Grade.model_validate(frame, by_name=False)
     except ValidationError as exc:

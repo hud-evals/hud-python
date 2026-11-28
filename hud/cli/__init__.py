@@ -15,11 +15,10 @@ from uuid import UUID
 
 import typer
 from dotenv import set_key
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from typer._click.exceptions import UsageError
 from typer.core import TyperCommand, TyperGroup
 
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.exceptions import HudAuthenticationError, HudRequestError, HudTimeoutError
 from hud.utils.hud_console import HUDConsole
 
@@ -63,26 +62,15 @@ class AuthScope(BaseModel):
 
 
 class DirectoryLink(BaseModel):
-    """``.hud/config.json``: platform ids plus the credentials that wrote them.
-
-    hud 0.6.17 and earlier wrote camelCase ids (``registryId``, ``tasksetId``,
-    ``projectId``) and no ``scope``; such a file still validates, reads as an unscoped
-    link, and warns until hud v0.7.0. The next update rewrites it.
-    """
+    """``.hud/config.json``: platform ids plus the credentials that wrote them."""
 
     model_config = ConfigDict(extra="ignore")
 
     version: Literal[1] = 1
     scope: AuthScope | None = None
-    registry_id: UUID | None = Field(
-        default=None, validation_alias=AliasChoices("registry_id", "registryId")
-    )
-    taskset_id: UUID | None = Field(
-        default=None, validation_alias=AliasChoices("taskset_id", "tasksetId")
-    )
-    project_id: UUID | None = Field(
-        default=None, validation_alias=AliasChoices("project_id", "projectId")
-    )
+    registry_id: UUID | None = None
+    taskset_id: UUID | None = None
+    project_id: UUID | None = None
 
 
 class DirectoryState:
@@ -130,13 +118,14 @@ class DirectoryState:
                 suggestion="Delete the file and run the command again.",
             ) from exc
         if stored.scope is None:
-            warn_deprecated(
-                f"`{path}` in the hud 0.6.17 format (camelCase ids, no `scope`)",
-                "`hud deploy`, `hud sync env` or `hud project use` in this directory rewrites it "
-                "in the current format",
-                change="will stop loading",
+            raise CliError(
+                "failure",
+                f"{path} is in the hud 0.6.17 format (camelCase ids, no scope), which hud no "
+                "longer reads.",
+                suggestion="Delete the file, then link this directory again with hud sync env, "
+                "hud sync tasks or hud project use.",
             )
-        elif stored.scope != self.scope:
+        if stored.scope != self.scope:
             if stored.scope.origin != self.scope.origin:
                 detail = (
                     f"{path} was linked against {stored.scope.origin}, not {self.scope.origin}."
@@ -331,7 +320,6 @@ class CLIGroup(TyperGroup):
         "harbor",
         "qa",
         "jobs",
-        "cancel",
         "trace",
         "models",
         "set",

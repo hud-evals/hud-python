@@ -1,10 +1,10 @@
 """Stand-ins for the ``claude``, ``codex`` and ``pi`` executables a CLI agent launches.
 
 Each records what the agent handed it (argv, the variables it set, stdin, ``.hud_*``
-files), prints the JSONL stream the real CLI would, and exits as told. Like the real
-CLIs, each is a native executable: a compiled launcher that runs the stub script in its
-own process. ``answer`` and ``prompt`` speak either CLI's stream
-by its executable name.
+files, Pi's ``models.json``), prints the JSONL stream the real CLI would, and exits as
+told. Like the real CLIs, each is a native executable: a compiled launcher that runs the
+stub script in its own process. ``answer`` and ``prompt`` speak either CLI's stream by
+its executable name.
 """
 
 from __future__ import annotations
@@ -64,6 +64,10 @@ record = {{
     }},
     "pid": os.getpid(),
 }}
+# Pi reads its model, endpoint and request settings from models.json in its agent directory.
+_pi_home = os.environ.get("PI_CODING_AGENT_DIR")
+if _pi_home and os.path.exists(os.path.join(_pi_home, "models.json")):
+    record["pi_models"] = json.load(open(os.path.join(_pi_home, "models.json")))
 
 
 def drive_computer(server, actions):
@@ -332,20 +336,6 @@ def claude_result(text: str = "done", *, is_error: bool = False) -> dict[str, An
         "num_turns": 2,
         "total_cost_usd": 0.01,
     }
-
-
-CLAUDE_TURN_LIMIT = {
-    "type": "result",
-    "subtype": "error_max_turns",
-    "is_error": True,
-    "errors": ["Reached maximum number of turns (1)"],
-    "terminal_reason": "max_turns",
-    "stop_reason": "tool_use",
-    "session_id": "session-1",
-    "duration_ms": 5,
-    "num_turns": 2,
-    "total_cost_usd": 0.01,
-}
 
 
 def codex_item(kind: str, item_id: str, **fields: Any) -> dict[str, Any]:

@@ -23,7 +23,6 @@ from hud.eval.run import rollout
 from hud.runtime import LocalRuntime, Shared
 from hud.telemetry.context import get_mcp_trace_id
 from hud.types import AgentType
-from hud.utils.exceptions import HudDeprecationWarning
 from tests.conftest import SANDBOX
 from tests.fixtures import clis
 from tests.fixtures.asgi import mcp_server, serve_asgi
@@ -182,26 +181,6 @@ async def test_how_the_cli_exits_decides_how_the_run_ends(
 
     assert (trace.status, trace.content) == (status, content)
     assert trace.error == (None if error is None else f"[agent loop] RuntimeError: {error}")
-
-
-async def test_a_cli_run_that_reaches_its_turn_limit_stops_at_max_steps(tmp_path: Path) -> None:
-    stub = clis.Stub(
-        tmp_path / "ws" / ".stub",
-        "claude",
-        stdout=clis.jsonl(DONE, clis.CLAUDE_TURN_LIMIT),
-        exit=1,
-    )
-    stub.install()
-
-    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
-    (trace,) = (await task().run(ClaudeCLIAgent(ClaudeCLIConfig(max_steps=1)))).traces
-
-    assert (trace.status, trace.stop_reason, trace.content, trace.error) == (
-        "completed",
-        "max_steps",
-        "done",
-        None,
-    )
 
 
 @BACKINGS
@@ -861,13 +840,9 @@ def test_pi_config_refuses_what_pi_cannot_honor(fields: dict[str, Any], named: s
         PiConfig.model_validate(fields)
 
 
-def test_an_agent_loaded_with_a_key_its_config_lacks_warns_naming_it() -> None:
-    with pytest.warns(
-        HudDeprecationWarning, match=r"`PiConfig` with unknown keys `max_token` \(ignored\)"
-    ):
-        agent = PiAgent.load({"model": "my-model", "max_token": 2048})
-
-    assert agent.config.model == "my-model"
+def test_an_agent_loaded_with_a_key_its_config_lacks_is_refused_naming_it() -> None:
+    with pytest.raises(ValidationError, match="max_token"):
+        PiAgent.load({"model": "my-model", "max_token": 2048})
 
 
 ECHO_EXTENSION = """

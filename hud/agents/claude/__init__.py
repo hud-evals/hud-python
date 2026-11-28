@@ -1,1 +1,1 @@
-"""Claude provider harness."""
+"""Claude Code agent."""

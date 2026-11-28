@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import uuid
 from enum import StrEnum
@@ -20,8 +19,6 @@ from pydantic import (
 from typing_extensions import TypeVar
 
 from hud.graders.base import Grade
-from hud.telemetry.context import get_current_trace_id
-from hud.utils.deprecation import moved_to, resolve_retired, warn_deprecated
 from hud.utils.serialization import JsonObject
 from hud.utils.time import now_iso
 
@@ -35,6 +32,12 @@ T = TypeVar("T")
 
 
 class AgentType(StrEnum):
+    """The agent types ``hud eval``, ``create_agent`` and ``HostedRuntime`` name.
+
+    ``claude`` and ``claude_cli`` run Claude Code, ``openai`` and ``codex_cli`` run Codex,
+    and ``openai_compatible`` and ``pi`` run Pi. ``gemini`` has no agent yet.
+    """
+
     CLAUDE = "claude"
     CLAUDE_CLI = "claude_cli"
     CODEX_CLI = "codex_cli"
@@ -44,83 +47,55 @@ class AgentType(StrEnum):
     PI = "pi"
 
     @property
-    def is_cli(self) -> bool:
-        from hud.agents.cli import CLIAgent
-
-        return issubclass(self.cls, CLIAgent)
-
-    @property
     def cls(self) -> type[Agent]:
         match self:
-            case AgentType.CLAUDE:
-                from hud.agents.claude.agent import ClaudeAgent
-
-                return ClaudeAgent
-            case AgentType.CLAUDE_CLI:
+            case AgentType.CLAUDE | AgentType.CLAUDE_CLI:
                 from hud.agents.claude.cli.agent import ClaudeCLIAgent
 
                 return ClaudeCLIAgent
-            case AgentType.CODEX_CLI:
+            case AgentType.OPENAI | AgentType.CODEX_CLI:
                 from hud.agents.codex.agent import CodexCLIAgent
 
                 return CodexCLIAgent
-            case AgentType.OPENAI:
-                from hud.agents.openai.agent import OpenAIAgent
-
-                return OpenAIAgent
-            case AgentType.GEMINI:
-                from hud.agents.gemini.agent import GeminiAgent
-
-                return GeminiAgent
-            case AgentType.OPENAI_COMPATIBLE:
-                from hud.agents.openai_compatible.agent import OpenAIChatAgent
-
-                return OpenAIChatAgent
-            case AgentType.PI:
+            case AgentType.OPENAI_COMPATIBLE | AgentType.PI:
                 from hud.agents.pi.agent import PiAgent
 
                 return PiAgent
+            case AgentType.GEMINI:
+                raise ValueError(_NO_GEMINI_AGENT)
 
     @property
     def config_cls(self) -> type[AgentConfig]:
         """The agent's config class, without importing the agent."""
-        from hud.agents.types import (
-            ClaudeCLIConfig,
-            ClaudeConfig,
-            CodexCLIConfig,
-            GeminiConfig,
-            OpenAIChatConfig,
-            OpenAIConfig,
-            PiConfig,
-        )
+        from hud.agents.types import ClaudeCLIConfig, CodexCLIConfig, PiConfig
 
         match self:
-            case AgentType.CLAUDE:
-                return ClaudeConfig
-            case AgentType.CLAUDE_CLI:
+            case AgentType.CLAUDE | AgentType.CLAUDE_CLI:
                 return ClaudeCLIConfig
-            case AgentType.CODEX_CLI:
+            case AgentType.OPENAI | AgentType.CODEX_CLI:
                 return CodexCLIConfig
-            case AgentType.OPENAI:
-                return OpenAIConfig
-            case AgentType.GEMINI:
-                return GeminiConfig
-            case AgentType.OPENAI_COMPATIBLE:
-                return OpenAIChatConfig
-            case AgentType.PI:
+            case AgentType.OPENAI_COMPATIBLE | AgentType.PI:
                 return PiConfig
+            case AgentType.GEMINI:
+                raise ValueError(_NO_GEMINI_AGENT)
 
     @classmethod
     def of(cls, agent: object) -> AgentType | None:
-        """The registered agent type ``agent`` is an instance of, or ``None``.
+        """The agent type ``agent`` is an instance of, or ``None``.
 
-        A type whose agent extra isn't installed is skipped.
+        It names the CLI agents ``claude_cli``, ``codex_cli`` and ``pi``, the names every
+        hud release resolves to the same agent.
         """
-        for agent_type in cls:
-            with contextlib.suppress(ImportError):
-                if isinstance(agent, agent_type.cls):
-                    return agent_type
+        for agent_type in (cls.CLAUDE_CLI, cls.CODEX_CLI, cls.PI):
+            if isinstance(agent, agent_type.cls):
+                return agent_type
         return None
+
+
+_NO_GEMINI_AGENT = (
+    "agent type 'gemini' has no agent in this hud release; the Gemini CLI agent it will run "
+    "is not available yet"
+)
 
 
 # The shapes traces record keep MCP's camelCase field names (mimeType, isError), the
@@ -298,24 +273,13 @@ class Step(BaseModel, Generic[SourceT_co]):
 
     model_config = ConfigDict(extra="forbid")
 
-    def emit(self, *, trace_id: str | None = None) -> None:
-        """Export this step under ``trace_id``, else the current trace; deprecated."""
-        # hud.eval.run imports this module, so the deprecated path imports it late.
-        from hud.eval.run import export_step
-
-        warn_deprecated("`Step.emit`", "use `hud.eval.run.export_step(trace_id, step)`")
-        trace_id = trace_id or get_current_trace_id()
-        if trace_id:
-            export_step(trace_id, self)
-
 
 TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 
 # Why the rollout stopped; anything but "done" means a limit cut it off.
 StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malformed_tool_call"]
 
-# The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
-# conditions the loop may either stop on or answer with an error result.
+# The stop reasons a single model output can carry (``AgentStep.stop_reason``).
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
 
 
@@ -353,12 +317,6 @@ class Trace(BaseModel):
     def reward(self) -> float:
         return self.grade.reward
 
-    @property
-    def evaluation(self) -> dict[str, Any]:
-        """``grade.to_summary()``; deprecated."""
-        warn_deprecated("`Trace.evaluation`", "use `trace.grade.to_summary()`")
-        return self.grade.to_summary()
-
     def final(self, get: Callable[[Step], T | None]) -> T | None:
         """The newest step's non-``None`` answer to ``get``; falsy answers count."""
         return next(
@@ -373,15 +331,6 @@ class Trace(BaseModel):
     @property
     def is_error(self) -> bool:
         return self.status == "error"
-
-    @property
-    def is_truncated(self) -> bool:
-        """Whether a limit (step budget, token cap, timeout) cut the rollout off; deprecated."""
-        warn_deprecated(
-            "`Trace.is_truncated`",
-            "read `trace.stop_reason` (anything but `None` or `'done'` means a limit cut it off)",
-        )
-        return self.stop_reason is not None and self.stop_reason != "done"
 
     @property
     def error(self) -> str | None:
@@ -413,14 +362,3 @@ class Trace(BaseModel):
         if step.ended_at is None:
             step.ended_at = now_iso()
         self.steps.append(step)
-
-    def __len__(self) -> int:
-        warn_deprecated("`len(trace)`", "use `len(trace.steps)`")
-        return len(self.steps)
-
-
-_RETIRED = moved_to("hud.graders", "EvaluationResult", "SubScore")
-
-
-def __getattr__(name: str) -> Any:
-    return resolve_retired(__name__, name, _RETIRED)
