@@ -55,7 +55,7 @@ FAILING: dict[str, tuple[list[str], dict[str, str]]] = {
 MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
     "deploy": (["deploy", "--no-env"], ENVIRONMENT, {}),
     "eval": (
-        ["eval", "Demo", "openai_compatible", "-m", "scripted"],
+        ["eval", "Demo", "pi"],
         {},
         {
             "GET /v2/tasksets": {"items": [{"id": TASKSET_ID, "name": "Demo"}], "total": 1},
@@ -356,8 +356,8 @@ SECRET = "s3cr3t-c0d3"
         ),
         (
             [
-                *("eval", "tasks.py", "openai_compatible", "-m", "custom"),
-                *("-c", f"api_key={SECRET}", "-c", "base_url=http://127.0.0.1:9", "--dry-run"),
+                *("eval", "tasks.py", "claude_cli"),
+                *("-c", f'env={{"TOKEN": "{SECRET}"}}', "--dry-run"),
             ],
             {"tasks.py": TASKS_PY},
             {},

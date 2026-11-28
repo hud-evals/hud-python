@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import uuid
 from enum import StrEnum
@@ -33,6 +32,12 @@ T = TypeVar("T")
 
 
 class AgentType(StrEnum):
+    """The agent types ``hud eval``, ``create_agent`` and ``HostedRuntime`` name.
+
+    ``claude`` and ``claude_cli`` run Claude Code, ``openai`` and ``codex_cli`` run Codex,
+    and ``openai_compatible`` and ``pi`` run Pi. ``gemini`` has no agent yet.
+    """
+
     CLAUDE = "claude"
     CLAUDE_CLI = "claude_cli"
     CODEX_CLI = "codex_cli"
@@ -42,83 +47,55 @@ class AgentType(StrEnum):
     PI = "pi"
 
     @property
-    def is_cli(self) -> bool:
-        from hud.agents.cli import CLIAgent
-
-        return issubclass(self.cls, CLIAgent)
-
-    @property
     def cls(self) -> type[Agent]:
         match self:
-            case AgentType.CLAUDE:
-                from hud.agents.claude.agent import ClaudeAgent
-
-                return ClaudeAgent
-            case AgentType.CLAUDE_CLI:
+            case AgentType.CLAUDE | AgentType.CLAUDE_CLI:
                 from hud.agents.claude.cli.agent import ClaudeCLIAgent
 
                 return ClaudeCLIAgent
-            case AgentType.CODEX_CLI:
+            case AgentType.OPENAI | AgentType.CODEX_CLI:
                 from hud.agents.codex.agent import CodexCLIAgent
 
                 return CodexCLIAgent
-            case AgentType.OPENAI:
-                from hud.agents.openai.agent import OpenAIAgent
-
-                return OpenAIAgent
-            case AgentType.GEMINI:
-                from hud.agents.gemini.agent import GeminiAgent
-
-                return GeminiAgent
-            case AgentType.OPENAI_COMPATIBLE:
-                from hud.agents.openai_compatible.agent import OpenAIChatAgent
-
-                return OpenAIChatAgent
-            case AgentType.PI:
+            case AgentType.OPENAI_COMPATIBLE | AgentType.PI:
                 from hud.agents.pi.agent import PiAgent
 
                 return PiAgent
+            case AgentType.GEMINI:
+                raise ValueError(_NO_GEMINI_AGENT)
 
     @property
     def config_cls(self) -> type[AgentConfig]:
         """The agent's config class, without importing the agent."""
-        from hud.agents.types import (
-            ClaudeCLIConfig,
-            ClaudeConfig,
-            CodexCLIConfig,
-            GeminiConfig,
-            OpenAIChatConfig,
-            OpenAIConfig,
-            PiConfig,
-        )
+        from hud.agents.types import ClaudeCLIConfig, CodexCLIConfig, PiConfig
 
         match self:
-            case AgentType.CLAUDE:
-                return ClaudeConfig
-            case AgentType.CLAUDE_CLI:
+            case AgentType.CLAUDE | AgentType.CLAUDE_CLI:
                 return ClaudeCLIConfig
-            case AgentType.CODEX_CLI:
+            case AgentType.OPENAI | AgentType.CODEX_CLI:
                 return CodexCLIConfig
-            case AgentType.OPENAI:
-                return OpenAIConfig
-            case AgentType.GEMINI:
-                return GeminiConfig
-            case AgentType.OPENAI_COMPATIBLE:
-                return OpenAIChatConfig
-            case AgentType.PI:
+            case AgentType.OPENAI_COMPATIBLE | AgentType.PI:
                 return PiConfig
+            case AgentType.GEMINI:
+                raise ValueError(_NO_GEMINI_AGENT)
 
     @classmethod
     def of(cls, agent: object) -> AgentType | None:
-        """The registered agent type ``agent`` is an instance of, or ``None``.
+        """The agent type ``agent`` is an instance of, or ``None``.
 
-        A type whose agent extra isn't installed is skipped.
+        It names the CLI agents ``claude_cli``, ``codex_cli`` and ``pi``, the names every
+        hud release resolves to the same agent.
         """
-        for agent_type in cls:
-            with contextlib.suppress(ImportError):
-                if isinstance(agent, agent_type.cls):
-                    return agent_type
+        for agent_type in (cls.CLAUDE_CLI, cls.CODEX_CLI, cls.PI):
+            if isinstance(agent, agent_type.cls):
+                return agent_type
         return None
+
+
+_NO_GEMINI_AGENT = (
+    "agent type 'gemini' has no agent in this hud release; the Gemini CLI agent it will run "
+    "is not available yet"
+)
 
 
 # The shapes traces record keep MCP's camelCase field names (mimeType, isError), the
@@ -302,8 +279,7 @@ TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 # Why the rollout stopped; anything but "done" means a limit cut it off.
 StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malformed_tool_call"]
 
-# The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
-# conditions the loop may either stop on or answer with an error result.
+# The stop reasons a single model output can carry (``AgentStep.stop_reason``).
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
 
 

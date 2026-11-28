@@ -84,34 +84,10 @@ class Settings(BaseSettings):
         validation_alias="ANTHROPIC_API_KEY",
     )
 
-    aws_access_key_id: str | None = Field(
-        default=None,
-        description="AWS access key ID for Bedrock",
-        validation_alias="AWS_ACCESS_KEY_ID",
-    )
-
-    aws_secret_access_key: str | None = Field(
-        default=None,
-        description="AWS secret access key for Bedrock",
-        validation_alias="AWS_SECRET_ACCESS_KEY",
-    )
-
-    aws_region: str | None = Field(
-        default=None,
-        description="AWS region for Bedrock (e.g., us-east-1)",
-        validation_alias="AWS_REGION",
-    )
-
     openai_api_key: str | None = Field(
         default=None,
         description="API key for OpenAI models",
         validation_alias="OPENAI_API_KEY",
-    )
-
-    gemini_api_key: str | None = Field(
-        default=None,
-        description="API key for Google Gemini models",
-        validation_alias="GEMINI_API_KEY",
     )
 
     telemetry_enabled: bool = Field(

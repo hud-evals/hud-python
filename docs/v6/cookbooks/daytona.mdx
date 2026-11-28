@@ -29,7 +29,8 @@ async def fix_calc(variant: int = 0):
     yield 1.0 if await calc_passes() else 0.0
 ```
 
-Run it locally first. The `claude` agent needs a `HUD_API_KEY` or an `ANTHROPIC_API_KEY`:
+Run it locally first. The `claude` agent runs Claude Code, so `claude` must be on your `PATH`, and it
+needs a `HUD_API_KEY` or an `ANTHROPIC_API_KEY`:
 
 ```bash
 hud eval tasks.py claude

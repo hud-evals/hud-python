@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud import Task, Taskset
-from hud.agents import OpenAIChatAgent
-from hud.agents.types import OpenAIChatConfig
+from hud.agents import PiAgent
+from hud.agents.types import PiConfig
 from hud.runtime import HostedRuntime
 from hud.types import AgentType
 from tests.conftest import eventually
@@ -34,10 +34,8 @@ def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="k")
 
 
-def chat_agent() -> OpenAIChatAgent:
-    return OpenAIChatAgent(
-        OpenAIChatConfig(model="test-model", api_key="secret", base_url="http://model.test")
-    )
+def pi_agent() -> PiAgent:
+    return PiAgent(PiConfig(model="test-model"))
 
 
 async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_end(
@@ -65,7 +63,7 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
         context={"base_path": tmp_path},
     )
 
-    job = await Taskset("sums", [row]).run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
+    job = await Taskset("sums", [row]).run(pi_agent(), runtime=HostedRuntime(poll_interval=0))
 
     (trace,) = job.traces
     (submitted,) = services.requests("api", "POST", SUBMIT)
@@ -76,10 +74,7 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
         trace.group_id,
     )
     assert (body["env"], body["task"], body["args"]) == ("sums", "add", {"a": 1, "b": 2})
-    assert (body["agent"]["type"], body["agent"]["config"]["timeout_seconds"]) == (
-        "openai_compatible",
-        45.0,
-    )
+    assert (body["agent"]["type"], body["agent"]["config"]["timeout_seconds"]) == ("pi", 45.0)
     assert body["runtime_config"]["compose"]["document"]["services"]["main"]["image"] == (
         "sums:latest"
     )
@@ -87,7 +82,6 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
         "judge",
         {"image": "judge:1"},
     )
-    assert "secret" not in str(body)
     assert (trace.reward, trace.status, trace.runtime) == (
         0.5,
         "completed",
@@ -180,7 +174,7 @@ async def test_the_trace_the_platform_ends_with_is_the_runs_outcome(
     services.route("api", "POST", SUBMIT, json={"status": "queued"})
     services.route("api", "GET", POLL, json=state)
 
-    job = await Task(env="sums", id="add").run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
+    job = await Task(env="sums", id="add").run(pi_agent(), runtime=HostedRuntime(poll_interval=0))
 
     (trace,) = job.traces
     assert (trace.reward, trace.status, trace in job.errors) == (reward, status, not graded)
@@ -202,7 +196,7 @@ async def test_a_hosted_rollout_past_its_deadline_is_cancelled_on_the_platform(
     services.route("api", "POST", CANCEL, json={"status": "accepted"})
 
     job = await Task(env="sums", id="add").run(
-        chat_agent(), runtime=HostedRuntime(poll_interval=0), rollout_timeout=1
+        pi_agent(), runtime=HostedRuntime(poll_interval=0), rollout_timeout=1
     )
 
     (trace,) = job.traces
@@ -219,7 +213,7 @@ async def test_cancelling_a_hosted_rollout_cancels_it_on_the_platform(
     services.route("api", "POST", CANCEL, json={"status": "accepted"})
 
     pending = asyncio.create_task(
-        Task(env="sums", id="add").run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
+        Task(env="sums", id="add").run(pi_agent(), runtime=HostedRuntime(poll_interval=0))
     )
     await eventually(lambda: services.requests("api", "POST", SUBMIT) != [])
     pending.cancel()
@@ -230,18 +224,18 @@ async def test_cancelling_a_hosted_rollout_cancels_it_on_the_platform(
 
 
 @pytest.mark.parametrize(
-    ("agent_type", "config"),
+    ("agent_type", "sent", "config"),
     [
-        ("claude", {"model": "claude-sonnet-4-6", "max_steps": 5, "tool_timeout_seconds": 30}),
-        ("openai", {"model": "gpt-5.6", "prompt_cache_key": "shared"}),
-        ("gemini", {"model": "gemini-m", "max_output_tokens": 512}),
-        ("openai_compatible", {"model": "m", "completion_kwargs": {"temperature": 0.2}}),
-        ("claude_cli", {"reasoning_effort": "max", "permission_mode": "plan"}),
-        ("codex_cli", {"sandbox": "read-only", "reasoning_effort": "high"}),
+        ("claude_cli", "claude_cli", {"reasoning_effort": "max", "permission_mode": "plan"}),
+        ("codex_cli", "codex_cli", {"sandbox": "read-only", "reasoning_effort": "high"}),
+        ("pi", "pi", {"model": "m", "completion_kwargs": {"temperature": 0.2}}),
+        ("claude", "claude_cli", {"model": "claude-sonnet-4-6"}),
+        ("openai", "codex_cli", {"model": "gpt-5.6"}),
+        ("openai_compatible", "pi", {"model": "m"}),
     ],
 )
 async def test_the_submission_carries_the_agents_type_and_the_users_config(
-    agent_type: str, config: dict[str, Any], services: FakeServices
+    agent_type: str, sent: str, config: dict[str, Any], services: FakeServices
 ) -> None:
     services.route("api", "POST", SUBMIT, json={"status": "queued"})
     services.route("api", "GET", POLL, json={"status": "completed", "reward": 1.0})
@@ -251,5 +245,5 @@ async def test_the_submission_carries_the_agents_type_and_the_users_config(
     await Task(env="sums", id="add").run(agent, runtime=HostedRuntime(poll_interval=0))
 
     (body,) = services.bodies("api", "POST", SUBMIT)
-    assert body["agent"]["type"] == agent_type
+    assert body["agent"]["type"] == sent
     assert config.items() <= body["agent"]["config"].items()

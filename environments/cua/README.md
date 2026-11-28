@@ -29,19 +29,17 @@ Deploy the image so each rollout receives a fresh desktop:
 
 ```bash
 hud deploy
-hud eval tasks.py claude --model claude-opus-4-7 --runtime hud --max-steps 100 -y
 ```
 
-The multi-step task wants headroom (`--max-steps 100`). `hud eval` runs the first task only; add
-`--all` for all three or `--task-ids <slug>`.
+No built-in agent runs this environment yet: the built-in agents run a coding CLI in an `ssh`
+workspace, and this environment serves only a screen. Drive it with
+[your own harness](https://docs.hud.ai/v6/advanced/extending#bring-your-own-harness).
 
-For a single local smoke rollout, build and attach to one container, then remove it:
+For a single local container, build and serve one, then remove it:
 
 ```bash
 docker build -f Dockerfile.hud -t hud-cua:dev .
 docker run -d --name hud-cua --env-file .env -p 8765:8765 hud-cua:dev
-hud eval tasks.py claude --task-ids open-website-example \
-  --model claude-opus-4-7 --runtime tcp://127.0.0.1:8765 -y
 docker rm -f hud-cua
 ```
 

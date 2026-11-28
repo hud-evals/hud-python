@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 from daytona import Image
-from hud.agents import ClaudeAgent
+from hud.agents import ClaudeCLIAgent
 from hud.clients import connect
 
 from env import fix_calc
@@ -59,7 +59,7 @@ async def one_rollout(provider, idx: int) -> dict:
     t0 = time.perf_counter()
     row = {"idx": idx, "spin_up_s": None, "connect_s": None, "ok": False, "error": ""}
     try:
-        job = await fix_calc().run(ClaudeAgent(), runtime=timed)
+        job = await fix_calc().run(ClaudeCLIAgent(), runtime=timed)
         row["ok"] = True
         row["reward"] = job.reward
         row["spin_up_s"] = timed.spin_ups[0] if timed.spin_ups else None

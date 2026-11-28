@@ -51,9 +51,8 @@ hud eval "My Taskset" codex_cli --model gpt-6.1-sol
 hud eval "My Taskset" pi --model deepseek/deepseek-v4.1-flash
 ```
 
-`claude`, `openai`, `gemini` and `openai_compatible` still run HUD's
-[provider agents](/v6/reference/agents#provider-agents), which are deprecated and warn when they start.
-From hud v0.7.0, `claude` runs Claude Code and `openai` runs Codex.
+`claude` also runs Claude Code, `openai` Codex and `openai_compatible` Pi; see
+[agent types](/v6/reference/agents#agent-types).
 
 For a custom loop - a fine-tuned model, a framework you already use - see
 [bring your own harness](/v6/advanced/extending#bring-your-own-harness).

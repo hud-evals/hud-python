@@ -24,7 +24,6 @@ from hud.runtime.local import SubprocessRuntime
 from hud.runtime.modal import ModalRuntime
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -68,10 +67,8 @@ class EvalConfig(BaseModel):
     task_ids: list[str] | None = None
     all: bool = False
     max_concurrent: int = 30
-    max_steps: int = 10
     verbose: bool = False
     very_verbose: bool = False
-    auto_respond: bool = False
     group_size: int = 1
     gateway: bool = False
     runtime: Placement | TcpUrl | None = None
@@ -105,18 +102,8 @@ def eval_command(
     max_concurrent: int | None = typer.Option(
         None, "--max-concurrent", help="Max concurrent tasks"
     ),
-    max_steps: int | None = typer.Option(
-        None,
-        "--max-steps",
-        help="Max steps per task for the deprecated provider agents; CLI agents ignore it",
-    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     very_verbose: bool = typer.Option(False, "--very-verbose", "-vv", help="Debug logs"),
-    auto_respond: bool = typer.Option(
-        False,
-        "--auto-respond",
-        help="Automatically prompt the agent to continue if it does not respond with a tool call",
-    ),
     group_size: int | None = typer.Option(None, "--group", help="Runs per task"),
     task_ids: str | None = typer.Option(
         None,
@@ -161,12 +148,6 @@ def eval_command(
     """
     hud_console.info("Initializing evaluation...")
     cfg = EvalConfig()
-    if max_steps is not None:
-        warn_deprecated(
-            "`max_steps` in `hud eval`",
-            "CLI agents ignore it and run until done or `timeout_seconds` "
-            "(`--config timeout_seconds=...`)",
-        )
 
     overrides: dict[str, Any] = {
         key: value
@@ -174,7 +155,6 @@ def eval_command(
             "source": source,
             "model": model,
             "max_concurrent": max_concurrent,
-            "max_steps": max_steps,
             "group_size": group_size,
             "runtime": runtime,
         }.items()
@@ -187,7 +167,6 @@ def eval_command(
                 "all": all,
                 "verbose": verbose,
                 "very_verbose": very_verbose,
-                "auto_respond": auto_respond,
                 "gateway": gateway,
             }.items()
             if value
@@ -245,9 +224,6 @@ def eval_command(
             "runtime": planned,
             "remote": planned is Placement.HOSTED,
             "all": cfg.all,
-            "max_steps": cfg.agent_config.get(agent_type.value, {}).get("max_steps")
-            if agent_type.is_cli
-            else cfg.max_steps,
             "max_concurrent": cfg.max_concurrent,
             "group_size": cfg.group_size,
             "task_ids": cfg.task_ids,
@@ -269,7 +245,9 @@ def eval_command(
         # Pick the agent type, then a current catalog model of that type, newest first.
         picked_type = AgentType(
             hud_console.select(
-                "Select an agent:", choices=[agent.value for agent in AgentType], default=0
+                "Select an agent:",
+                choices=[agent.value for agent in AgentType if agent is not AgentType.GEMINI],
+                default=0,
             )
         )
         picked: dict[str, Any] = {"agent_type": picked_type}
@@ -317,12 +295,6 @@ def eval_command(
 
     if cfg.gateway or cfg.runtime in (Placement.HUD, Placement.HOSTED):
         PlatformClient.from_settings()
-    if (
-        agent_type == AgentType.OPENAI_COMPATIBLE
-        and cfg.model is None
-        and "model" not in cfg.agent_config.get("openai_compatible", {})
-    ):
-        raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
 
     if Path(source).exists():
         hud_console.info(f"Loading tasks from: {source}")
@@ -404,10 +376,6 @@ def eval_command(
     agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
     if cfg.model:
         agent_kwargs["model"] = cfg.model
-    if not agent_type.is_cli:
-        agent_kwargs["max_steps"] = cfg.max_steps
-        if cfg.auto_respond:
-            agent_kwargs["auto_respond"] = True
     if cfg.gateway:
         agent_kwargs["gateway"] = True
 
@@ -424,15 +392,13 @@ def eval_command(
     table.add_row("max_concurrent", str(cfg.max_concurrent))
     if cfg.group_size > 1:
         table.add_row("group_size", str(cfg.group_size))
-    for flag in ("auto_respond", "very_verbose", "verbose", "gateway"):
+    for flag in ("very_verbose", "verbose", "gateway"):
         if getattr(cfg, flag):
             table.add_row(flag, "[bold green]True[/bold green]")
     table.add_row("", "")
     table.add_row(f"[dim]{agent_type.value} config[/dim]", "")
     for name, value in agent_kwargs.items():
-        if name == "auto_respond":
-            continue
-        table.add_row(f"  {name}", "****" if name == "api_key" else str(value))
+        table.add_row(f"  {name}", str(value))
     hud_console.print(table)
     CLI.confirm_or_abort("Proceed?", yes=yes, default=True)
 

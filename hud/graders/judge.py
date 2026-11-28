@@ -7,14 +7,11 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
 from hud.utils.gateway import build_gateway_client
 
 from .base import Grader, SubScore
-
-if TYPE_CHECKING:
-    from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +80,7 @@ class LLMJudgeGrader(Grader):
                 "`combine`"
             )
 
-        client = cast("AsyncOpenAI", build_gateway_client("openai"))
+        client = build_gateway_client()
         answer_text = str(answer)
 
         async def _judge(criterion: _Criterion) -> SubScore:

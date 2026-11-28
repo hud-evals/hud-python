@@ -124,7 +124,7 @@ A **capability** is a connection the environment exposes; a **harness** attaches
 | **`cdp`** | Browser control over the Chrome DevTools Protocol |
 | **`rfb`** | Full computer-use over VNC: screen + keyboard/mouse |
 
-**Ships natively:** Claude, OpenAI (Responses), OpenAI-compatible endpoints, and Gemini via `create_agent("claude-sonnet-4-5")` (or `gpt-…`, `gemini-…`). The harness wires capability-backed tools for the model you choose at run time.
+**Ships natively:** Claude Code, Codex, and Pi (any OpenAI-compatible endpoint) via `create_agent("claude-sonnet-4-5")` (or `gpt-…`). Each runs its CLI in the environment's `ssh` workspace.
 
 **Bring your own:** a harness attaches to a capability and defines a tool spec — wrap `browser-use` on `cdp`, or your own agent on `ssh` / `mcp`. No protocol work required.
 

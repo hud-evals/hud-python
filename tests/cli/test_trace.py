@@ -8,17 +8,15 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud import Environment, Task
-from hud.agents import OpenAIChatAgent
-from hud.agents.types import OpenAIChatConfig
+from hud.agents import PiAgent
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime
-from tests.fixtures.models import Turn, call
+from tests.fixtures import clis
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.conftest import Hud, HudEnv
-    from tests.fixtures.models import Models
     from tests.fixtures.services import FakeServices
 
 TRACE_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
@@ -51,10 +49,16 @@ def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: None
         assert shown in result.stdout
 
 
-async def write_a_report(
-    models: Models, hud_env: HudEnv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> str:
-    """Run a rollout whose scripted model writes REPORT.md through a tool; return its trace id.
+WRITE_CALL = {
+    "type": "toolCall",
+    "id": "call-1",
+    "name": "write",
+    "arguments": {"path": "REPORT.md", "content": "PASS"},
+}
+
+
+async def write_a_report(hud_env: HudEnv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Run a rollout whose agent writes REPORT.md through a tool; return its trace id.
 
     Spans land in ``spans/`` under ``tmp_path``, the working directory of the
     rollout and of ``hud``, so rendered paths stay short.
@@ -62,22 +66,31 @@ async def write_a_report(
     monkeypatch.chdir(tmp_path)
     hud_env.set(HUD_TRACE_DIR="spans")
     workspace = tmp_path / "workspace"
-    report = workspace / "REPORT.md"
+    stub = clis.Stub(
+        workspace / ".stub",
+        "pi",
+        stdout=clis.jsonl(
+            clis.PI_STARTED,
+            {"type": "message_start"},
+            clis.pi_assistant(WRITE_CALL, stop="toolUse"),
+            clis.pi_tool_result("call-1", "write", "Successfully wrote 4 bytes to REPORT.md"),
+            {"type": "message_start"},
+            clis.pi_assistant({"type": "text", "text": "Wrote it."}),
+            clis.PI_SETTLED,
+        ),
+    )
+    stub.install()
     env = Environment("report")
-    env.workspace(workspace, guest_path=str(workspace))
-
-    @env.initialize
-    async def seed() -> None:
-        workspace.mkdir(parents=True, exist_ok=True)
+    env.workspace(workspace, guest_path=str(workspace), env=stub.shell_env())
 
     @env.template()
     async def write_report():
         yield "Write PASS to REPORT.md."
-        yield 1.0 if report.read_text().strip() == "PASS" else 0.0
+        yield 1.0
 
-    models.script([call("write", filePath="REPORT.md", content="PASS"), Turn(text="Wrote it.")])
-    agent = OpenAIChatAgent(OpenAIChatConfig(model="scripted", max_steps=4))
-    trace = await rollout(Task(env="report", id="write_report"), agent, runtime=LocalRuntime(env))
+    trace = await rollout(
+        Task(env="report", id="write_report"), PiAgent(), runtime=LocalRuntime(env)
+    )
     assert trace.reward == 1.0
     assert trace.trace_id is not None
     return trace.trace_id
@@ -86,12 +99,11 @@ async def write_a_report(
 async def test_a_local_trace_lists_tool_calls_with_their_results(
     hud: Hud,
     signed_in: FakeServices,
-    models: Models,
     hud_env: HudEnv,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    trace_id = await write_a_report(models, hud_env, tmp_path, monkeypatch)
+    trace_id = await write_a_report(hud_env, tmp_path, monkeypatch)
 
     result = hud("trace", "get", trace_id, "--json", cwd=tmp_path)
 
@@ -108,7 +120,7 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
     ]
     assert prompt["text"] == "Write PASS to REPORT.md."
     assert call_write["tool_calls"][0]["name"] == written["tool_name"] == "write"
-    assert written["arguments"] == {"filePath": "REPORT.md", "content": "PASS"}
+    assert written["arguments"] == WRITE_CALL["arguments"]
     assert "4 bytes" in written["result_text"]
     assert answer["text"] == "Wrote it."
     assert (setup["name"], graded["name"]) == ("write_report", "write_report")
@@ -118,12 +130,11 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
 async def test_a_local_trace_renders_despite_a_record_cut_short(
     hud: Hud,
     signed_in: FakeServices,
-    models: Models,
     hud_env: HudEnv,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    trace_id = await write_a_report(models, hud_env, tmp_path, monkeypatch)
+    trace_id = await write_a_report(hud_env, tmp_path, monkeypatch)
     spans = tmp_path / "spans" / f"{uuid.UUID(trace_id).hex}.jsonl"
     complete = spans.read_text()
     spans.write_text(complete + complete.splitlines()[-1][:40])

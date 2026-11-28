@@ -45,6 +45,9 @@ PYTHONPATH=. uv run bench/baseline.py --max-concurrent 24  # every variant on Da
 PYTHONPATH=. uv run bench/reap.py --delete                 # clean up stray sandboxes
 ```
 
+The agent is Claude Code: the local rollout needs `claude` on your `PATH`, and
+`Dockerfile.hud` installs it in the sandbox image.
+
 `DaytonaRuntime` builds the snapshot from `Dockerfile.hud` on first run and
 reuses it after. Size it with `resources=Resources(cpu=..., memory=...)`; a task
 that sets `runtime_config` is refused rather than run without it. Sandboxes

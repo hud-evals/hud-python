@@ -140,7 +140,7 @@ async def count(word: str = "strawberry"):
 ### `Citation`
 
 A normalized citation across providers (`hud.agents.types.Citation`): `type`, `text`, `source`,
-`title`, `start_index`, `end_index`. A reply annotation, not a grading input - provider agents attach
+`title`, `start_index`, `end_index`. A reply annotation, not a grading input - an agent attaches
 them to `AgentStep.citations`, and chat surfaces read the final reply's via the `trace.final(...)`
 query above. A task that wants to grade sources should declare them in its `returns=` schema so the
 agent submits them as part of the answer.

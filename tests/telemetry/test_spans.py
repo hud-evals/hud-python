@@ -11,14 +11,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud import Environment, Task, Taskset
-from hud.agents import OpenAIChatAgent
-from hud.agents.types import OpenAIChatConfig
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime
 from hud.telemetry import flush
 from tests.conftest import ROOT, spans
 from tests.fixtures.agents import ScriptedAgent
-from tests.fixtures.models import Turn, call
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
@@ -26,7 +23,6 @@ if TYPE_CHECKING:
 
     from hud import Trace
     from tests.conftest import HudEnv
-    from tests.fixtures.models import Models
     from tests.fixtures.services import FakeServices
 
 UPLOAD = "/trace/{id}/telemetry-upload"
@@ -106,10 +102,9 @@ def upload_env() -> Environment:
     ("broken", "reward"), [(False, 1.0), (True, 0.0)], ids=["graded", "grading-error"]
 )
 async def test_every_rollout_step_is_uploaded_to_its_own_trace(
-    reporting: FakeServices, models: Models, broken: bool, reward: float
+    reporting: FakeServices, broken: bool, reward: float
 ) -> None:
-    models.script([call("missing_tool", x=1), Turn(text="ok")])
-    agent = OpenAIChatAgent(OpenAIChatConfig(model="scripted", max_steps=4))
+    agent = ScriptedAgent("ok")
     task = Task(env="upload", id="answer", args={"broken": broken})
 
     job = await Taskset("t", [task]).run(agent, runtime=LocalRuntime(upload_env()), group=2)
