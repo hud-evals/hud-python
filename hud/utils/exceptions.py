@@ -114,4 +114,4 @@ class HudNetworkError(HudException):
 
 
 class HudDeprecationWarning(FutureWarning):
-    """The HUD API deprecated a route this client calls, or code imported a retired SDK path."""
+    """The HUD API deprecated a route this client calls, or code used a deprecated SDK form."""

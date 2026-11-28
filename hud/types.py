@@ -21,7 +21,7 @@ from typing_extensions import TypeVar
 
 from hud.graders.base import Grade
 from hud.telemetry.context import get_current_trace_id
-from hud.utils.deprecation import moved_to, resolve_retired, warn_deprecated
+from hud.utils.deprecation import warn_deprecated
 from hud.utils.serialization import JsonObject
 from hud.utils.time import now_iso
 
@@ -417,10 +417,3 @@ class Trace(BaseModel):
     def __len__(self) -> int:
         warn_deprecated("`len(trace)`", "use `len(trace.steps)`")
         return len(self.steps)
-
-
-_RETIRED = moved_to("hud.graders", "EvaluationResult", "SubScore")
-
-
-def __getattr__(name: str) -> Any:
-    return resolve_retired(__name__, name, _RETIRED)

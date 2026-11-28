@@ -31,7 +31,7 @@ List, get, create, and status commands accept `--json`. JSON is written to **std
 
 Every command that changes platform state takes `--dry-run`, which previews the action without sending or writing anything, and asks for confirmation before it acts. Pass `--yes` / `-y` to skip the confirmation; without it, the command exits `2` in a non-interactive terminal. For deployment, select local secrets with `--env-file` or skip them with `--no-env`.
 
-If the HUD API deprecates a route that `hud` calls, `hud` prints a warning to stderr with the route's sunset date and replacement. Upgrade `hud` when you see one. SDK code receives it as `hud.utils.exceptions.HudDeprecationWarning`, a `FutureWarning`. The same warning names the current path when code imports a name from a path that hud v0.7.0 removes, such as `from hud.eval import Taskset`.
+If the HUD API deprecates a route that `hud` calls, `hud` prints a warning to stderr with the route's sunset date and replacement. Upgrade `hud` when you see one. SDK code receives it as `hud.utils.exceptions.HudDeprecationWarning`, a `FutureWarning`.
 
 Resource commands use noun-verb grammar (`hud jobs list`, `hud models list`, `hud task start`).
 
