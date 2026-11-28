@@ -82,7 +82,8 @@ result = await LLMJudgeGrader.grade(
 The default model is `claude-sonnet-5-5`. Pass `model` to use a different judge.
 
 `criteria` items are strings, or `(requirement, weight)` tuples with a weight of 0 or more. An
-empty rubric is a grading error.
+empty rubric or a negative weight is a grading error; grade a penalty as its own negative-weight
+subscore in `combine`.
 
 The returned `SubScore` has one child per criterion: `name` is the requirement, `value` is
 `1.0`/`0.0` for the verdict, and `info["reason"]` is the judge's justification. The rubric value
@@ -91,7 +92,7 @@ without a `MET` or `UNMET` verdict is a grading error.
 
 ## `combine` - compose multiple graders
 
-`await combine(*items)` takes `SubScore`s and grader coroutines, runs the coroutines in parallel, and combines the results into a `Grade` whose reward is the weighted sum of the subscores. Positive weights sum to `1.0`. Negative weights are penalties, and nothing clamps, so a penalty can take the reward below 0. Repeated names get numeric suffixes (`BashGrader-1`, `BashGrader-2`).
+`await combine(*items)` takes `SubScore`s and grader coroutines, runs the coroutines in parallel, and combines the results into a `Grade` whose reward is the weighted sum of the subscores. Positive weights must sum to `1.0` (within 0.01), or grading fails. Negative weights are penalties, and nothing clamps, so a penalty can take the reward below 0. Repeated names get numeric suffixes (`BashGrader-1`, `BashGrader-2`).
 
 ```python
 @env.template()

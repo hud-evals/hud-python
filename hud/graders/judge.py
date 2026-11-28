@@ -9,7 +9,6 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.gateway import build_gateway_client
 
 from .base import Grader, SubScore
@@ -54,8 +53,8 @@ class _Criterion:
 class LLMJudgeGrader(Grader):
     """Grade an answer against weighted criteria with an LLM judge on the HUD gateway.
 
-    Criteria are judged concurrently, one call each. Negative weights (deprecated) count as
-    penalties when the judge finds the criterion met.
+    Criteria are judged concurrently, one call each. Weights are 0 or more; grade a penalty
+    as its own negative-weight subscore in ``combine``.
     """
 
     name = "LLMJudgeGrader"
@@ -78,11 +77,10 @@ class LLMJudgeGrader(Grader):
         if not parsed:
             raise ValueError("LLMJudgeGrader needs at least one criterion; got none")
         if penalties := [c.requirement for c in parsed if c.weight < 0]:
-            warn_deprecated(
-                f"`LLMJudgeGrader` with negative criteria ({penalties!r})",
-                "grade each penalty as its own negative-weight subscore in `combine`",
-                change="will raise",
-                stacklevel=3,
+            raise ValueError(
+                f"LLMJudgeGrader criteria need weights of 0 or more, got negative weights for "
+                f"{penalties!r}; grade each penalty as its own negative-weight subscore in "
+                "`combine`"
             )
 
         client = cast("AsyncOpenAI", build_gateway_client("openai"))
@@ -126,10 +124,9 @@ def _parse_criteria(criteria: list[str | tuple[str, float]] | None) -> list[_Cri
 
 
 def _user_prompt(criterion: _Criterion, answer: str, question: str) -> str:
-    criterion_type = "negative" if criterion.weight < 0 else "positive"
     query = f"<query>\n{question}\n</query>\n\n" if question else ""
     return (
-        f"<criterion_type>\n{criterion_type}\n</criterion_type>\n\n"
+        "<criterion_type>\npositive\n</criterion_type>\n\n"
         f"<criterion>\n{criterion.requirement}\n</criterion>\n\n"
         f"{query}"
         f"<response>\n{answer}\n</response>"
@@ -159,15 +156,8 @@ def _parse_verdict(content: str) -> tuple[bool, str]:
 
 
 def _rubric_value(subscores: list[SubScore]) -> float:
-    """Met positive weight minus met penalty weight, over total positive weight, in ``[0, 1]``.
-
-    With only penalties, ``1.0`` minus the met share of penalty weight.
-    """
-    total_positive = sum(max(0.0, subscore.weight) for subscore in subscores)
-    total_negative = sum(abs(subscore.weight) for subscore in subscores if subscore.weight < 0)
-    weighted_sum = sum(subscore.value * subscore.weight for subscore in subscores)
-    if total_positive > 0:
-        return max(0.0, min(1.0, weighted_sum / total_positive))
-    if total_negative > 0:
-        return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative))
-    return 0.0
+    """Met weight over total weight, or ``0.0`` when every weight is 0."""
+    total = sum(subscore.weight for subscore in subscores)
+    if total <= 0:
+        return 0.0
+    return sum(subscore.value * subscore.weight for subscore in subscores) / total

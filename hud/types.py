@@ -20,8 +20,6 @@ from pydantic import (
 from typing_extensions import TypeVar
 
 from hud.graders.base import Grade
-from hud.telemetry.context import get_current_trace_id
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.serialization import JsonObject
 from hud.utils.time import now_iso
 
@@ -298,16 +296,6 @@ class Step(BaseModel, Generic[SourceT_co]):
 
     model_config = ConfigDict(extra="forbid")
 
-    def emit(self, *, trace_id: str | None = None) -> None:
-        """Export this step under ``trace_id``, else the current trace; deprecated."""
-        # hud.eval.run imports this module, so the deprecated path imports it late.
-        from hud.eval.run import export_step
-
-        warn_deprecated("`Step.emit`", "use `hud.eval.run.export_step(trace_id, step)`")
-        trace_id = trace_id or get_current_trace_id()
-        if trace_id:
-            export_step(trace_id, self)
-
 
 TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 
@@ -353,12 +341,6 @@ class Trace(BaseModel):
     def reward(self) -> float:
         return self.grade.reward
 
-    @property
-    def evaluation(self) -> dict[str, Any]:
-        """``grade.to_summary()``; deprecated."""
-        warn_deprecated("`Trace.evaluation`", "use `trace.grade.to_summary()`")
-        return self.grade.to_summary()
-
     def final(self, get: Callable[[Step], T | None]) -> T | None:
         """The newest step's non-``None`` answer to ``get``; falsy answers count."""
         return next(
@@ -373,15 +355,6 @@ class Trace(BaseModel):
     @property
     def is_error(self) -> bool:
         return self.status == "error"
-
-    @property
-    def is_truncated(self) -> bool:
-        """Whether a limit (step budget, token cap, timeout) cut the rollout off; deprecated."""
-        warn_deprecated(
-            "`Trace.is_truncated`",
-            "read `trace.stop_reason` (anything but `None` or `'done'` means a limit cut it off)",
-        )
-        return self.stop_reason is not None and self.stop_reason != "done"
 
     @property
     def error(self) -> str | None:
@@ -413,7 +386,3 @@ class Trace(BaseModel):
         if step.ended_at is None:
             step.ended_at = now_iso()
         self.steps.append(step)
-
-    def __len__(self) -> int:
-        warn_deprecated("`len(trace)`", "use `len(trace.steps)`")
-        return len(self.steps)

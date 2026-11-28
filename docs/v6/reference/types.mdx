@@ -47,6 +47,10 @@ subscores), and the trace records the one the environment sent (`trace.grade`). 
 | `is_error` | `bool` | Whether grading failed or never happened. |
 | `subscores` | `list[SubScore] \| None` | The breakdown, as `combine` builds it; see [Graders](/v6/reference/graders#subscore). |
 
+A grade with `subscores` must explain its reward: `sum(value * weight)` over the subscores equals
+`reward` within 0.01, or validation fails. A grade frame whose `score` is a boolean, or whose
+`done`, `isError`, `content`, `info` or `subscores` has the wrong type, is a protocol error.
+
 `grade.to_summary()` is the frame without `info` at any level, the form the platform records and
 safe to persist.
 
@@ -63,7 +67,7 @@ trace reports under a job, so even a single `task.run` returns a job of one. You
 | `traces` | `list[Trace]` | The graded traces, in expansion order (task-major, then group). |
 | `group` | `int` | Rollouts per task. |
 | `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
-| `reward` | `float` | Property: mean reward across graded traces, excluding `errors`. |
+| `reward` | `float` | Property: mean reward across graded traces, excluding `errors`; raises `ValueError` when no trace is graded. |
 | `errors` | `list[Trace]` | Property: traces whose `grade.is_error` is true. |
 | `results` | `dict[str, list[Trace]]` | Property: traces grouped by task slug - the alignment-safe alternative to `zip(tasks, job.traces)`, list-valued since `group > 1` gives several traces per task. |
 

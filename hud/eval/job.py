@@ -12,7 +12,6 @@ from hud.graders.base import Grade
 from hud.settings import settings
 from hud.telemetry.exporter import export
 from hud.telemetry.span import TRACE_SCHEMA
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
@@ -36,29 +35,18 @@ class Job:
     group: int = 1
     taskset_id: str | None = None
 
-    @classmethod
-    async def start(cls, name: str, *, group: int = 1, taskset_id: str | None = None) -> Job:
-        """A job registered before its first run; deprecated."""
-        warn_deprecated("`Job.start`", "construct `Job(name=...)` and pass it as `job=`")
-        job = cls(name=name, group=group, taskset_id=taskset_id)
-        await job_enter(job.id, name=name, group=group, taskset_id=taskset_id)
-        return job
-
     @property
     def reward(self) -> float:
         """Mean reward over traces whose grade is not an error.
 
-        With none, it warns and returns 0.0; hud v0.7.0 raises.
+        Raises ``ValueError`` when there is none; check ``errors`` first.
         """
         graded = [trace.reward for trace in self.traces if not trace.grade.is_error]
         if not graded:
-            warn_deprecated(
-                f"`Job.reward` with no graded trace ({len(self.errors)} of "
-                f"{len(self.traces)} have an error grade)",
-                "check `job.errors` first",
-                change="will raise",
+            raise ValueError(
+                f"job {self.name!r} has no graded trace ({len(self.errors)} of "
+                f"{len(self.traces)} have an error grade); check `job.errors` first"
             )
-            return 0.0
         return sum(graded) / len(graded)
 
     @property

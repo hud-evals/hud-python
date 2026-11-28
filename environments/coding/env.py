@@ -11,9 +11,9 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-from hud import Environment
+from hud import Environment, Grade
 from hud.environment import Workspace
-from hud.graders import EvaluationResult, combine
+from hud.graders import combine
 from pydantic import Field
 
 from grader import check_selection, grade_tests
@@ -117,7 +117,7 @@ async def _grade(
     fail_to_pass: list[str] | None,
     pass_to_pass: list[str] | None,
     binary: bool,
-) -> EvaluationResult:
+) -> Grade:
     await workspace.terminate_sessions()
     agent_git = REPO_DIR / ".git"
     if agent_git.is_symlink() or agent_git.is_file():
@@ -148,10 +148,10 @@ async def _grade(
         check=False,
     )
     if applied.returncode != 0:
-        return EvaluationResult(
+        return Grade(
             content="hidden tests failed to apply",
             info={"git_apply": applied.stderr[-4000:]},
-            isError=True,
+            is_error=True,
         )
 
     test_result = await grade_tests(
