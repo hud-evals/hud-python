@@ -35,12 +35,6 @@ RUNTIME_NAMES = (
 exported subsets of them."""
 
 
-TRAINING_REPLACEMENT = (
-    "train on HUD rollouts with your own trainer, as the `fireworks-rl-training` cookbook does"
-)
-"""What replaces ``hud.train`` and the ``hud models`` commands built on it."""
-
-
 def warn_deprecated(
     subject: str, instead: str, *, change: str = "will be removed", stacklevel: int = 2
 ) -> None:

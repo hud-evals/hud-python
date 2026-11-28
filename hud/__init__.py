@@ -13,10 +13,8 @@ from .graders.base import Grade
 from .types import Trace
 from .utils.deprecation import (
     RUNTIME_NAMES,
-    TRAINING_REPLACEMENT,
     moved_to,
     resolve_retired,
-    served_from,
 )
 from .version import __version__
 
@@ -44,7 +42,6 @@ _RETIRED = {
     **moved_to("hud.clients", "connect"),
     **moved_to("hud.cli.tasksets", "SyncPlan"),
     **moved_to("hud.telemetry", "instrument"),
-    **served_from("hud.train.client", "TrainingClient", instead=TRAINING_REPLACEMENT),
 }
 
 

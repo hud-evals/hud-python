@@ -82,10 +82,6 @@ modal = [
     "modal>=1.0,<2",
 ]
 
-train = [
-    "torch>=2,<3",
-]
-
 [dependency-groups]
 dev = [
     "ruff==0.17.6",

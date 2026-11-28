@@ -38,7 +38,6 @@ SERVICE_ENV = {
     "telemetry": "HUD_TELEMETRY_URL",
     "gateway": "HUD_GATEWAY_URL",
     "runtime": "HUD_RUNTIME_URL",
-    "rl": "HUD_RL_URL",
     "web": "HUD_WEB_URL",
 }
 

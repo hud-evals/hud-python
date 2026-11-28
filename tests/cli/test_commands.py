@@ -43,15 +43,6 @@ ENVIRONMENT = {
     "env.py": 'from hud import Environment\nenv = Environment("example")\n',
     "Dockerfile.hud": "FROM python:3.12\n",
 }
-MODEL = {
-    "id": "cccccccc-0000-4000-8000-000000000102",
-    "name": "My Sonnet",
-    "model_name": "team/my-sonnet",
-    "sdk_agent_type": "claude",
-    "is_trainable": True,
-    "provider": {"name": "anthropic"},
-}
-
 # name -> (an invocation that fails when signed out, the files it needs)
 FAILING: dict[str, tuple[list[str], dict[str, str]]] = {
     "version": (["version", "--no-such-option"], {}),  # rejected while parsing
@@ -95,12 +86,6 @@ MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
     ),
     # Answers --dry-run before it reaches the platform.
     "jobs cancel": (["jobs", "cancel", JOB_ID], {}, {}),
-    # Asks only when --set changes the head.
-    "models head": (
-        ["models", "head", "team/my-sonnet", "--set", "ckpt-1"],
-        {},
-        {"GET /v2/models": {"items": [MODEL], "total": 1}},
-    ),
 }
 # name -> (invocation, files, platform replies, the ids it prints under ``--quiet``)
 LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = {

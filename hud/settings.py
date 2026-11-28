@@ -66,13 +66,6 @@ class Settings(BaseSettings):
         validation_alias="HUD_RUNTIME_URL",
     )
 
-    hud_rl_url: str = Field(
-        default="https://rl.hud.ai",
-        description="Base URL for the HUD training (RL) service; deprecated, removed in hud "
-        "v0.7.0 with hud.train",
-        validation_alias="HUD_RL_URL",
-    )
-
     api_key: str | None = Field(
         default=None,
         description="API key for authentication with the HUD API",
