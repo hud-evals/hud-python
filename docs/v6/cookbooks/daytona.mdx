@@ -69,7 +69,7 @@ Same task, same agent, one argument changed. A fresh sandbox is usable in about 
 `fix_calc` takes a `variant` from 0 to 23, each a different set of seeded bugs. Run them all as one taskset, `group` attempts each, with up to `max_concurrent` sandboxes at once:
 
 ```python
-agent = create_agent("claude-haiku-4-5", completion_kwargs={"max_tokens": 2048})
+agent = create_agent("claude-haiku-4-5")
 taskset = Taskset("calc", [fix_calc(variant=v) for v in range(24)])
 
 job = await taskset.run(agent, runtime=runtime, group=2, max_concurrent=24)

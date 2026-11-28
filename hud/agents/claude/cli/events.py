@@ -168,10 +168,7 @@ class ClaudeEvents:
                 result = message.get("result")
                 if isinstance(result, str):
                     trace.content = result
-                # The CLI reports its --max-turns limit as an error; it is the step budget.
-                if message.get("subtype") == "error_max_turns":
-                    trace.stop_reason = "max_steps"
-                elif message.get("is_error"):
+                if message.get("is_error"):
                     self.error = trace.content or "claude CLI reported an error"
                 for key in (
                     "subtype",

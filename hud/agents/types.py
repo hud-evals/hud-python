@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, NotRequired, Self, cast
+from typing import Annotated, Any, Literal, NotRequired, Self
 from uuid import uuid4
 
 from openai.types.responses import ResponseTextConfigParam
@@ -13,9 +13,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
-    ValidatorFunctionWrapHandler,
     field_serializer,
-    field_validator,
     model_validator,
     with_config,
 )
@@ -35,7 +33,6 @@ from hud.types import (
     ToolResult,
     Trace,
 )
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.serialization import json_safe_value
 
 ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
@@ -46,33 +43,12 @@ PiExtensionFile = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]+\.(t
 
 
 class AgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     model_name: str = "Agent"
     model: str = "unknown"
     gateway: bool = False
-
-    @model_validator(mode="before")
-    @classmethod
-    def _warn_deprecated_keys(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        if "checkpoint_name" in data:
-            warn_deprecated(f"`{cls.__name__}.checkpoint_name`", "use `model`", stacklevel=3)
-            data = dict(data)
-            checkpoint_name = data.pop("checkpoint_name")
-            data.setdefault("model", checkpoint_name)
-        if cls.model_config.get("extra", "ignore") != "ignore":
-            return data
-        unknown = sorted(set(data) - set(cls.model_fields))
-        if unknown:
-            keys = ", ".join(f"`{key}`" for key in unknown)
-            warn_deprecated(
-                f"`{cls.__name__}` with unknown keys {keys} (ignored)",
-                f"use the fields `{cls.__name__}` defines",
-                change="will be an error",
-                stacklevel=3,
-            )
-        return data
 
 
 class ToolAgentConfig(AgentConfig):
@@ -173,30 +149,6 @@ class OpenAIConfig(ToolAgentConfig):
         max_length=64,
     )
 
-    @field_validator("reasoning", "tool_choice", "text", mode="wrap")
-    @classmethod
-    def _declared_keys_only(cls, value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
-        """Raise on a key the OpenAI SDK's type does not declare, which validation would drop."""
-        validated = handler(value)
-        if dropped := _dropped_keys(value, validated):
-            raise ValueError(f"unknown keys for the installed openai SDK: {', '.join(dropped)}")
-        return validated
-
-
-def _dropped_keys(raw: Any, kept: Any, path: str = "") -> list[str]:
-    if not isinstance(raw, dict) or not isinstance(kept, dict):
-        return []
-    raw_dict, kept_dict = cast("dict[str, Any]", raw), cast("dict[str, Any]", kept)
-    return [
-        dropped
-        for key, value in raw_dict.items()
-        for dropped in (
-            [f"{path}{key}"]
-            if key not in kept_dict
-            else _dropped_keys(value, kept_dict[key], f"{path}{key}.")
-        )
-    ]
-
 
 class OpenAIChatConfig(ToolAgentConfig):
     model_name: str = "OpenAI Chat"
@@ -214,16 +166,10 @@ class OpenAIChatConfig(ToolAgentConfig):
 
 
 class ClaudeCLIConfig(AgentConfig):
-    """``max_steps`` (deprecated; ``timeout_seconds`` bounds the run) is the CLI's ``--max-turns``.
-
-    Values <= 0 leave it unlimited.
-    """
-
     system_prompt: str | None = None
     model_name: str = "Claude CLI"
     model: str = "claude-haiku-5-5"
     permission_mode: str = "bypassPermissions"
-    max_steps: int = -1
     # Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
     reasoning_effort: ClaudeEffort | None = None
     # Extra variables for the CLI's environment, such as its model tiers. They reach
@@ -244,14 +190,6 @@ class ClaudeCLIConfig(AgentConfig):
         ],
     )
     disallowed_tools: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _warn_max_steps(self) -> Self:
-        if "max_steps" in self.model_fields_set:
-            warn_deprecated(
-                "`ClaudeCLIConfig.max_steps`", "bound the run with `timeout_seconds`", stacklevel=3
-            )
-        return self
 
 
 class CodexCLIConfig(AgentConfig):

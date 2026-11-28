@@ -27,7 +27,7 @@ MODEL = "claude-haiku-4-5"
 
 
 async def main(*, variants: int, group: int, max_concurrent: int, start: int, model: str) -> None:
-    agent = create_agent(model, completion_kwargs={"max_tokens": 2048})
+    agent = create_agent(model)
     variant_ids = list(range(start, start + variants))
     taskset = Taskset("calc", [fix_calc(variant=v) for v in variant_ids])
     runtime = DaytonaRuntime(snapshot_name(), image=Image.from_dockerfile("Dockerfile.hud"))

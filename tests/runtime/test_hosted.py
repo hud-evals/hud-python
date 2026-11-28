@@ -236,7 +236,7 @@ async def test_cancelling_a_hosted_rollout_cancels_it_on_the_platform(
         ("openai", {"model": "gpt-5.6", "prompt_cache_key": "shared"}),
         ("gemini", {"model": "gemini-m", "max_output_tokens": 512}),
         ("openai_compatible", {"model": "m", "completion_kwargs": {"temperature": 0.2}}),
-        ("claude_cli", {"reasoning_effort": "max", "max_steps": 3}),
+        ("claude_cli", {"reasoning_effort": "max", "permission_mode": "plan"}),
         ("codex_cli", {"sandbox": "read-only", "reasoning_effort": "high"}),
     ],
 )

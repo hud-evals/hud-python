@@ -93,7 +93,7 @@ it is never serialized.
 | `slug` | `str` | Stable id for sync, filtering, and lookup. Defaults to `id`, plus a hash of `args` when there are any. |
 | `columns` | `dict \| None` | Metadata surfaced as filter/leaderboard facets. |
 | `validation` | `list[dict] \| None` | Platform/sync metadata. |
-| `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"max_steps": 50, "timeout_seconds": 900}`). |
+| `agent_config` | `dict \| None` | Per-task agent overrides (e.g. `{"timeout_seconds": 900}`). |
 | `runtime_config` | `RuntimeConfig \| None` | Per-row launch requirements; the [runtime](/v6/reference/runtime) applies what it supports. |
 | `verifier` | `Task \| None` | Agent-less task whose evaluation replaces the actor task's grade. Nested verifiers are rejected. |
 | `environment` | `Environment \| None` | The live environment whose template minted the row; never serialized. |

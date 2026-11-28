@@ -125,8 +125,6 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                 "--thinking-display=summarized",
                 f"--permission-mode={self.config.permission_mode}",
             ]
-            if self.config.max_steps > 0:
-                args.append(f"--max-turns={self.config.max_steps}")
             if self.config.reasoning_effort is not None:
                 args.extend(["--effort", self.config.reasoning_effort])
             if self.config.system_prompt:
