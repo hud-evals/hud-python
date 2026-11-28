@@ -18,13 +18,12 @@ hud set HUD_TELEMETRY_ENABLED=0
 or set `HUD_TELEMETRY_ENABLED=0` in your environment.
 
 When you run evaluations with an API key configured, the SDK uploads trace
-spans to the HUD platform. Depending on the agent, task, instrumentation, and
-workspace configuration, span payloads can include:
+spans to the HUD platform. Depending on the agent, task, and workspace
+configuration, span payloads can include:
 
 - prompts and other structured messages, task arguments, and task setup and grading results;
 - model content and reasoning, tool calls, raw provider data, usage, and token-level samples;
-- complete tool requests and results;
-- serialized arguments and results from instrumented functions, plus exception messages; and
+- complete tool requests and results; and
 - workspace setup and agent file diffs and final artifacts when workspace file tracking is active.
 
 Spans also include execution metadata such as step order, timings, status, and errors. They
