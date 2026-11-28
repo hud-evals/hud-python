@@ -10,8 +10,6 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Self
 from urllib.parse import urlsplit, urlunsplit
 
-from hud.utils.deprecation import warn_deprecated
-
 
 def _normalize_url(url: str, *, default_scheme: str, default_port: int | None) -> str:
     """Coerce shorthand ``host[:port]`` into a full ``scheme://host:port[/path]`` URL."""
@@ -111,25 +109,6 @@ class Capability:
         if process_connections:
             params["process_connections"] = True
         return cls(name=name, protocol="ssh/2", url=normalized, params=params)
-
-    @classmethod
-    def cdp(
-        cls,
-        *,
-        name: str = "browser",
-        url: str,
-        target_id: str | None = None,
-    ) -> Capability:
-        """``cdp/1.3`` — Chromium DevTools over WebSocket."""
-        warn_deprecated(
-            "`Capability.cdp`",
-            'use `Capability(name="browser", protocol="cdp/1.3", url="ws://host:port")`',
-        )
-        normalized = _normalize_url(url, default_scheme="ws", default_port=9222)
-        params: dict[str, Any] = {}
-        if target_id is not None:
-            params["target_id"] = target_id
-        return cls(name=name, protocol="cdp/1.3", url=normalized, params=params)
 
     @classmethod
     def rfb(

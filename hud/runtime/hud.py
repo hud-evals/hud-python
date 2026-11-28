@@ -13,7 +13,6 @@ import httpx2
 
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
-from hud.utils.deprecation import warn_deprecated
 
 from .core import Runtime
 
@@ -34,14 +33,7 @@ class HUDRuntime:
     gateway's WebSocket tunnel to its control channel.
     """
 
-    def __init__(
-        self,
-        *,
-        runtime_url: str | None = None,
-    ) -> None:
-        if runtime_url is not None:
-            warn_deprecated("`HUDRuntime(runtime_url=...)`", "set `HUD_RUNTIME_URL`")
-        self.runtime_url = runtime_url
+    def __init__(self) -> None:
         self._warned_unsupported_config = False
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
@@ -84,7 +76,7 @@ class HUDRuntime:
         api_key = settings.api_key
         if not api_key:
             raise RuntimeError("HUD runtime tunnel requires HUD_API_KEY")
-        runtime_url = (self.runtime_url or settings.hud_runtime_url).rstrip("/")
+        runtime_url = settings.hud_runtime_url.rstrip("/")
         session_id = await self._create_runtime_session(runtime_url, api_key, task)
         try:
             yield Runtime(

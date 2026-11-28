@@ -43,7 +43,6 @@ from hud.environment.namespace import (
 )
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.environment.utils import forward_output
-from hud.utils.deprecation import warn_deprecated
 from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -545,8 +544,6 @@ class Workspace:
         host: str = "127.0.0.1",
         port: int = 0,
         user: str = _DEFAULT_USER,
-        host_key_path: Path | None = None,
-        authorized_client_keys: list[Path] | None = None,
         track_files: bool = False,
         shell_uid: int | None = None,
         shell_gid: int | None = None,
@@ -555,15 +552,6 @@ class Workspace:
         hosts_path: Path | str | None = None,
         hand_over_root: bool = True,
     ) -> None:
-        for name, value in (
-            ("host_key_path", host_key_path),
-            ("authorized_client_keys", authorized_client_keys),
-        ):
-            if value is not None:
-                warn_deprecated(
-                    f"`Workspace({name}=...)`",
-                    "the workspace generates its keys in `credentials_dir`",
-                )
         self.root: Path = Path(root).resolve()
         self._cred_dir: Path | None = None
         self._configured_cred_dir = Path(credentials_dir) if credentials_dir else None
@@ -618,8 +606,6 @@ class Workspace:
         # image staged it already: whose it is, is the image's statement.
         self._hand_over_root = hand_over_root
         self._require_isolation = require_isolation
-        self._ssh_host_key_path = host_key_path
-        self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
         self._client_key_path: Path | None = None
         self._host_key: asyncssh.SSHKey | None = None
@@ -914,9 +900,10 @@ class Workspace:
         return self._host_pubkey_str
 
     @property
-    def ssh_client_key_path(self) -> Path | None:
-        """Ephemeral client private key path (None if external keys supplied)."""
+    def ssh_client_key_path(self) -> Path:
+        """Ephemeral client private key path."""
         self._prepare_runtime()
+        assert self._client_key_path is not None
         return self._client_key_path
 
     @property
@@ -936,7 +923,7 @@ class Workspace:
             url=self.ssh_url,
             user=self.ssh_user,
             host_pubkey=self.ssh_host_pubkey,
-            client_key=key_path.read_text() if key_path else None,
+            client_key=key_path.read_text(),
             client_key_path=key_path,
             cwd=self._guest_path,
             isolation="bwrap" if self.bwrap_available else "none",
@@ -1500,37 +1487,28 @@ class Workspace:
         return path
 
     def _load_or_generate_host_key(self) -> tuple[asyncssh.SSHKey, str]:
-        if self._ssh_host_key_path is not None:
-            key = asyncssh.read_private_key(self._ssh_host_key_path)
+        key_path = self._credentials_dir() / "host_ed25519"
+        if key_path.exists():
+            key = asyncssh.read_private_key(key_path)
         else:
-            key_path = self._credentials_dir() / "host_ed25519"
-            if key_path.exists():
-                key = asyncssh.read_private_key(key_path)
-            else:
-                key = asyncssh.generate_private_key("ssh-ed25519")
-                key.write_private_key(str(key_path))
-                key.write_public_key(str(key_path.with_suffix(".pub")))
+            key = asyncssh.generate_private_key("ssh-ed25519")
+            key.write_private_key(str(key_path))
+            key.write_public_key(str(key_path.with_suffix(".pub")))
         return key, key.export_public_key().decode("ascii").strip()
 
     def _ensure_authorized_keys_file(self) -> Path:
         """Write the authorized_keys file asyncssh wants on disk."""
         creds = self._credentials_dir()
         auth_path = creds / "authorized_keys"
-        pub_lines: list[str] = []
+        priv_path = creds / "client_ed25519"
+        pub_path = priv_path.with_suffix(".pub")
+        if not (priv_path.exists() and pub_path.exists()):
+            client = asyncssh.generate_private_key("ssh-ed25519")
+            client.write_private_key(str(priv_path))
+            client.write_public_key(str(pub_path))
+        self._client_key_path = priv_path
 
-        if self._ssh_authorized_client_keys:
-            pub_lines.extend(Path(p).read_text().strip() for p in self._ssh_authorized_client_keys)
-        else:
-            priv_path = creds / "client_ed25519"
-            pub_path = priv_path.with_suffix(".pub")
-            if not (priv_path.exists() and pub_path.exists()):
-                client = asyncssh.generate_private_key("ssh-ed25519")
-                client.write_private_key(str(priv_path))
-                client.write_public_key(str(pub_path))
-            pub_lines.append(pub_path.read_text().strip())
-            self._client_key_path = priv_path
-
-        auth_path.write_text("\n".join(pub_lines) + "\n", encoding="ascii")
+        auth_path.write_text(pub_path.read_text().strip() + "\n", encoding="ascii")
         return auth_path
 
     def _requested_process_connections(
